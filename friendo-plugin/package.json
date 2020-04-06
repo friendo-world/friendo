@@ -1,0 +1,30 @@
+{
+  "name": "friendo-plugin",
+  "version": "0.0.1",
+  "description": "the friendo world plugin for WordPress",
+  "main": "assets/src/index.js",
+  "scripts": {
+    "build": "webpack --mode production",
+    "watch": "webpack --watch --mode development",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Henry Holtgeerts",
+  "license": "ISC",
+  "devDependencies": {
+    "@babel/core": "^7.7.7",
+    "@babel/preset-env": "^7.7.7",
+    "@babel/preset-react": "^7.7.4",
+    "babel-loader": "^8.0.6",
+    "css-loader": "^3.4.1",
+    "mini-css-extract-plugin": "^0.9.0",
+    "style-loader": "^1.1.2",
+    "webpack": "^4.41.5",
+    "webpack-cli": "^3.3.10"
+  },
+  "dependencies": {
+    "react": "^16.12.0",
+    "react-dom": "^16.12.0",
+    "react-icons": "^3.9.0",
+    "react-rnd": "^10.1.6"
+  }
+}
