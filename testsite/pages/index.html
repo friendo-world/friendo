@@ -1,0 +1,14 @@
+{% extends "templates/base.html" %}
+{% block content %}
+<h1>Hello, {{ site.name }}!</h1>
+<p>Request path: {{ request.path }}</p>
+
+{% for post in collections.blog %}
+<article>
+    <h2><a href="/blog/{{ post.slug }}">{{ post.title }}</a></h2>
+    <p>{{ post.body }}</p>
+</article>
+{% empty %}
+<p>No blog posts yet. Create a "blog" collection in the <a href="/_/">admin UI</a>.</p>
+{% endfor %}
+{% endblock %}

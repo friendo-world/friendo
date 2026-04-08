@@ -1,0 +1,24 @@
+{
+  "name": "friendo",
+  "private": true,
+  "scripts": {
+    "build": "cd binary && go build -o ../bin/friendo ./cmd/friendo/",
+    "serve": "npm run build && cd testsite && ../bin/friendo serve",
+    "serve:open": "npm run build && cd testsite && ../bin/friendo serve --open-admin",
+    "clean": "rm -rf bin/ testsite/dist/",
+
+    "init": "npm run build && ./bin/friendo init",
+    "export": "npm run build && cd testsite && ../bin/friendo export --mode static",
+    "deploy:local": "npm run build && cd testsite && ../bin/friendo deploy --api-url https://local.friendo.world",
+    "deploy:dry": "npm run build && cd testsite && ../bin/friendo deploy --dry-run",
+
+    "world:install": "cd world && npm install",
+    "world:dev": "cd world && npm run dev",
+    "world:sync": "cd world && npm run sync",
+    "world:deploy": "cd world && npm run deploy",
+
+    "tunnel": "cloudflared tunnel run friendo-local",
+
+    "dev": "bash dev.sh"
+  }
+}
