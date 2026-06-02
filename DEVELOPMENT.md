@@ -117,12 +117,10 @@ npm run tunnel            # map *.local.friendo.world → :8787
 
 | Command | Description |
 |---|---|
-| `npm run build` | Build admin SPA + Tailwind CSS + Go binary |
+| `npm run build` | Build admin SPA + Go binary |
 | `npm run admin:install` | Install admin SPA deps (first time only) |
 | `npm run admin` | Build the admin SPA (→ `runtime/go/admin/spa` + edge bundle) |
 | `npm run admin:dev` | Vite dev server for the admin SPA (hot reload) |
-| `npm run css` | Compile Tailwind CSS only |
-| `npm run css:watch` | Watch mode for Tailwind CSS |
 | `npm run serve` | Build + serve testsite on :3000 (Go runtime) |
 | `npm run serve:open` | Same but skip admin auth |
 | `npm run edge:dev` | Start edge runtime on :8788 (miniflare D1 + R2) |
@@ -226,10 +224,7 @@ All endpoints require site admin auth (session cookie from `/_/login`).
 
 ## Tailwind
 
-Admin UI uses Tailwind CSS, compiled from `runtime/go/admin/admin.css` and embedded in the Go binary via `go:embed`. The Tailwind config scans `admin.go` for class usage via `@source "./admin.go"`.
-
-To iterate on styles:
-```bash
-npm run css:watch   # in one terminal
-npm run serve       # in another
-```
+The admin SPA ([admin/](admin/)) uses Tailwind CSS via the `@tailwindcss/vite`
+plugin — it's compiled into the SPA bundle by `npm run admin`, no separate step.
+Iterate on it with `npm run admin:dev` (Vite hot reload). The public site's own
+styles are plain CSS authored by the site owner; Friendo doesn't impose Tailwind there.

@@ -1,11 +1,29 @@
 // Thin REST client for the Friendo site API. Every Friendo runtime (Go, edge)
 // exposes the same endpoints under /_/api, so this client is runtime-agnostic.
 
+export type Role = "superadmin" | "admin" | "editor" | "member";
+
 export type User = {
   id: string;
   email: string;
   name: string;
-  role: "superadmin" | "admin" | "editor" | "member";
+  role: Role;
+  created?: string;
+};
+
+export type UserInput = {
+  email?: string;
+  name: string;
+  role: string;
+  password?: string;
+};
+
+export type SetupStatus = { needsSetup: boolean; hasLegacyAdmin: boolean };
+
+export type Settings = {
+  site: { name: string };
+  collections: number;
+  users: number;
 };
 
 export class ApiError extends Error {
@@ -83,4 +101,38 @@ export const api = {
     }),
   deleteRecord: (id: string) =>
     req<void>(`/records/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  setupStatus: () => req<SetupStatus>("/setup"),
+  setup: (email: string, name: string, password: string) =>
+    req<{ user: User }>("/setup", {
+      method: "POST",
+      body: JSON.stringify({ email, name, password }),
+    }),
+  migrate: (email: string) =>
+    req<{ ok: boolean }>("/migrate", { method: "POST", body: JSON.stringify({ email }) }),
+
+  users: () => req<{ users: User[] }>("/users"),
+  createUser: (input: UserInput) =>
+    req<{ user: User }>("/users", { method: "POST", body: JSON.stringify(input) }),
+  updateUser: (id: string, input: UserInput) =>
+    req<{ user: User }>(`/users/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  deleteUser: (id: string) =>
+    req<void>(`/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  settings: () => req<Settings>("/settings"),
 };
+
+// availableRoles returns the roles an actor with the given role may assign.
+export function availableRoles(actorRole: Role): Role[] {
+  switch (actorRole) {
+    case "superadmin":
+      return ["admin", "editor", "member"];
+    case "admin":
+      return ["editor", "member"];
+    default:
+      return ["member"];
+  }
+}

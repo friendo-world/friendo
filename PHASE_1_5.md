@@ -48,26 +48,22 @@ served identically by both runtimes. See **Shared admin SPA** below.
 - CLI `friendo deploy` uses the provisioning API via `PlatformClient`
 - See [REFACTOR.md](./REFACTOR.md) for full architecture details
 
-## In progress
-
 ### Shared admin SPA + REST API (M3 + M4)
-The admin UI is being rebuilt as one Preact SPA in [admin/](admin/), built once and
-served byte-for-byte identically by both runtimes (`go:embed` for Go, an embedded
-bundle for the edge). The runtimes converge on a runtime-agnostic REST API under
-`/_/api/*`; the UI never diverges again.
+The admin UI is now one Preact SPA in [admin/](admin/), built once and served
+byte-for-byte identically by both runtimes (`go:embed` for Go, an embedded bundle
+for the edge). Both runtimes implement the same runtime-agnostic REST API under
+`/_/api/*`, so the UI never diverges. Every endpoint was verified on the Go runtime
+and on the edge under miniflare with identical JSON shapes and status codes.
 
-**Phase 1 — foundations (done, verified on both runtimes):**
-- `admin/` Vite + Preact + TS app; build → `runtime/go/admin/spa` + `runtime/edge/spa-bundle.js`
-- Both runtimes serve the same bundle at `/_/` and `/_/assets/*` (identical asset hashes)
-- REST auth: `GET /_/api/me`, `POST /_/api/auth/login`, `POST /_/api/auth/logout` — same JSON shapes on Go and edge
-- Login → cookie → authenticated `/me` flow verified on the Go runtime and on the edge under miniflare
-- Existing push/pull sync endpoints kept, still admin-auth-gated
+- **Foundations:** `admin/` Vite + Preact + TS; build → `runtime/go/admin/spa` + `runtime/edge/spa-bundle.js` (identical asset hashes). Auth: `GET /me`, `POST /auth/login`, `POST /auth/logout`.
+- **Records:** `GET /collections`, full CRUD under `/collections/:c/records` and `/records/:id`; SPA dashboard, collection list, record form (preact-iso routing).
+- **Users:** list/create/update/delete under `/users` with server-enforced role rules (superadmin > admin > editor > member); SPA users list + form.
+- **Settings:** `GET /settings` (site name + counts); SPA settings view.
+- **First-run:** `GET/POST /setup` and `POST /migrate`; SPA bootstraps into Setup/Migrate/Login based on `/setup` status. Fresh-site setup verified end-to-end.
+- **Cleanup:** removed the Go server-rendered admin (templates, embedded Tailwind, `npm run css`) and the edge's old JS-string admin — the SPA is the single source of truth.
 
-**Phase 2–4 (remaining):**
-- Records CRUD (REST + SPA views)
-- Users, settings, and first-run setup/migrate ported into the SPA
-- Remove the last server-rendered admin pages (Go) and any leftover edge admin code
-- Stretch (original M4): `data-friendo-*` progressive-enhancement attributes for public-site comments/reactions/polls
+**Remaining stretch (original M4):** `data-friendo-*` progressive-enhancement
+attributes for public-site comments/reactions/polls (not required by the admin UI).
 
 ## Remaining
 

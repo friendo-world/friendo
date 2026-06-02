@@ -2,12 +2,10 @@
   "name": "friendo",
   "private": true,
   "scripts": {
-    "css": "npx @tailwindcss/cli -i runtime/go/admin/admin.css -o runtime/go/admin/static/admin.css --minify",
-    "css:watch": "npx @tailwindcss/cli -i runtime/go/admin/admin.css -o runtime/go/admin/static/admin.css --watch",
     "admin:install": "cd admin && npm install",
     "admin": "cd admin && npm run build && node scripts/bundle-edge.mjs",
     "admin:dev": "cd admin && npm run dev",
-    "build": "npm run admin && npm run css && go build -o bin/friendo ./cli/cmd/friendo/",
+    "build": "npm run admin && go build -o bin/friendo ./cli/cmd/friendo/",
     "serve": "npm run build && cd testsite && ../bin/friendo serve",
     "serve:open": "npm run build && cd testsite && ../bin/friendo serve --open-admin",
     "clean": "rm -rf bin/ testsite/dist/",
@@ -24,9 +22,5 @@
     "platform:deploy": "cd platform && npm run deploy",
     "tunnel": "cloudflared tunnel run friendo-local",
     "dev": "bash dev.sh"
-  },
-  "devDependencies": {
-    "@tailwindcss/cli": "^4.2.2",
-    "tailwindcss": "^4.2.2"
   }
 }

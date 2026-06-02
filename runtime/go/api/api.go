@@ -22,12 +22,15 @@ import (
 //
 // Public endpoints (me, auth) carry no auth so the SPA can bootstrap and log in.
 // Everything else requires site admin authentication (session cookie).
-func Mount(r chi.Router, db *data.DB, siteDir string, authFunc func(*http.Request) *data.User) {
+func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*http.Request) *data.User) {
 	r.Route("/api", func(r chi.Router) {
 		// Public endpoints — used by the SPA to bootstrap and authenticate.
 		r.Get("/me", handleMe(authFunc))
 		r.Post("/auth/login", handleLogin(db))
 		r.Post("/auth/logout", handleLogout(db))
+		r.Get("/setup", handleSetupStatus(db))
+		r.Post("/setup", handleSetupCreate(db))
+		r.Post("/migrate", handleMigrate(db))
 
 		// Authenticated endpoints (admin+).
 		r.Group(func(r chi.Router) {
@@ -53,6 +56,15 @@ func Mount(r chi.Router, db *data.DB, siteDir string, authFunc func(*http.Reques
 			r.Get("/records/{id}", handleGetRecord(db))
 			r.Put("/records/{id}", handleUpdateRecord(db))
 			r.Delete("/records/{id}", handleDeleteRecord(db))
+
+			// Users
+			r.Get("/users", handleListUsers(db))
+			r.Post("/users", handleCreateUser(db, authFunc))
+			r.Put("/users/{id}", handleUpdateUser(db, authFunc))
+			r.Delete("/users/{id}", handleDeleteUser(db, authFunc))
+
+			// Settings
+			r.Get("/settings", handleSettings(db, siteName))
 
 			// Push endpoints
 			r.Post("/push/templates", handlePushTemplates(siteDir))
@@ -233,10 +245,11 @@ func clearSessionCookie(w http.ResponseWriter) {
 // userJSON is the public shape of a user returned to the SPA (no password hash).
 func userJSON(u *data.User) map[string]any {
 	return map[string]any{
-		"id":    u.ID,
-		"email": u.Email,
-		"name":  u.Name,
-		"role":  u.Role,
+		"id":      u.ID,
+		"email":   u.Email,
+		"name":    u.Name,
+		"role":    u.Role,
+		"created": u.Created,
 	}
 }
 
@@ -570,6 +583,250 @@ func handlePullUsers(db *data.DB) http.HandlerFunc {
 			result = []map[string]any{}
 		}
 		jsonResponse(w, map[string]any{"users": result})
+	}
+}
+
+// --- First-run setup / migrate ---
+
+func handleSetupStatus(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, map[string]any{
+			"needsSetup":     !db.IsSetupDone(),
+			"hasLegacyAdmin": db.HasLegacyAdmin(),
+		})
+	}
+}
+
+func handleSetupCreate(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if db.IsSetupDone() {
+			jsonError(w, "setup already complete", http.StatusConflict)
+			return
+		}
+		var in struct {
+			Email    string `json:"email"`
+			Name     string `json:"name"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		email := strings.TrimSpace(in.Email)
+		if email == "" {
+			jsonError(w, "email is required", http.StatusBadRequest)
+			return
+		}
+		if len(in.Password) < 8 {
+			jsonError(w, "password must be at least 8 characters", http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			name = strings.Split(email, "@")[0]
+		}
+
+		user, err := db.CreateUser(email, name, in.Password, "superadmin")
+		if err != nil {
+			jsonError(w, "could not create account: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if token, err := db.CreateSession(user.ID, r.RemoteAddr, r.UserAgent()); err == nil {
+			setSessionCookie(w, token)
+		}
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"user": userJSON(user)})
+	}
+}
+
+func handleMigrate(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !db.HasLegacyAdmin() {
+			jsonError(w, "no legacy admin to migrate", http.StatusBadRequest)
+			return
+		}
+		var in struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		email := strings.TrimSpace(in.Email)
+		if email == "" {
+			jsonError(w, "email is required", http.StatusBadRequest)
+			return
+		}
+		if err := db.MigrateAdminToUsers(email); err != nil {
+			jsonError(w, "migration failed: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		jsonResponse(w, map[string]any{"ok": true})
+	}
+}
+
+// --- Users ---
+
+// canAssignRole reports whether an actor may assign targetRole. superadmin is
+// never assignable via the API; only a superadmin may assign admin.
+func canAssignRole(actorRole, targetRole string) bool {
+	switch targetRole {
+	case "admin", "editor", "member":
+	default:
+		return false
+	}
+	if targetRole == "admin" && actorRole != "superadmin" {
+		return false
+	}
+	return true
+}
+
+func handleListUsers(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		users, err := db.ListUsers()
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		out := []map[string]any{}
+		for _, u := range users {
+			out = append(out, userJSON(u))
+		}
+		jsonResponse(w, map[string]any{"users": out})
+	}
+}
+
+func handleCreateUser(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor := authFunc(r)
+		var in struct {
+			Email    string `json:"email"`
+			Name     string `json:"name"`
+			Password string `json:"password"`
+			Role     string `json:"role"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		email := strings.TrimSpace(in.Email)
+		if email == "" {
+			jsonError(w, "email is required", http.StatusBadRequest)
+			return
+		}
+		if len(in.Password) < 8 {
+			jsonError(w, "password must be at least 8 characters", http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			name = strings.Split(email, "@")[0]
+		}
+		role := in.Role
+		if role == "" {
+			role = "member"
+		}
+		if !canAssignRole(actor.Role, role) {
+			jsonError(w, "you cannot assign that role", http.StatusForbidden)
+			return
+		}
+		user, err := db.CreateUser(email, name, in.Password, role)
+		if err != nil {
+			jsonError(w, "could not create user: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"user": userJSON(user)})
+	}
+}
+
+func handleUpdateUser(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor := authFunc(r)
+		id := chi.URLParam(r, "id")
+		target, err := db.GetUserByID(id)
+		if err != nil {
+			jsonError(w, "user not found", http.StatusNotFound)
+			return
+		}
+		// Can't modify someone of equal/higher rank unless superadmin.
+		if actor.Role != "superadmin" && data.RoleRank(target.Role) >= data.RoleRank(actor.Role) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		var in struct {
+			Name     string `json:"name"`
+			Role     string `json:"role"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			name = target.Name
+		}
+		role := target.Role
+		if in.Role != "" && in.Role != target.Role {
+			if !canAssignRole(actor.Role, in.Role) {
+				jsonError(w, "you cannot assign that role", http.StatusForbidden)
+				return
+			}
+			role = in.Role
+		}
+		if err := db.UpdateUser(id, name, role); err != nil {
+			jsonError(w, "update failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(in.Password) >= 8 {
+			if err := db.UpdateUserPassword(id, in.Password); err != nil {
+				jsonError(w, "password update failed: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		updated, _ := db.GetUserByID(id)
+		jsonResponse(w, map[string]any{"user": userJSON(updated)})
+	}
+}
+
+func handleDeleteUser(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor := authFunc(r)
+		id := chi.URLParam(r, "id")
+		if id == actor.ID {
+			jsonError(w, "you cannot delete your own account", http.StatusBadRequest)
+			return
+		}
+		target, err := db.GetUserByID(id)
+		if err != nil {
+			jsonError(w, "user not found", http.StatusNotFound)
+			return
+		}
+		if actor.Role != "superadmin" && data.RoleRank(target.Role) >= data.RoleRank(actor.Role) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if err := db.DeleteUser(id); err != nil {
+			jsonError(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// --- Settings ---
+
+func handleSettings(db *data.DB, siteName string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		users, _ := db.ListUsers()
+		counts, _ := db.CollectionCounts()
+		jsonResponse(w, map[string]any{
+			"site":        map[string]any{"name": siteName},
+			"collections": len(counts),
+			"users":       len(users),
+		})
 	}
 }
 

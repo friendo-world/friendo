@@ -189,7 +189,7 @@ app.get("/_/api/pull/users", async (c) => {
 // --- REST auth (/_/api/me, /_/api/auth/*) ---
 
 function userJSON(u) {
-  return { id: u.id, email: u.email, name: u.name, role: u.role };
+  return { id: u.id, email: u.email, name: u.name, role: u.role, created: u.created };
 }
 
 app.get("/_/api/me", async (c) => {
@@ -235,6 +235,47 @@ app.post("/_/api/auth/logout", async (c) => {
   }
   c.header("Set-Cookie", `${SITE_SESSION_COOKIE}=; Path=/_/; HttpOnly; Max-Age=0`);
   return c.body(null, 204);
+});
+
+// --- First-run setup ---
+// The edge has no legacy-admin concept, so hasLegacyAdmin is always false;
+// "needs setup" simply means no user accounts exist for this site yet.
+
+async function userCount(c, siteId) {
+  const row = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE site_id = ?")
+    .bind(siteId).first();
+  return row?.n || 0;
+}
+
+app.get("/_/api/setup", async (c) => {
+  const n = await userCount(c, getSiteId(c));
+  return c.json({ needsSetup: n === 0, hasLegacyAdmin: false });
+});
+
+app.post("/_/api/setup", async (c) => {
+  const siteId = getSiteId(c);
+  if ((await userCount(c, siteId)) > 0) return c.json({ error: "setup already complete" }, 409);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const email = (body.email || "").trim();
+  if (!email) return c.json({ error: "email is required" }, 400);
+  if ((body.password || "").length < 8) {
+    return c.json({ error: "password must be at least 8 characters" }, 400);
+  }
+  const name = (body.name || "").trim() || email.split("@")[0];
+
+  const user = await createUser(c.env, siteId, email, name, body.password, "superadmin");
+  const token = await createSiteSession(
+    c.env, user.id,
+    c.req.header("CF-Connecting-IP") || "", c.req.header("User-Agent") || ""
+  );
+  c.header("Set-Cookie", setSiteSessionCookie(token));
+  return c.json({ user: userJSON(user) }, 201);
 });
 
 // --- Content (collections + records) ---
@@ -362,6 +403,147 @@ app.delete("/_/api/records/:id", async (c) => {
     .bind(c.req.param("id"), auth.siteId).run();
   if (!res.meta.changes) return c.json({ error: "record not found" }, 404);
   return c.body(null, 204);
+});
+
+// --- Users + settings ---
+
+const ROLE_RANK = { superadmin: 4, admin: 3, editor: 2, member: 1 };
+function rank(role) {
+  return ROLE_RANK[role] || 0;
+}
+
+// canAssignRole: superadmin is never assignable via the API; only a superadmin
+// may assign admin. Matches the Go runtime.
+function canAssignRole(actorRole, targetRole) {
+  if (!["admin", "editor", "member"].includes(targetRole)) return false;
+  if (targetRole === "admin" && actorRole !== "superadmin") return false;
+  return true;
+}
+
+async function createUser(env, siteId, email, name, password, role) {
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  const hash = await bcrypt.hash(password, 10);
+  await env.DB.prepare(
+    `INSERT INTO users (id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated)
+     VALUES (?, ?, ?, '', ?, '', ?, ?, '["password"]', ?, ?)`
+  ).bind(id, siteId, email, name, hash, role, now, now).run();
+  return { id, email, name, role, created: now };
+}
+
+app.get("/_/api/users", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  const { results } = await c.env.DB.prepare(
+    "SELECT id, email, name, role, created FROM users WHERE site_id = ? ORDER BY created"
+  ).bind(auth.siteId).all();
+  return c.json({ users: results || [] });
+});
+
+app.post("/_/api/users", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const email = (body.email || "").trim();
+  if (!email) return c.json({ error: "email is required" }, 400);
+  if ((body.password || "").length < 8) {
+    return c.json({ error: "password must be at least 8 characters" }, 400);
+  }
+  const role = body.role || "member";
+  if (!canAssignRole(auth.user.role, role)) {
+    return c.json({ error: "you cannot assign that role" }, 403);
+  }
+  const name = (body.name || "").trim() || email.split("@")[0];
+
+  const dupe = await c.env.DB.prepare("SELECT id FROM users WHERE site_id = ? AND email = ?")
+    .bind(auth.siteId, email).first();
+  if (dupe) return c.json({ error: "a user with that email already exists" }, 400);
+
+  const user = await createUser(c.env, auth.siteId, email, name, body.password, role);
+  return c.json({ user: userJSON(user) }, 201);
+});
+
+app.put("/_/api/users/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  const id = c.req.param("id");
+  const target = await c.env.DB.prepare("SELECT id, name, role FROM users WHERE id = ? AND site_id = ?")
+    .bind(id, auth.siteId).first();
+  if (!target) return c.json({ error: "user not found" }, 404);
+  if (auth.user.role !== "superadmin" && rank(target.role) >= rank(auth.user.role)) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const name = (body.name || "").trim() || target.name;
+  let role = target.role;
+  if (body.role && body.role !== target.role) {
+    if (!canAssignRole(auth.user.role, body.role)) {
+      return c.json({ error: "you cannot assign that role" }, 403);
+    }
+    role = body.role;
+  }
+  const now = nowISO();
+  await c.env.DB.prepare("UPDATE users SET name = ?, role = ?, updated = ? WHERE id = ? AND site_id = ?")
+    .bind(name, role, now, id, auth.siteId).run();
+  if ((body.password || "").length >= 8) {
+    const hash = await bcrypt.hash(body.password, 10);
+    await c.env.DB.prepare("UPDATE users SET password_hash = ?, updated = ? WHERE id = ? AND site_id = ?")
+      .bind(hash, now, id, auth.siteId).run();
+  }
+  const updated = await c.env.DB.prepare(
+    "SELECT id, email, name, role, created FROM users WHERE id = ? AND site_id = ?"
+  ).bind(id, auth.siteId).first();
+  return c.json({ user: updated });
+});
+
+app.delete("/_/api/users/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  const id = c.req.param("id");
+  if (id === auth.user.id) return c.json({ error: "you cannot delete your own account" }, 400);
+
+  const target = await c.env.DB.prepare("SELECT id, role FROM users WHERE id = ? AND site_id = ?")
+    .bind(id, auth.siteId).first();
+  if (!target) return c.json({ error: "user not found" }, 404);
+  if (auth.user.role !== "superadmin" && rank(target.role) >= rank(auth.user.role)) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+
+  await c.env.DB.prepare("DELETE FROM users WHERE id = ? AND site_id = ?").bind(id, auth.siteId).run();
+  await c.env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND site_id = ?")
+    .bind(id, auth.siteId).run();
+  return c.body(null, 204);
+});
+
+app.get("/_/api/settings", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  const cols = await c.env.DB.prepare(
+    "SELECT COUNT(DISTINCT collection) AS n FROM posts WHERE site_id = ?"
+  ).bind(auth.siteId).first();
+  const users = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE site_id = ?")
+    .bind(auth.siteId).first();
+  return c.json({
+    site: { name: c.env.SITE_NAME || getSiteId(c) },
+    collections: cols?.n || 0,
+    users: users?.n || 0,
+  });
 });
 
 // --- Admin SPA bundle ---
