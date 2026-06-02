@@ -2,42 +2,56 @@
 # Start the full Friendo local dev environment.
 # Usage: bash dev.sh
 
-set -e
+# Kill anything already on ports we need.
+lsof -ti :3000 | xargs kill 2>/dev/null || true
+lsof -ti :8787 | xargs kill 2>/dev/null || true
 
 cleanup() {
   echo ""
   echo "Shutting down..."
-  kill $WORKER_PID $TUNNEL_PID $SERVE_PID 2>/dev/null
-  wait $WORKER_PID $TUNNEL_PID $SERVE_PID 2>/dev/null
+  [ -n "$SERVE_PID" ] && kill $SERVE_PID 2>/dev/null
+  [ -n "$WORKER_PID" ] && kill $WORKER_PID 2>/dev/null
+  [ -n "$TUNNEL_PID" ] && kill $TUNNEL_PID 2>/dev/null
+  wait 2>/dev/null
   echo "Done."
 }
 trap cleanup EXIT INT TERM
 
-# Build the binary
+# Build CSS + binary (this must succeed)
 echo "Building friendo..."
-cd binary && go build -o ../bin/friendo ./cmd/friendo/ && cd ..
+npm run css || { echo "CSS build failed"; exit 1; }
+go build -o bin/friendo ./cli/cmd/friendo/ || { echo "Go build failed"; exit 1; }
 
-# Sync testsite to local D1/R2
+# Sync testsite to local D1/R2 (non-fatal if wrangler isn't set up)
 echo "Syncing testsite to edge..."
-cd world && bash sync.sh ../testsite 2>&1 | tail -1 && cd ..
+if [ -f platform/sync.sh ]; then
+  (cd platform && bash sync.sh ../testsite 2>&1 | tail -1) || echo "  Skipped (sync failed)"
+fi
 
-# Start the Worker
+ROOT="$(pwd)"
+
+# Start the Worker (non-fatal)
+WORKER_PID=""
 echo "Starting Worker on :8787..."
-cd world && npm run dev -- --port 8787 > /dev/null 2>&1 &
+(cd "$ROOT/platform" && npm run dev -- --port 8787 > /dev/null 2>&1) &
 WORKER_PID=$!
-cd ..
 sleep 3
 
-# Start the tunnel
+# Start the tunnel (non-fatal if cloudflared isn't installed)
+TUNNEL_PID=""
 echo "Starting Cloudflare tunnel..."
-cloudflared tunnel run friendo-local > /dev/null 2>&1 &
-TUNNEL_PID=$!
+if command -v cloudflared &> /dev/null; then
+  cloudflared tunnel run friendo-local > /dev/null 2>&1 &
+  TUNNEL_PID=$!
+else
+  echo "  Skipped (cloudflared not installed)"
+fi
 
 # Start the local binary
+SERVE_PID=""
 echo "Starting friendo serve on :3000..."
-cd testsite && ../bin/friendo serve --open-admin > /dev/null 2>&1 &
+(cd "$ROOT/testsite" && "$ROOT/bin/friendo" serve --open-admin > /dev/null 2>&1) &
 SERVE_PID=$!
-cd ..
 
 echo ""
 echo "============================================"

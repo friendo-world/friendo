@@ -22,3 +22,9 @@ world/.wrangler/
 
 # Dist output
 dist/
+
+# Wrangler secrets (local dev)
+.dev.vars
+
+# Wrangler local state
+.wrangler/

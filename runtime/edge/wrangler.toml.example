@@ -1,0 +1,27 @@
+# Friendo Edge Runtime — Self-hosted single-site Worker
+#
+# Setup:
+#   1. Copy this file to wrangler.toml
+#   2. Create your D1 database: wrangler d1 create my-site
+#   3. Create your R2 bucket: wrangler r2 bucket create my-site-assets
+#   4. Replace the IDs below
+#   5. Deploy: npx wrangler deploy
+#   6. Push your site: friendo push --target https://your-domain.com
+
+name = "my-friendo-site"
+main = "index.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+SITE_ID = "default"
+SITE_NAME = "My Site"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "my-site"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "my-site-assets"

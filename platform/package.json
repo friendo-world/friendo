@@ -1,0 +1,16 @@
+{
+  "name": "friendo-world",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "lsof -ti:8787 | xargs kill 2>/dev/null; wrangler dev",
+    "deploy": "wrangler deploy --env production",
+    "schema": "wrangler d1 execute DB --local --file=schema.sql"
+  },
+  "dependencies": {
+    "better-auth": "^1.6.0",
+    "hono": "^4.12.12",
+    "kysely": "^0.28.15",
+    "kysely-d1": "^0.4.0"
+  }
+}

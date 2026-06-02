@@ -1,0 +1,55 @@
+name = "friendo-world"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- Local dev (default) ---
+# `wrangler dev` runs the dispatch Worker locally.
+# Platform D1 is local (miniflare). Dispatch connects to the remote `dev` namespace.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "friendo-world"
+database_id = "local-dev"
+
+[[dispatch_namespaces]]
+binding = "DISPATCHER"
+namespace = "dev"
+remote = true
+
+[[r2_buckets]]
+binding = "RUNTIME_BUCKET"
+bucket_name = "friendo-runtime"
+
+[vars]
+DISPATCH_NAMESPACE = "dev"
+# CF_ACCOUNT_ID and CF_API_TOKEN should be set via `wrangler secret put`
+
+# --- Production ---
+# Activate with: wrangler deploy --env production
+# Before first use:
+#   wrangler d1 create friendo-world
+# Then paste the real database_id below.
+
+[env.production]
+routes = [
+  { pattern = "friendo.world/*", zone_name = "friendo.world" },
+  { pattern = "*.friendo.world/*", zone_name = "friendo.world" }
+]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "friendo-world"
+database_id = "REPLACE_WITH_REAL_D1_ID"
+
+[[env.production.dispatch_namespaces]]
+binding = "DISPATCHER"
+namespace = "production"
+
+[[env.production.r2_buckets]]
+binding = "RUNTIME_BUCKET"
+bucket_name = "friendo-runtime"
+
+[env.production.vars]
+DISPATCH_NAMESPACE = "production"
+# CF_ACCOUNT_ID and CF_API_TOKEN should be set via `wrangler secret put --env production`

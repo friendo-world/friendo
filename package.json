@@ -2,23 +2,28 @@
   "name": "friendo",
   "private": true,
   "scripts": {
-    "build": "cd binary && go build -o ../bin/friendo ./cmd/friendo/",
+    "css": "npx @tailwindcss/cli -i runtime/go/admin/admin.css -o runtime/go/admin/static/admin.css --minify",
+    "css:watch": "npx @tailwindcss/cli -i runtime/go/admin/admin.css -o runtime/go/admin/static/admin.css --watch",
+    "build": "npm run css && go build -o bin/friendo ./cli/cmd/friendo/",
     "serve": "npm run build && cd testsite && ../bin/friendo serve",
     "serve:open": "npm run build && cd testsite && ../bin/friendo serve --open-admin",
     "clean": "rm -rf bin/ testsite/dist/",
-
     "init": "npm run build && ./bin/friendo init",
     "export": "npm run build && cd testsite && ../bin/friendo export --mode static",
     "deploy:local": "npm run build && cd testsite && ../bin/friendo deploy --api-url https://local.friendo.world",
     "deploy:dry": "npm run build && cd testsite && ../bin/friendo deploy --dry-run",
-
-    "world:install": "cd world && npm install",
-    "world:dev": "cd world && npm run dev",
-    "world:sync": "cd world && npm run sync",
-    "world:deploy": "cd world && npm run deploy",
-
+    "edge:install": "cd runtime/edge && npm install",
+    "edge:dev": "cd runtime/edge && npm run dev",
+    "edge:schema": "cd runtime/edge && npm run schema",
+    "platform:install": "cd platform && npm install",
+    "platform:dev": "cd platform && npm run dev",
+    "platform:sync": "cd platform && npm run sync",
+    "platform:deploy": "cd platform && npm run deploy",
     "tunnel": "cloudflared tunnel run friendo-local",
-
     "dev": "bash dev.sh"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.2",
+    "tailwindcss": "^4.2.2"
   }
 }
