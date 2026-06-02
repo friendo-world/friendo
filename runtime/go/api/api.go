@@ -16,36 +16,134 @@ import (
 	"github.com/henryholtgeerts/friendo/runtime/go/data"
 )
 
-// Mount registers the sync API routes under /_/api/ on the given router.
-// All endpoints require site admin authentication (email + password via session cookie).
+// Mount registers the REST + sync API routes under /api on the given router,
+// which is expected to be the /_ subrouter (so endpoints live at /_/api/*).
+//
+// Public endpoints (me, auth) carry no auth so the SPA can bootstrap and log in.
+// Everything else requires site admin authentication (session cookie).
 func Mount(r chi.Router, db *data.DB, siteDir string, authFunc func(*http.Request) *data.User) {
-	r.Route("/_/api", func(r chi.Router) {
-		// All API routes require admin auth.
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				user := authFunc(req)
-				if user == nil {
-					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-					return
-				}
-				if data.RoleRank(user.Role) < data.RoleRank("admin") {
-					http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
-					return
-				}
-				next.ServeHTTP(w, req)
+	r.Route("/api", func(r chi.Router) {
+		// Public endpoints — used by the SPA to bootstrap and authenticate.
+		r.Get("/me", handleMe(authFunc))
+		r.Post("/auth/login", handleLogin(db))
+		r.Post("/auth/logout", handleLogout(db))
+
+		// Authenticated endpoints (admin+).
+		r.Group(func(r chi.Router) {
+			r.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					user := authFunc(req)
+					if user == nil {
+						jsonError(w, "unauthorized", http.StatusUnauthorized)
+						return
+					}
+					if data.RoleRank(user.Role) < data.RoleRank("admin") {
+						jsonError(w, "forbidden", http.StatusForbidden)
+						return
+					}
+					next.ServeHTTP(w, req)
+				})
 			})
+
+			// Push endpoints
+			r.Post("/push/templates", handlePushTemplates(siteDir))
+			r.Post("/push/assets", handlePushAssets(siteDir))
+			r.Post("/push/data", handlePushData(db))
+			r.Post("/push/users", handlePushUsers(db))
+
+			// Pull endpoints
+			r.Get("/pull/data", handlePullData(db))
+			r.Get("/pull/users", handlePullUsers(db))
 		})
-
-		// Push endpoints
-		r.Post("/push/templates", handlePushTemplates(siteDir))
-		r.Post("/push/assets", handlePushAssets(siteDir))
-		r.Post("/push/data", handlePushData(db))
-		r.Post("/push/users", handlePushUsers(db))
-
-		// Pull endpoints
-		r.Get("/pull/data", handlePullData(db))
-		r.Get("/pull/users", handlePullUsers(db))
 	})
+}
+
+// --- Auth (session cookie) ---
+
+// sessionCookieName must match the cookie read by admin.GetSessionUser.
+const sessionCookieName = "friendo_session"
+
+func setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/_/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400 * 7,
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/_/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+}
+
+// userJSON is the public shape of a user returned to the SPA (no password hash).
+func userJSON(u *data.User) map[string]any {
+	return map[string]any{
+		"id":    u.ID,
+		"email": u.Email,
+		"name":  u.Name,
+		"role":  u.Role,
+	}
+}
+
+// handleMe returns the current user, or 401 if not authenticated.
+func handleMe(authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		jsonResponse(w, map[string]any{"user": userJSON(user)})
+	}
+}
+
+// handleLogin authenticates email + password and starts a session.
+func handleLogin(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		user, err := db.AuthenticateUser(strings.TrimSpace(body.Email), body.Password)
+		if err != nil {
+			jsonError(w, "invalid email or password", http.StatusUnauthorized)
+			return
+		}
+
+		token, err := db.CreateSession(user.ID, r.RemoteAddr, r.UserAgent())
+		if err != nil {
+			jsonError(w, "could not create session", http.StatusInternalServerError)
+			return
+		}
+
+		setSessionCookie(w, token)
+		jsonResponse(w, map[string]any{"user": userJSON(user)})
+	}
+}
+
+// handleLogout ends the current session.
+func handleLogout(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+			db.DeleteSession(cookie.Value)
+		}
+		clearSessionCookie(w)
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // --- Push handlers ---

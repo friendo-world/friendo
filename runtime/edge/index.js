@@ -11,6 +11,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
+import { SPA_INDEX, SPA_ASSETS } from "./spa-bundle.js";
 
 const app = new Hono();
 
@@ -185,57 +186,26 @@ app.get("/_/api/pull/users", async (c) => {
   return c.json({ users: results || [] });
 });
 
-// --- Site admin UI ---
+// --- REST auth (/_/api/me, /_/api/auth/*) ---
 
-const adminCSS = `*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f9fafb;color:#111827;-webkit-font-smoothing:antialiased}`;
-
-function siteAdminNav(user, activePage) {
-  const link = (href, label, page) =>
-    `<a href="${href}" style="font-size:0.875rem;${page === activePage ? 'font-weight:500;color:#2563eb' : 'color:#6b7280'}">${label}</a>`;
-  return `<nav style="display:flex;align-items:center;gap:1.5rem;border-bottom:1px solid #e5e7eb;background:white;padding:0.75rem 1.5rem">
-    <span style="font-weight:700;color:#111827">Friendo</span>
-    ${link("/_/", "Dashboard", "dashboard")}
-    ${link("/_/users", "Users", "users")}
-    <a href="/" style="font-size:0.875rem;color:#6b7280">View site</a>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:0.75rem">
-      <span style="font-size:0.75rem;color:#9ca3af">${escapeHtml(user.email)}</span>
-      <form method="POST" action="/_/logout" style="margin:0"><button type="submit" style="padding:0.25rem 0.5rem;border:1px solid #d1d5db;border-radius:0.375rem;background:none;cursor:pointer;font-size:0.75rem;color:#374151">Log out</button></form>
-    </div>
-  </nav>`;
+function userJSON(u) {
+  return { id: u.id, email: u.email, name: u.name, role: u.role };
 }
 
-function siteAdminPage(title, user, activePage, body) {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} — Friendo Admin</title>
-<style>${adminCSS}
-.container{max-width:48rem;margin:0 auto;padding:2rem 1rem}
-a{color:#2563eb;text-decoration:none}a:hover{text-decoration:underline}
-table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:0.5rem 1rem;border-bottom:1px solid #f3f4f6}
-th{font-size:0.75rem;font-weight:600;color:#6b7280;text-transform:uppercase}
-.btn{display:inline-block;padding:0.25rem 0.75rem;border-radius:0.375rem;border:none;cursor:pointer;font-size:0.75rem;font-weight:500;text-decoration:none}
-.btn-blue{background:#2563eb;color:white}.btn-blue:hover{background:#1d4ed8;text-decoration:none}
-.btn-red{background:#dc2626;color:white}.btn-red:hover{background:#b91c1c;text-decoration:none}
-.btn-outline{background:none;border:1px solid #d1d5db;color:#374151}.btn-outline:hover{background:#f9fafb;text-decoration:none}
-.card{background:white;border-radius:0.5rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);overflow:hidden}
-input,textarea,select{width:100%;padding:0.5rem;border:1px solid #d1d5db;border-radius:0.375rem;font-size:0.875rem;margin-top:0.25rem;font-family:inherit}
-textarea{min-height:10rem;resize:vertical}
-label{display:block;margin-bottom:1rem;font-weight:500;font-size:0.875rem}
-.error{background:#fef2f2;color:#dc2626;padding:0.5rem 0.75rem;border-radius:0.375rem;margin-bottom:1rem;font-size:0.875rem}
-</style></head><body>
-${siteAdminNav(user, activePage)}
-<div class="container">${body}</div>
-</body></html>`;
-}
-
-// Site admin login
-app.get("/_/login", async (c) => {
+app.get("/_/api/me", async (c) => {
   const user = await getSiteSessionUser(c);
-  if (user) return c.redirect("/_/");
-  return c.html(siteLoginHTML());
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  return c.json({ user: userJSON(user) });
 });
 
-app.post("/_/login", async (c) => {
+app.post("/_/api/auth/login", async (c) => {
   const siteId = getSiteId(c);
-  const body = await c.req.parseBody();
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
   const email = (body.email || "").trim();
   const password = body.password || "";
 
@@ -243,201 +213,45 @@ app.post("/_/login", async (c) => {
     "SELECT id, email, name, password_hash, role FROM users WHERE site_id = ? AND email = ?"
   ).bind(siteId, email).first();
 
-  if (!user || !user.password_hash) {
-    return c.html(siteLoginHTML("Invalid email or password."), 401);
+  if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
+    return c.json({ error: "invalid email or password" }, 401);
   }
 
-  const valid = await bcrypt.compare(password, user.password_hash);
-  if (!valid) {
-    return c.html(siteLoginHTML("Invalid email or password."), 401);
-  }
-
-  const ip = c.req.header("CF-Connecting-IP") || "";
-  const ua = c.req.header("User-Agent") || "";
-  const token = await createSiteSession(c.env, user.id, ip, ua);
-
-  return new Response(null, {
-    status: 302,
-    headers: { Location: "/_/", "Set-Cookie": setSiteSessionCookie(token) },
-  });
+  const token = await createSiteSession(
+    c.env, user.id,
+    c.req.header("CF-Connecting-IP") || "", c.req.header("User-Agent") || ""
+  );
+  c.header("Set-Cookie", setSiteSessionCookie(token));
+  return c.json({ user: userJSON(user) });
 });
 
-app.post("/_/logout", async (c) => {
+app.post("/_/api/auth/logout", async (c) => {
   const siteId = getSiteId(c);
   const cookie = c.req.raw.headers.get("cookie") || "";
   const match = cookie.match(/friendo_session=([^;]+)/);
   if (match) {
-    await c.env.DB.prepare("DELETE FROM sessions WHERE site_id = ? AND token = ?").bind(siteId, match[1]).run();
+    await c.env.DB.prepare("DELETE FROM sessions WHERE site_id = ? AND token = ?")
+      .bind(siteId, match[1]).run();
   }
-  return new Response(null, {
-    status: 302,
-    headers: { Location: "/_/login", "Set-Cookie": `${SITE_SESSION_COOKIE}=; Path=/_/; HttpOnly; Max-Age=0` },
+  c.header("Set-Cookie", `${SITE_SESSION_COOKIE}=; Path=/_/; HttpOnly; Max-Age=0`);
+  return c.body(null, 204);
+});
+
+// --- Admin SPA bundle ---
+// The same built bundle the Go runtime embeds (see admin/scripts/bundle-edge.mjs).
+
+app.get("/_/assets/*", (c) => {
+  const asset = SPA_ASSETS[c.req.path.replace(/^\/_/, "")];
+  if (!asset) return c.text("Not found", 404);
+  return c.body(asset.body, 200, {
+    "Content-Type": asset.type,
+    "Cache-Control": "public, max-age=31536000, immutable",
   });
 });
 
-// Admin dashboard
-app.get("/_/", async (c) => {
-  const auth = await requireSiteAdmin(c);
-  if (!auth) return c.redirect("/_/login");
-
-  const { results: collections } = await c.env.DB.prepare(
-    "SELECT DISTINCT collection FROM posts WHERE site_id = ? ORDER BY collection"
-  ).bind(auth.siteId).all();
-
-  const rows = (collections || []).map(({ collection }) => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem;border-bottom:1px solid #f3f4f6">
-      <span style="font-weight:500">${escapeHtml(collection)}</span>
-      <div style="display:flex;gap:0.5rem">
-        <a href="/_/collections/${encodeURIComponent(collection)}" class="btn btn-blue">Browse</a>
-        <a href="/_/collections/${encodeURIComponent(collection)}/new" class="btn btn-outline">New</a>
-      </div>
-    </div>`).join("");
-
-  return c.html(siteAdminPage("Dashboard", auth.user, "dashboard",
-    `<h1 style="font-size:1.25rem;font-weight:700;margin-bottom:1.5rem">Collections</h1>
-     <div class="card">${rows || '<p style="padding:1.5rem;color:#6b7280;text-align:center">No collections yet.</p>'}</div>`
-  ));
-});
-
-// Collection list
-app.get("/_/collections/:collection", async (c) => {
-  const auth = await requireSiteAdmin(c);
-  if (!auth) return c.redirect("/_/login");
-
-  const collection = c.req.param("collection");
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, slug, title, status, created FROM posts WHERE site_id = ? AND collection = ? ORDER BY created DESC`
-  ).bind(auth.siteId, collection).all();
-
-  const rows = (results || []).map((r) => `
-    <tr style="border-bottom:1px solid #f3f4f6">
-      <td style="padding:0.75rem 1rem;font-size:0.875rem;font-weight:500">${escapeHtml(r.title)}</td>
-      <td style="padding:0.75rem 1rem;font-size:0.875rem"><code style="background:#f3f4f6;padding:0.125rem 0.375rem;border-radius:0.25rem;font-size:0.75rem">${escapeHtml(r.slug)}</code></td>
-      <td style="padding:0.75rem 1rem;font-size:0.875rem">${escapeHtml(r.status)}</td>
-      <td style="padding:0.75rem 1rem;font-size:0.75rem;color:#9ca3af">${escapeHtml(r.created)}</td>
-      <td style="padding:0.75rem 1rem">
-        <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-          <a href="/_/collections/${encodeURIComponent(collection)}/${r.id}/edit" class="btn btn-blue">Edit</a>
-          <form method="POST" action="/_/collections/${encodeURIComponent(collection)}/${r.id}/delete" style="display:inline" onsubmit="return confirm('Delete?')">
-            <button type="submit" class="btn btn-red">Delete</button>
-          </form>
-        </div>
-      </td>
-    </tr>`).join("");
-
-  return c.html(siteAdminPage(collection, auth.user, "collections",
-    `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem">
-       <h1 style="font-size:1.25rem;font-weight:700">${escapeHtml(collection)}</h1>
-       <a href="/_/collections/${encodeURIComponent(collection)}/new" class="btn btn-blue" style="padding:0.5rem 1rem;font-size:0.875rem">New record</a>
-     </div>
-     ${results && results.length > 0 ? `<div class="card"><table><thead><tr>
-       <th>Title</th><th>Slug</th><th>Status</th><th>Created</th><th></th>
-     </tr></thead><tbody>${rows}</tbody></table></div>` :
-     `<div class="card"><p style="padding:1.5rem;color:#6b7280;text-align:center">No records yet. <a href="/_/collections/${encodeURIComponent(collection)}/new">Create one</a>.</p></div>`}`
-  ));
-});
-
-// New / Edit / Create / Update / Delete record
-app.get("/_/collections/:collection/new", async (c) => {
-  const auth = await requireSiteAdmin(c);
-  if (!auth) return c.redirect("/_/login");
-  const collection = c.req.param("collection");
-  return c.html(siteAdminPage(`New ${collection}`, auth.user, "collections", recordFormHTML(collection, null)));
-});
-
-app.post("/_/collections/:collection/new", async (c) => {
-  const auth = await requireSiteAdmin(c);
-  if (!auth) return c.json({ error: "Unauthorized" }, 401);
-  const collection = c.req.param("collection");
-  const body = await c.req.parseBody();
-  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  await c.env.DB.prepare(
-    `INSERT INTO posts (id, site_id, collection, slug, title, body, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(id, auth.siteId, collection, body.slug || "", body.title || "", body.body || "", body.status || "draft", now, now).run();
-  return c.redirect(`/_/collections/${encodeURIComponent(collection)}`);
-});
-
-app.get("/_/collections/:collection/:id/edit", async (c) => {
-  const auth = await requireSiteAdmin(c);
-  if (!auth) return c.redirect("/_/login");
-  const collection = c.req.param("collection");
-  const id = c.req.param("id");
-  const record = await c.env.DB.prepare(
-    "SELECT id, slug, title, body, status FROM posts WHERE id = ? AND site_id = ? AND collection = ?"
-  ).bind(id, auth.siteId, collection).first();
-  if (!record) return c.text("Not found", 404);
-  return c.html(siteAdminPage(`Edit ${collection}`, auth.user, "collections", recordFormHTML(collection, record)));
-});
-
-app.post("/_/collections/:collection/:id/edit", async (c) => {
-  const auth = await requireSiteAdmin(c);
-  if (!auth) return c.json({ error: "Unauthorized" }, 401);
-  const collection = c.req.param("collection");
-  const id = c.req.param("id");
-  const body = await c.req.parseBody();
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  await c.env.DB.prepare(
-    `UPDATE posts SET slug = ?, title = ?, body = ?, status = ?, updated = ? WHERE id = ? AND site_id = ? AND collection = ?`
-  ).bind(body.slug || "", body.title || "", body.body || "", body.status || "draft", now, id, auth.siteId, collection).run();
-  return c.redirect(`/_/collections/${encodeURIComponent(collection)}`);
-});
-
-app.post("/_/collections/:collection/:id/delete", async (c) => {
-  const auth = await requireSiteAdmin(c);
-  if (!auth) return c.json({ error: "Unauthorized" }, 401);
-  const collection = c.req.param("collection");
-  const id = c.req.param("id");
-  await c.env.DB.prepare(
-    "DELETE FROM posts WHERE id = ? AND site_id = ? AND collection = ?"
-  ).bind(id, auth.siteId, collection).run();
-  return c.redirect(`/_/collections/${encodeURIComponent(collection)}`);
-});
-
-function siteLoginHTML(error) {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Admin Login — Friendo</title>
-<style>${adminCSS}
-.container{max-width:26rem;margin:4rem auto;padding:0 1rem}
-.card{background:white;border-radius:0.5rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);padding:1.5rem}
-input{width:100%;padding:0.5rem;border:1px solid #d1d5db;border-radius:0.375rem;font-size:0.875rem;margin-top:0.25rem;font-family:inherit}
-label{display:block;margin-bottom:1rem;font-weight:500;font-size:0.875rem}
-.error{background:#fef2f2;color:#dc2626;padding:0.5rem 0.75rem;border-radius:0.375rem;margin-bottom:1rem;font-size:0.875rem}
-</style></head><body>
-<div class="container">
-  <div class="card">
-    <h1 style="font-size:1.25rem;font-weight:700;margin-bottom:0.25rem">Site Admin</h1>
-    <p style="font-size:0.875rem;color:#6b7280;margin-bottom:1.5rem">Sign in to manage this site.</p>
-    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
-    <form method="POST" action="/_/login">
-      <label>Email<input type="email" name="email" required autofocus></label>
-      <label>Password<input type="password" name="password" required></label>
-      <button type="submit" style="width:100%;padding:0.5rem;border:none;border-radius:0.375rem;cursor:pointer;font-size:0.875rem;font-weight:500;background:#2563eb;color:white">Log in</button>
-    </form>
-  </div>
-</div>
-</body></html>`;
-}
-
-function recordFormHTML(collection, record) {
-  const editing = !!record;
-  return `
-    <h1 style="font-size:1.25rem;font-weight:700;margin-bottom:1.5rem">${editing ? "Edit" : "New " + escapeHtml(collection)} record</h1>
-    <div class="card" style="padding:1.5rem">
-      <form method="POST">
-        <label>Title<input type="text" name="title" value="${escapeHtml(record?.title || "")}" required></label>
-        <label>Slug<input type="text" name="slug" value="${escapeHtml(record?.slug || "")}" required></label>
-        <label>Body<textarea name="body">${escapeHtml(record?.body || "")}</textarea></label>
-        <label>Status
-          <select name="status">
-            <option value="draft" ${record?.status === "draft" ? "selected" : ""}>Draft</option>
-            <option value="published" ${record?.status === "published" ? "selected" : ""}>Published</option>
-          </select>
-        </label>
-        <button type="submit" class="btn btn-blue" style="padding:0.5rem 1rem;font-size:0.875rem">${editing ? "Save" : "Create"}</button>
-      </form>
-    </div>`;
-}
+// App shell — every other /_/ path is client-side routed by the SPA.
+app.get("/_", (c) => c.redirect("/_/"));
+app.get("/_/*", (c) => c.html(SPA_INDEX));
 
 // --- Site rendering ---
 

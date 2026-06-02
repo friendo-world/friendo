@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Scan the SPA source for class usage. */
+@source "./";
+
+@theme {
+  --color-friendo-primary: #2563eb;
+  --color-friendo-primary-hover: #1d4ed8;
+  --color-friendo-danger: #dc2626;
+  --color-friendo-danger-hover: #b91c1c;
+
+  --color-role-superadmin: #7c3aed;
+  --color-role-admin: #2563eb;
+  --color-role-editor: #059669;
+  --color-role-member: #6b7280;
+}

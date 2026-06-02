@@ -17,7 +17,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/henryholtgeerts/friendo/runtime/go/admin"
-	"github.com/henryholtgeerts/friendo/runtime/go/api"
 	"github.com/henryholtgeerts/friendo/runtime/go/data"
 	_ "github.com/henryholtgeerts/friendo/runtime/go/renderer" // registers filters
 )
@@ -91,13 +90,8 @@ func Start(port int, openAdmin bool) error {
 
 	r := chi.NewRouter()
 
-	// Admin UI at /_/
-	admin.Mount(r, db, openAdmin, siteCfg.Site.Name)
-
-	// Sync API at /_/api/
-	api.Mount(r, db, siteDir, func(req *http.Request) *data.User {
-		return admin.GetSessionUser(req, db)
-	})
+	// Admin UI + REST/sync API at /_/ (the admin package mounts the api package).
+	admin.Mount(r, db, openAdmin, siteCfg.Site.Name, siteDir)
 
 	// Live reload SSE endpoint.
 	r.Get("/_/reload", handleReloadSSE)

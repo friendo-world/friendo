@@ -20,13 +20,12 @@ Phase 1.5 hardens the foundation and makes Friendo production-ready. Four tracks
 - Served at `/_/static/admin.css` — no CDN, no external dependency
 - `npm run css` / `npm run css:watch` for development
 
-### Admin UI rebuild (M3)
-- Admin templates moved out of Go string constants into `embed.FS` files under [runtime/go/admin/templates/](runtime/go/admin/templates/) — one `.html` per page, parsed once at startup
-- Shared `nav.html` partial replaces the navbar that was duplicated across six pages, with active-tab highlighting
-- New **settings page** (`/_/settings`) — site name, collection/user counts, current account
-- Richer **dashboard** — per-user greeting and live record counts per collection
-- Responsive layout — `flex-wrap` nav, `sm:` breakpoints, horizontally scrollable tables
-- Tailwind `@source` repointed from `admin.go` to `templates/` (kept `admin.go` in scope for the role-tag colors emitted from Go)
+### Admin UI rebuild (M3 — superseded by the shared SPA)
+An interim step first moved the Go admin templates out of string constants into
+`embed.FS` files (settings page, richer dashboard, responsive nav). That work has
+since been **superseded**: the two runtimes had divergent admin UIs (Go templates
+vs. edge JS-strings), so the admin UI is being rebuilt as a single shared SPA
+served identically by both runtimes. See **Shared admin SPA** below.
 
 ### Codebase refactor (M5)
 - `binary/` → `cli/` + `runtime/go/`
@@ -49,21 +48,36 @@ Phase 1.5 hardens the foundation and makes Friendo production-ready. Four tracks
 - CLI `friendo deploy` uses the provisioning API via `PlatformClient`
 - See [REFACTOR.md](./REFACTOR.md) for full architecture details
 
+## In progress
+
+### Shared admin SPA + REST API (M3 + M4)
+The admin UI is being rebuilt as one Preact SPA in [admin/](admin/), built once and
+served byte-for-byte identically by both runtimes (`go:embed` for Go, an embedded
+bundle for the edge). The runtimes converge on a runtime-agnostic REST API under
+`/_/api/*`; the UI never diverges again.
+
+**Phase 1 — foundations (done, verified on both runtimes):**
+- `admin/` Vite + Preact + TS app; build → `runtime/go/admin/spa` + `runtime/edge/spa-bundle.js`
+- Both runtimes serve the same bundle at `/_/` and `/_/assets/*` (identical asset hashes)
+- REST auth: `GET /_/api/me`, `POST /_/api/auth/login`, `POST /_/api/auth/logout` — same JSON shapes on Go and edge
+- Login → cookie → authenticated `/me` flow verified on the Go runtime and on the edge under miniflare
+- Existing push/pull sync endpoints kept, still admin-auth-gated
+
+**Phase 2–4 (remaining):**
+- Records CRUD (REST + SPA views)
+- Users, settings, and first-run setup/migrate ported into the SPA
+- Remove the last server-rendered admin pages (Go) and any leftover edge admin code
+- Stretch (original M4): `data-friendo-*` progressive-enhancement attributes for public-site comments/reactions/polls
+
 ## Remaining
 
 ### CLI ↔ site admin auth (blocker)
 The deploy/push/pull workflow is structurally complete but **non-functional** until this lands.
 - `/_/api/*` enforces site admin auth — returns 401 without a valid session ([api.go](runtime/go/api/api.go))
 - The CLI always builds its sync client with an empty cookie: `NewSiteClient(target, "")` in [deploy.go](cli/internal/deploy/deploy.go) (two `TODO`s)
-- Needed: prompt for site admin credentials → `POST /_/login` → capture the `friendo_session` cookie → cache in `~/.friendo/config` → pass through to `SiteClient`
-- Both ends already exist (`SiteClient` accepts a cookie; the server issues sessions at `POST /_/login`) — only the handshake is missing
+- Needed: prompt for site admin credentials → `POST /_/api/auth/login` → capture the `friendo_session` cookie → cache in `~/.friendo/config` → pass through to `SiteClient`
+- Both ends already exist (`SiteClient` accepts a cookie; the runtimes now issue sessions at `POST /_/api/auth/login`) — only the handshake is missing
 - Gates `friendo push`, `friendo pull`, and the final push step of `friendo deploy`
-
-### Client-side JS SDK (M4, not started)
-- `friendo.js` built on TanStack Query
-- RESTful API at `/_/api/*` for all content types (only bulk push/pull sync exists today — no per-record read/write)
-- Declarative `data-friendo-*` attributes for progressive enhancement
-- Comments, reactions, polls interactive out of the box
 
 ### Smaller loose ends
 - **D1 migrations:** edge runtime should check schema version on first request and apply pending migrations (REFACTOR Open TODO)

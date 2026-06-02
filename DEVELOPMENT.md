@@ -14,17 +14,23 @@ friendo/
 ├── cli/                  # The `friendo` CLI command
 │   ├── cmd/friendo/      # Main entry point
 │   └── internal/deploy/  # Deploy client (push/pull to remote)
+├── admin/                # Shared admin UI — one SPA, served by BOTH runtimes
+│   ├── src/              # Preact + TypeScript app
+│   ├── scripts/          # bundle-edge.mjs (mirrors the build into the edge)
+│   └── vite.config.ts    # builds to runtime/go/admin/spa
 ├── runtime/
 │   ├── go/               # Go site runtime (local dev server)
 │   │   ├── server/       # HTTP server, routing, hot reload
-│   │   ├── admin/        # Admin UI routes + embedded Tailwind templates
-│   │   ├── api/          # /_/api/* sync endpoints (push/pull)
+│   │   ├── admin/        # Serves the SPA bundle + first-run (setup/migrate)
+│   │   │   └── spa/      # Built admin SPA (embedded via go:embed)
+│   │   ├── api/          # /_/api/* REST + sync endpoints (auth, push/pull)
 │   │   ├── data/         # SQLite layer + schema
 │   │   ├── renderer/     # Pongo2 filters
 │   │   ├── export/       # Static HTML export
 │   │   └── scaffold/     # `friendo init` templates
 │   └── edge/             # JS site runtime (Cloudflare Workers)
-│       ├── index.js      # Hono app: site serving + admin UI + sync API
+│       ├── index.js      # Hono app: site serving + admin SPA + REST/sync API
+│       ├── spa-bundle.js # Built admin SPA, embedded (generated)
 │       └── schema.sql    # D1 schema (identical to Go runtime)
 ├── platform/             # friendo.world (managed hosting, WfP dispatch Worker)
 │   ├── worker.js         # Dispatch Worker: subdomain routing, platform auth, provisioning
@@ -111,7 +117,10 @@ npm run tunnel            # map *.local.friendo.world → :8787
 
 | Command | Description |
 |---|---|
-| `npm run build` | Compile Tailwind CSS + Go binary |
+| `npm run build` | Build admin SPA + Tailwind CSS + Go binary |
+| `npm run admin:install` | Install admin SPA deps (first time only) |
+| `npm run admin` | Build the admin SPA (→ `runtime/go/admin/spa` + edge bundle) |
+| `npm run admin:dev` | Vite dev server for the admin SPA (hot reload) |
 | `npm run css` | Compile Tailwind CSS only |
 | `npm run css:watch` | Watch mode for Tailwind CSS |
 | `npm run serve` | Build + serve testsite on :3000 (Go runtime) |
@@ -157,6 +166,30 @@ Self-hosters deploy `runtime/edge/index.js` directly — the same code, without 
 The Go and edge runtimes use fully local storage (SQLite / miniflare D1+R2). The platform dispatches to real user Workers in a remote `dev` namespace on Cloudflare — full parity with production.
 
 See the **Quick start** section above for setup commands.
+
+## Admin UI
+
+The admin UI is a single Preact SPA in [admin/](admin/), built once and served
+**identically by both runtimes** at `/_/` — so the UI never drifts between Go and
+edge. The runtimes differ only in their REST handlers, not in the interface.
+
+```
+admin/  ──vite build──▶  runtime/go/admin/spa/   (go:embed)
+                    └──▶  runtime/edge/spa-bundle.js  (generated, imported by the Worker)
+```
+
+The SPA talks to a runtime-agnostic REST API under `/_/api/*`. Both runtimes
+implement it (`runtime/go/api/`, `runtime/edge/index.js`). To work on the UI:
+
+```bash
+npm run admin:install   # first time only
+npm run admin:dev       # Vite dev server with hot reload
+# point its API calls at a running runtime, e.g. `npm run serve` on :3000
+```
+
+`npm run build` rebuilds the SPA before compiling, so the embedded bundle stays
+in sync. First-run (`/_/setup`, `/_/migrate`) is still server-rendered in the Go
+runtime; everything else is the SPA.
 
 ## Auth
 

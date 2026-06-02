@@ -1,0 +1,21 @@
+{
+  "name": "friendo-admin",
+  "private": true,
+  "type": "module",
+  "description": "Shared admin SPA — served identically by the Go and edge runtimes.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "preact": "^10.27.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.2",
+    "@tailwindcss/vite": "^4.2.2",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5"
+  }
+}
