@@ -92,7 +92,7 @@ func Start(port int, openAdmin bool) error {
 	r := chi.NewRouter()
 
 	// Admin UI at /_/
-	admin.Mount(r, db, openAdmin)
+	admin.Mount(r, db, openAdmin, siteCfg.Site.Name)
 
 	// Sync API at /_/api/
 	api.Mount(r, db, siteDir, func(req *http.Request) *data.User {

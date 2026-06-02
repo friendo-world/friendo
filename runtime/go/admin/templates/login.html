@@ -1,0 +1,17 @@
+{{define "login"}}
+<div class="mx-auto mt-16 max-w-md px-4">
+    <div class="rounded-lg bg-white p-6 shadow-sm">
+        <h1 class="mb-6 text-xl font-bold">Friendo Admin</h1>
+        {{if .Error}}<div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{{.Error}}</div>{{end}}
+        <form method="POST" action="/_/login">
+            <label class="mb-4 block text-sm font-medium">Email
+                <input type="email" name="email" value="{{if .Email}}{{.Email}}{{end}}" required autofocus class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
+            </label>
+            <label class="mb-5 block text-sm font-medium">Password
+                <input type="password" name="password" required class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
+            </label>
+            <button type="submit" class="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Log in</button>
+        </form>
+    </div>
+</div>
+{{end}}

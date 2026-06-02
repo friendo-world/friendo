@@ -1,0 +1,46 @@
+{{define "collection"}}
+{{template "nav" .}}
+<div class="mx-auto max-w-3xl px-4 py-8">
+    <div class="mb-6 flex items-center justify-between">
+        <h1 class="text-xl font-bold">{{.Collection}}</h1>
+        <a href="/_/collections/{{.Collection}}/new" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">New record</a>
+    </div>
+    {{if .Records}}
+    <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-gray-200">
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Title</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Slug</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Created</th>
+                    <th class="px-4 py-3"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Records}}
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="px-4 py-3 text-sm font-medium">{{index . "title"}}</td>
+                    <td class="px-4 py-3 text-sm"><code class="rounded bg-gray-100 px-1.5 py-0.5 text-xs">{{index . "slug"}}</code></td>
+                    <td class="px-4 py-3 text-sm">{{index . "status"}}</td>
+                    <td class="px-4 py-3 text-xs text-gray-400">{{index . "created"}}</td>
+                    <td class="px-4 py-3">
+                        <div class="flex gap-2 justify-end">
+                            <a href="/_/collections/{{$.Collection}}/{{index . "id"}}/edit" class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">Edit</a>
+                            <form method="POST" action="/_/collections/{{$.Collection}}/{{index . "id"}}/delete" class="inline" onsubmit="return confirm('Delete this record?')">
+                                <button type="submit" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+    {{else}}
+    <div class="rounded-lg bg-white p-6 text-center shadow-sm">
+        <p class="text-sm text-gray-500">No records yet. <a href="/_/collections/{{.Collection}}/new" class="text-blue-600 hover:underline">Create one</a>.</p>
+    </div>
+    {{end}}
+</div>
+{{end}}

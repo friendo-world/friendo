@@ -345,7 +345,7 @@ Extracted `runtime/edge/index.js` as standalone single-site Worker. Platform kee
 ## Open TODOs
 
 - ~~**Provisioning automation:**~~ Done. `POST /api/sites` now creates D1, applies the edge runtime schema, creates an R2 bucket, and deploys the user Worker to the dispatch namespace via Cloudflare API. Requires `CF_ACCOUNT_ID` and `CF_API_TOKEN` secrets, and the edge runtime bundle + schema in the `RUNTIME_BUCKET` R2 bucket.
-- **Site admin auth for CLI:** `friendo push` needs to authenticate with the site's admin (email + password), get a session cookie, and cache it. Currently stubbed with an empty cookie.
+- **Site admin auth for CLI (next up — blocker):** `friendo push` / `friendo pull` need to authenticate with the site's admin (email + password), get a `friendo_session` cookie, and cache it in `~/.friendo/config`. Currently stubbed with an empty cookie (`NewSiteClient(target, "")` in `cli/internal/deploy/deploy.go`), so every sync call hits the `/_/api/*` auth gate and 401s. Both ends already exist — the server issues sessions at `POST /_/login` and `SiteClient` accepts a cookie; only the login handshake is missing. This gates the entire deploy/push/pull workflow.
 - **D1 migrations:** The edge runtime should check schema version on first request and apply pending migrations. See REFACTOR.md architecture section for the design.
 
 ---

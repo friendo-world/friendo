@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
-/* Scan Go template strings in admin.go for class usage */
+/* Scan the embedded admin templates for Tailwind class usage */
+@source "./templates";
+/* roleTag() emits classes from Go, so keep admin.go in scope too */
 @source "./admin.go";
 
 /* Design tokens */

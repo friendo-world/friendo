@@ -18,14 +18,55 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+//go:embed templates/*.html
+var templateFiles embed.FS
+
 // openAdminMode is set when --open-admin is passed to friendo serve.
 // When true, the admin UI skips password authentication.
 var openAdminMode bool
 
+// siteName is the configured site name, shown on the settings page.
+var siteName string
+
+// funcMap holds the template helpers shared by every admin page.
+var funcMap = template.FuncMap{
+	"json": func(v any) string {
+		b, _ := json.MarshalIndent(v, "", "  ")
+		return string(b)
+	},
+	"join":    strings.Join,
+	"roleTag": func(role string) template.HTML { return template.HTML(roleTag(role)) },
+}
+
+// pageNames are the admin pages backed by templates/<name>.html.
+var pageNames = []string{
+	"setup", "migrate", "login",
+	"dashboard", "collection", "record_form",
+	"users", "user_form", "settings",
+}
+
+// pageTemplates maps a page name to a parsed template set (base + nav + page),
+// built once at startup. Each page renders by executing the "base" template,
+// which pulls in the page via a per-page "content" bridge.
+var pageTemplates = buildTemplates()
+
+func buildTemplates() map[string]*template.Template {
+	m := make(map[string]*template.Template, len(pageNames))
+	for _, p := range pageNames {
+		t := template.New(p).Funcs(funcMap)
+		t = template.Must(t.ParseFS(templateFiles,
+			"templates/base.html", "templates/nav.html", "templates/"+p+".html"))
+		template.Must(t.New("content").Parse(`{{template "` + p + `" .}}`))
+		m[p] = t
+	}
+	return m
+}
+
 // Mount registers the admin UI routes under /_/ on the given router.
 // If openAdmin is true, the admin UI is accessible without a password.
-func Mount(r chi.Router, db *data.DB, openAdmin bool) {
+func Mount(r chi.Router, db *data.DB, openAdmin bool, name string) {
 	openAdminMode = openAdmin
+	siteName = name
 	r.Route("/_", func(r chi.Router) {
 		// Serve embedded static files (CSS).
 		staticFS, _ := fs.Sub(staticFiles, "static")
@@ -48,6 +89,8 @@ func Mount(r chi.Router, db *data.DB, openAdmin bool) {
 		r.Get("/collections/{collection}/{id}/edit", handleRecordForm(db, true))
 		r.Post("/collections/{collection}/{id}/edit", handleRecordUpdate(db))
 		r.Post("/collections/{collection}/{id}/delete", handleRecordDelete(db))
+
+		r.Get("/settings", handleSettings(db))
 
 		// User management (admin+ only).
 		r.Get("/users", handleUserList(db))
@@ -277,11 +320,54 @@ func handleDashboard(db *data.DB) http.HandlerFunc {
 			return
 		}
 
-		collections, _ := db.ListCollections()
 		renderPage(w, "dashboard", map[string]any{
-			"User":         user,
-			"Collections":  collections,
-			"ContentTypes": contentTypes,
+			"User":        user,
+			"Active":      "dashboard",
+			"Collections": collectionStats(db),
+		})
+	}
+}
+
+// CollectionStat is a content type with its record count, shown on the dashboard.
+type CollectionStat struct {
+	Name  string
+	Count int
+}
+
+// collectionStats returns each built-in content type with its current record count.
+func collectionStats(db *data.DB) []CollectionStat {
+	stats := make([]CollectionStat, 0, len(contentTypes))
+	for _, ct := range contentTypes {
+		records, err := db.QueryCollection(ct)
+		if err != nil {
+			log.Printf("Error counting collection %q: %v", ct, err)
+		}
+		stats = append(stats, CollectionStat{Name: ct, Count: len(records)})
+	}
+	return stats
+}
+
+// --- Settings ---
+
+func handleSettings(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := requireAuth(w, r, db)
+		if user == nil {
+			return
+		}
+
+		collections, _ := db.ListCollections()
+		users, err := db.ListUsers()
+		if err != nil {
+			users = []*data.User{}
+		}
+
+		renderPage(w, "settings", map[string]any{
+			"User":        user,
+			"Active":      "settings",
+			"SiteName":    siteName,
+			"Collections": collections,
+			"UserCount":   len(users),
 		})
 	}
 }
@@ -304,6 +390,7 @@ func handleCollectionList(db *data.DB) http.HandlerFunc {
 
 		renderPage(w, "collection", map[string]any{
 			"User":       user,
+			"Active":     "",
 			"Collection": collection,
 			"Records":    records,
 		})
@@ -320,6 +407,7 @@ func handleRecordForm(db *data.DB, editing bool) http.HandlerFunc {
 		collection := chi.URLParam(r, "collection")
 		d := map[string]any{
 			"User":       user,
+			"Active":     "",
 			"Collection": collection,
 			"Editing":    editing,
 			"Record":     map[string]any{},
@@ -622,39 +710,19 @@ func availableRoles(currentRole string) []string {
 }
 
 func renderPage(w http.ResponseWriter, page string, d map[string]any) {
-	t, err := template.New("base").Funcs(template.FuncMap{
-		"json": func(v any) string {
-			b, _ := json.MarshalIndent(v, "", "  ")
-			return string(b)
-		},
-		"join":    strings.Join,
-		"roleTag": func(role string) template.HTML { return template.HTML(roleTag(role)) },
-	}).Parse(baseLayout)
-	if err != nil {
-		http.Error(w, "Template error", 500)
-		log.Printf("Admin template parse error: %v", err)
-		return
-	}
-
-	pageHTML, ok := pages[page]
+	t, ok := pageTemplates[page]
 	if !ok {
 		http.Error(w, "Page not found", 404)
 		return
 	}
 
-	// Parse the page template. It defines itself as {{define "pagename"}}...{{end}}.
-	// We also add a "content" template that calls the page by name.
-	t, err = t.Parse(pageHTML)
-	if err != nil {
-		http.Error(w, "Template error", 500)
-		log.Printf("Admin page template parse error: %v", err)
-		return
+	// The shared nav compares .Active against a string, so make sure the key is
+	// always present (a missing map key would make {{eq}} fail at render time).
+	if d == nil {
+		d = map[string]any{}
 	}
-	t, err = t.New("content").Parse(`{{template "` + page + `" .}}`)
-	if err != nil {
-		http.Error(w, "Template error", 500)
-		log.Printf("Admin content bridge parse error: %v", err)
-		return
+	if _, ok := d["Active"]; !ok {
+		d["Active"] = ""
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -675,299 +743,4 @@ func roleTag(role string) string {
 		c = "bg-gray-500"
 	}
 	return `<span class="inline-block rounded-full px-2 py-0.5 text-xs font-semibold text-white ` + c + `">` + role + `</span>`
-}
-
-// --- Embedded HTML templates ---
-
-const baseLayout = `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Friendo Admin</title>
-    <link rel="stylesheet" href="/_/static/admin.css">
-</head>
-<body class="bg-gray-50 text-gray-900 antialiased">
-    {{template "content" .}}
-</body>
-</html>`
-
-var pages = map[string]string{
-	"setup": `{{define "setup"}}
-<div class="mx-auto mt-16 max-w-md px-4">
-    <div class="rounded-lg bg-white p-6 shadow-sm">
-        <h1 class="mb-1 text-xl font-bold">Set up Friendo</h1>
-        <p class="mb-6 text-sm text-gray-500">Create your admin account to get started.</p>
-        {{if .Error}}<div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{{.Error}}</div>{{end}}
-        <form method="POST" action="/_/setup">
-            <label class="mb-4 block text-sm font-medium">Email
-                <input type="email" name="email" value="{{if .Email}}{{.Email}}{{end}}" required autofocus class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <label class="mb-4 block text-sm font-medium">Name <span class="font-normal text-gray-400">(optional)</span>
-                <input type="text" name="name" value="{{if .Name}}{{.Name}}{{end}}" placeholder="Defaults to email prefix" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <label class="mb-1 block text-sm font-medium">Password
-                <input type="password" name="password" required minlength="8" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <p class="mb-5 text-xs text-gray-400">Minimum 8 characters</p>
-            <button type="submit" class="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Create account</button>
-        </form>
-    </div>
-</div>
-{{end}}`,
-
-	"migrate": `{{define "migrate"}}
-<div class="mx-auto mt-16 max-w-md px-4">
-    <div class="rounded-lg bg-white p-6 shadow-sm">
-        <h1 class="mb-1 text-xl font-bold">Upgrade your admin</h1>
-        <p class="mb-6 text-sm text-gray-500">Friendo now uses email-based accounts. Enter your email to upgrade your existing admin password to a full account.</p>
-        {{if .Error}}<div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{{.Error}}</div>{{end}}
-        <form method="POST" action="/_/migrate">
-            <label class="mb-4 block text-sm font-medium">Email
-                <input type="email" name="email" required autofocus class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <button type="submit" class="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Upgrade account</button>
-        </form>
-    </div>
-</div>
-{{end}}`,
-
-	"login": `{{define "login"}}
-<div class="mx-auto mt-16 max-w-md px-4">
-    <div class="rounded-lg bg-white p-6 shadow-sm">
-        <h1 class="mb-6 text-xl font-bold">Friendo Admin</h1>
-        {{if .Error}}<div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{{.Error}}</div>{{end}}
-        <form method="POST" action="/_/login">
-            <label class="mb-4 block text-sm font-medium">Email
-                <input type="email" name="email" value="{{if .Email}}{{.Email}}{{end}}" required autofocus class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <label class="mb-5 block text-sm font-medium">Password
-                <input type="password" name="password" required class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <button type="submit" class="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Log in</button>
-        </form>
-    </div>
-</div>
-{{end}}`,
-
-	"dashboard": `{{define "dashboard"}}
-<nav class="flex items-center gap-6 border-b border-gray-200 bg-white px-6 py-3">
-    <span class="font-bold text-gray-900">Friendo</span>
-    <a href="/_/" class="text-sm font-medium text-blue-600">Dashboard</a>
-    <a href="/_/users" class="text-sm text-gray-500 hover:text-gray-900">Users</a>
-    <a href="/" class="text-sm text-gray-500 hover:text-gray-900">View site</a>
-    <div class="ml-auto flex items-center gap-3">
-        <span class="text-xs text-gray-400">{{.User.Email}}</span>
-        <form method="POST" action="/_/logout"><button type="submit" class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">Log out</button></form>
-    </div>
-</nav>
-<div class="mx-auto max-w-3xl px-4 py-8">
-    <h1 class="mb-6 text-xl font-bold">Collections</h1>
-    {{range .ContentTypes}}
-    <div class="mb-3 flex items-center justify-between rounded-lg bg-white p-4 shadow-sm">
-        <span class="font-medium">{{.}}</span>
-        <div class="flex gap-2">
-            <a href="/_/collections/{{.}}" class="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700">Browse</a>
-            <a href="/_/collections/{{.}}/new" class="rounded border border-blue-600 px-3 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50">New</a>
-        </div>
-    </div>
-    {{end}}
-</div>
-{{end}}`,
-
-	"collection": `{{define "collection"}}
-<nav class="flex items-center gap-6 border-b border-gray-200 bg-white px-6 py-3">
-    <span class="font-bold text-gray-900">Friendo</span>
-    <a href="/_/" class="text-sm text-gray-500 hover:text-gray-900">Dashboard</a>
-    <a href="/_/users" class="text-sm text-gray-500 hover:text-gray-900">Users</a>
-    <a href="/" class="text-sm text-gray-500 hover:text-gray-900">View site</a>
-    <div class="ml-auto flex items-center gap-3">
-        <span class="text-xs text-gray-400">{{.User.Email}}</span>
-        <form method="POST" action="/_/logout"><button type="submit" class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">Log out</button></form>
-    </div>
-</nav>
-<div class="mx-auto max-w-3xl px-4 py-8">
-    <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-xl font-bold">{{.Collection}}</h1>
-        <a href="/_/collections/{{.Collection}}/new" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">New record</a>
-    </div>
-    {{if .Records}}
-    <div class="overflow-hidden rounded-lg bg-white shadow-sm">
-        <table class="w-full">
-            <thead>
-                <tr class="border-b border-gray-200">
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Title</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Slug</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Created</th>
-                    <th class="px-4 py-3"></th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .Records}}
-                <tr class="border-b border-gray-100 hover:bg-gray-50">
-                    <td class="px-4 py-3 text-sm font-medium">{{index . "title"}}</td>
-                    <td class="px-4 py-3 text-sm"><code class="rounded bg-gray-100 px-1.5 py-0.5 text-xs">{{index . "slug"}}</code></td>
-                    <td class="px-4 py-3 text-sm">{{index . "status"}}</td>
-                    <td class="px-4 py-3 text-xs text-gray-400">{{index . "created"}}</td>
-                    <td class="px-4 py-3">
-                        <div class="flex gap-2 justify-end">
-                            <a href="/_/collections/{{$.Collection}}/{{index . "id"}}/edit" class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">Edit</a>
-                            <form method="POST" action="/_/collections/{{$.Collection}}/{{index . "id"}}/delete" class="inline" onsubmit="return confirm('Delete this record?')">
-                                <button type="submit" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Delete</button>
-                            </form>
-                        </div>
-                    </td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
-    </div>
-    {{else}}
-    <div class="rounded-lg bg-white p-6 text-center shadow-sm">
-        <p class="text-sm text-gray-500">No records yet. <a href="/_/collections/{{.Collection}}/new" class="text-blue-600 hover:underline">Create one</a>.</p>
-    </div>
-    {{end}}
-</div>
-{{end}}`,
-
-	"record_form": `{{define "record_form"}}
-<nav class="flex items-center gap-6 border-b border-gray-200 bg-white px-6 py-3">
-    <span class="font-bold text-gray-900">Friendo</span>
-    <a href="/_/" class="text-sm text-gray-500 hover:text-gray-900">Dashboard</a>
-    <a href="/_/collections/{{.Collection}}" class="text-sm text-gray-500 hover:text-gray-900">{{.Collection}}</a>
-    <a href="/" class="text-sm text-gray-500 hover:text-gray-900">View site</a>
-    <div class="ml-auto flex items-center gap-3">
-        <span class="text-xs text-gray-400">{{.User.Email}}</span>
-        <form method="POST" action="/_/logout"><button type="submit" class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">Log out</button></form>
-    </div>
-</nav>
-<div class="mx-auto max-w-3xl px-4 py-8">
-    <h1 class="mb-6 text-xl font-bold">{{if .Editing}}Edit record{{else}}New {{.Collection}} record{{end}}</h1>
-    {{if .Error}}<div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{{.Error}}</div>{{end}}
-    <div class="rounded-lg bg-white p-6 shadow-sm">
-        <form method="POST">
-            <label class="mb-4 block text-sm font-medium">Title
-                <input type="text" name="title" value="{{if .Editing}}{{index .Record "title"}}{{end}}" required class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <label class="mb-4 block text-sm font-medium">Slug
-                <input type="text" name="slug" value="{{if .Editing}}{{index .Record "slug"}}{{end}}" required class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <label class="mb-4 block text-sm font-medium">Body
-                <textarea name="body" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm min-h-40 resize-y focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">{{if .Editing}}{{index .Record "body"}}{{end}}</textarea>
-            </label>
-            <label class="mb-5 block text-sm font-medium">Status
-                <select name="status" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-                    <option value="draft" {{if .Editing}}{{if eq (index .Record "status") "draft"}}selected{{end}}{{end}}>Draft</option>
-                    <option value="published" {{if .Editing}}{{if eq (index .Record "status") "published"}}selected{{end}}{{end}}>Published</option>
-                </select>
-            </label>
-            <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">{{if .Editing}}Save{{else}}Create{{end}}</button>
-        </form>
-    </div>
-</div>
-{{end}}`,
-
-	"users": `{{define "users"}}
-<nav class="flex items-center gap-6 border-b border-gray-200 bg-white px-6 py-3">
-    <span class="font-bold text-gray-900">Friendo</span>
-    <a href="/_/" class="text-sm text-gray-500 hover:text-gray-900">Dashboard</a>
-    <a href="/_/users" class="text-sm font-medium text-blue-600">Users</a>
-    <a href="/" class="text-sm text-gray-500 hover:text-gray-900">View site</a>
-    <div class="ml-auto flex items-center gap-3">
-        <span class="text-xs text-gray-400">{{.User.Email}}</span>
-        <form method="POST" action="/_/logout"><button type="submit" class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">Log out</button></form>
-    </div>
-</nav>
-<div class="mx-auto max-w-3xl px-4 py-8">
-    <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-xl font-bold">Users</h1>
-        <a href="/_/users/new" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Add user</a>
-    </div>
-    {{if .Users}}
-    <div class="overflow-hidden rounded-lg bg-white shadow-sm">
-        <table class="w-full">
-            <thead>
-                <tr class="border-b border-gray-200">
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Email</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Role</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Created</th>
-                    <th class="px-4 py-3"></th>
-                </tr>
-            </thead>
-            <tbody>
-                {{range .Users}}
-                <tr class="border-b border-gray-100 hover:bg-gray-50">
-                    <td class="px-4 py-3 text-sm font-medium">{{.Name}}</td>
-                    <td class="px-4 py-3 text-sm text-gray-600">{{.Email}}</td>
-                    <td class="px-4 py-3">{{roleTag .Role}}</td>
-                    <td class="px-4 py-3 text-xs text-gray-400">{{.Created}}</td>
-                    <td class="px-4 py-3">
-                        <div class="flex gap-2 justify-end">
-                            <a href="/_/users/{{.ID}}/edit" class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">Edit</a>
-                            {{if ne .Role "superadmin"}}
-                            <form method="POST" action="/_/users/{{.ID}}/delete" class="inline" onsubmit="return confirm('Delete this user?')">
-                                <button type="submit" class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">Delete</button>
-                            </form>
-                            {{end}}
-                        </div>
-                    </td>
-                </tr>
-                {{end}}
-            </tbody>
-        </table>
-    </div>
-    {{else}}
-    <div class="rounded-lg bg-white p-6 text-center shadow-sm">
-        <p class="text-sm text-gray-500">No users yet.</p>
-    </div>
-    {{end}}
-</div>
-{{end}}`,
-
-	"user_form": `{{define "user_form"}}
-<nav class="flex items-center gap-6 border-b border-gray-200 bg-white px-6 py-3">
-    <span class="font-bold text-gray-900">Friendo</span>
-    <a href="/_/" class="text-sm text-gray-500 hover:text-gray-900">Dashboard</a>
-    <a href="/_/users" class="text-sm text-gray-500 hover:text-gray-900">Users</a>
-    <a href="/" class="text-sm text-gray-500 hover:text-gray-900">View site</a>
-    <div class="ml-auto flex items-center gap-3">
-        <span class="text-xs text-gray-400">{{.User.Email}}</span>
-        <form method="POST" action="/_/logout"><button type="submit" class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">Log out</button></form>
-    </div>
-</nav>
-<div class="mx-auto max-w-3xl px-4 py-8">
-    <h1 class="mb-6 text-xl font-bold">{{if .Editing}}Edit user{{else}}Add user{{end}}</h1>
-    {{if .Error}}<div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{{.Error}}</div>{{end}}
-    <div class="rounded-lg bg-white p-6 shadow-sm">
-        <form method="POST">
-            {{if not .Editing}}
-            <label class="mb-4 block text-sm font-medium">Email
-                <input type="email" name="email" value="{{if .Email}}{{.Email}}{{end}}" required class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            {{else}}
-            <div class="mb-4 text-sm">
-                <span class="font-medium text-gray-500">Email:</span> <span>{{.Target.Email}}</span>
-            </div>
-            {{end}}
-            <label class="mb-4 block text-sm font-medium">Name
-                <input type="text" name="name" value="{{if .Editing}}{{.Target.Name}}{{else}}{{if .Name}}{{.Name}}{{end}}{{end}}" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <label class="mb-4 block text-sm font-medium">Role
-                <select name="role" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-                    {{range .Roles}}
-                    <option value="{{.}}" {{if $.Editing}}{{if eq $.Target.Role .}}selected{{end}}{{end}}>{{.}}</option>
-                    {{end}}
-                </select>
-            </label>
-            <label class="mb-1 block text-sm font-medium">Password{{if .Editing}} <span class="font-normal text-gray-400">(leave blank to keep current)</span>{{end}}
-                <input type="password" name="password" {{if not .Editing}}required minlength="8"{{end}} class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none">
-            </label>
-            <p class="mb-5 text-xs text-gray-400">Minimum 8 characters</p>
-            <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">{{if .Editing}}Save{{else}}Create user{{end}}</button>
-        </form>
-    </div>
-</div>
-{{end}}`,
 }
