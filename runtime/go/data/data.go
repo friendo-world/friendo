@@ -143,6 +143,106 @@ func (db *DB) ListCollections() ([]string, error) {
 	return names, rows.Err()
 }
 
+// CollectionCount is a collection name with its record count.
+type CollectionCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// CollectionCounts returns the record count for each collection that has posts.
+func (db *DB) CollectionCounts() ([]CollectionCount, error) {
+	rows, err := db.Conn.Query(
+		`SELECT collection, COUNT(*) FROM posts WHERE site_id = ? GROUP BY collection ORDER BY collection`,
+		db.SiteID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var counts []CollectionCount
+	for rows.Next() {
+		var c CollectionCount
+		if err := rows.Scan(&c.Name, &c.Count); err != nil {
+			return nil, err
+		}
+		counts = append(counts, c)
+	}
+	return counts, rows.Err()
+}
+
+// GetRecordByID returns a single post by id, scoped to the site.
+func (db *DB) GetRecordByID(id string) (map[string]any, error) {
+	row := db.Conn.QueryRow(
+		`SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
+		 FROM posts WHERE id = ? AND site_id = ?`,
+		id, db.SiteID,
+	)
+	var rid, collection, slug, title, body, authorID, status, publishedAt, created, updated string
+	if err := row.Scan(&rid, &collection, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, sql.ErrNoRows
+		}
+		return nil, err
+	}
+	return map[string]any{
+		"id":           rid,
+		"collection":   collection,
+		"slug":         slug,
+		"title":        title,
+		"body":         body,
+		"author_id":    authorID,
+		"status":       status,
+		"published_at": publishedAt,
+		"created":      created,
+		"updated":      updated,
+	}, nil
+}
+
+// CreateRecord inserts a new post and returns its id.
+func (db *DB) CreateRecord(collection, slug, title, body, status, authorID string) (string, error) {
+	id := GenerateID()
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, collection, slug, title, body, status, authorID, now, now,
+	)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// UpdateRecord updates an existing post's editable fields.
+func (db *DB) UpdateRecord(id, slug, title, body, status string) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	res, err := db.Conn.Exec(
+		`UPDATE posts SET slug = ?, title = ?, body = ?, status = ?, updated = ?
+		 WHERE id = ? AND site_id = ?`,
+		slug, title, body, status, now, id, db.SiteID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// DeleteRecord removes a post by id, scoped to the site.
+func (db *DB) DeleteRecord(id string) error {
+	res, err := db.Conn.Exec(`DELETE FROM posts WHERE id = ? AND site_id = ?`, id, db.SiteID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // --- User management ---
 
 // User represents a user account.

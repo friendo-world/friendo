@@ -237,6 +237,133 @@ app.post("/_/api/auth/logout", async (c) => {
   return c.body(null, 204);
 });
 
+// --- Content (collections + records) ---
+
+// Always present so a fresh site has somewhere to create the first record.
+// Must match defaultCollections in the Go runtime.
+const DEFAULT_COLLECTIONS = ["blog", "pages", "posts"];
+
+async function requireAdmin(c) {
+  const auth = await requireSiteAdmin(c);
+  if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return null;
+  return auth;
+}
+
+function nowISO() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+app.get("/_/api/collections", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  const { results } = await c.env.DB.prepare(
+    "SELECT collection, COUNT(*) AS count FROM posts WHERE site_id = ? GROUP BY collection ORDER BY collection"
+  ).bind(auth.siteId).all();
+
+  const byName = {};
+  for (const r of results || []) byName[r.collection] = r.count;
+
+  const out = [];
+  const seen = new Set();
+  for (const name of DEFAULT_COLLECTIONS) {
+    out.push({ name, count: byName[name] || 0 });
+    seen.add(name);
+  }
+  for (const r of results || []) {
+    if (!seen.has(r.collection)) out.push({ name: r.collection, count: r.count });
+  }
+  return c.json({ collections: out });
+});
+
+app.get("/_/api/collections/:collection/records", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, slug, title, body, author_id, status, published_at, created, updated
+     FROM posts WHERE site_id = ? AND collection = ? ORDER BY created DESC`
+  ).bind(auth.siteId, c.req.param("collection")).all();
+  return c.json({ records: results || [] });
+});
+
+app.post("/_/api/collections/:collection/records", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  await c.env.DB.prepare(
+    `INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, created, updated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    id, auth.siteId, c.req.param("collection"),
+    body.slug || "", body.title || "", body.body || "", body.status || "draft",
+    auth.user.id, now, now
+  ).run();
+
+  const record = await c.env.DB.prepare(
+    `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
+     FROM posts WHERE id = ? AND site_id = ?`
+  ).bind(id, auth.siteId).first();
+  return c.json({ record }, 201);
+});
+
+app.get("/_/api/records/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  const record = await c.env.DB.prepare(
+    `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
+     FROM posts WHERE id = ? AND site_id = ?`
+  ).bind(c.req.param("id"), auth.siteId).first();
+  if (!record) return c.json({ error: "record not found" }, 404);
+  return c.json({ record });
+});
+
+app.put("/_/api/records/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const id = c.req.param("id");
+  const res = await c.env.DB.prepare(
+    `UPDATE posts SET slug = ?, title = ?, body = ?, status = ?, updated = ?
+     WHERE id = ? AND site_id = ?`
+  ).bind(
+    body.slug || "", body.title || "", body.body || "", body.status || "draft",
+    nowISO(), id, auth.siteId
+  ).run();
+  if (!res.meta.changes) return c.json({ error: "record not found" }, 404);
+
+  const record = await c.env.DB.prepare(
+    `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
+     FROM posts WHERE id = ? AND site_id = ?`
+  ).bind(id, auth.siteId).first();
+  return c.json({ record });
+});
+
+app.delete("/_/api/records/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (!auth) return c.json({ error: "unauthorized" }, 401);
+
+  const res = await c.env.DB.prepare("DELETE FROM posts WHERE id = ? AND site_id = ?")
+    .bind(c.req.param("id"), auth.siteId).run();
+  if (!res.meta.changes) return c.json({ error: "record not found" }, 404);
+  return c.body(null, 204);
+});
+
 // --- Admin SPA bundle ---
 // The same built bundle the Go runtime embeds (see admin/scripts/bundle-edge.mjs).
 

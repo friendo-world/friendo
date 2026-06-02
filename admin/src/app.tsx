@@ -1,7 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
+import { LocationProvider, Router, Route } from "preact-iso";
 import { api, ApiError, type User } from "./api";
+import { AuthProvider } from "./auth";
+import { Layout } from "./components/layout";
 import { Login } from "./views/login";
-import { Shell } from "./views/shell";
+import { Dashboard } from "./views/dashboard";
+import { CollectionView } from "./views/collection";
+import { RecordForm } from "./views/record-form";
+import { NotFound } from "./views/not-found";
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -12,7 +18,6 @@ export function App() {
       .me()
       .then((r) => setUser(r.user))
       .catch((e) => {
-        // 401 simply means "not logged in" — anything else is unexpected.
         if (!(e instanceof ApiError) || e.status !== 401) console.error(e);
         setUser(null);
       })
@@ -29,13 +34,24 @@ export function App() {
 
   if (!user) return <Login onLogin={setUser} />;
 
+  const logout = async () => {
+    await api.logout().catch(() => {});
+    setUser(null);
+  };
+
   return (
-    <Shell
-      user={user}
-      onLogout={async () => {
-        await api.logout().catch(() => {});
-        setUser(null);
-      }}
-    />
+    <AuthProvider value={{ user, logout }}>
+      <LocationProvider>
+        <Layout>
+          <Router>
+            <Route path="/_/" component={Dashboard} />
+            <Route path="/_/collections/:collection/new" component={RecordForm} />
+            <Route path="/_/collections/:collection" component={CollectionView} />
+            <Route path="/_/records/:id/edit" component={RecordForm} />
+            <Route default component={NotFound} />
+          </Router>
+        </Layout>
+      </LocationProvider>
+    </AuthProvider>
   );
 }

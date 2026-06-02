@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,6 +46,14 @@ func Mount(r chi.Router, db *data.DB, siteDir string, authFunc func(*http.Reques
 				})
 			})
 
+			// Content: collections + records
+			r.Get("/collections", handleListCollections(db))
+			r.Get("/collections/{collection}/records", handleListRecords(db))
+			r.Post("/collections/{collection}/records", handleCreateRecord(db, authFunc))
+			r.Get("/records/{id}", handleGetRecord(db))
+			r.Put("/records/{id}", handleUpdateRecord(db))
+			r.Delete("/records/{id}", handleDeleteRecord(db))
+
 			// Push endpoints
 			r.Post("/push/templates", handlePushTemplates(siteDir))
 			r.Post("/push/assets", handlePushAssets(siteDir))
@@ -56,6 +65,143 @@ func Mount(r chi.Router, db *data.DB, siteDir string, authFunc func(*http.Reques
 			r.Get("/pull/users", handlePullUsers(db))
 		})
 	})
+}
+
+// --- Content (collections + records) ---
+
+// defaultCollections always appear in the collections list so a fresh site has
+// somewhere to create the first record. Both runtimes use the same set.
+var defaultCollections = []string{"blog", "pages", "posts"}
+
+func handleListCollections(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		counts, err := db.CollectionCounts()
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		byName := map[string]int{}
+		for _, c := range counts {
+			byName[c.Name] = c.Count
+		}
+
+		out := []data.CollectionCount{}
+		seen := map[string]bool{}
+		for _, name := range defaultCollections {
+			out = append(out, data.CollectionCount{Name: name, Count: byName[name]})
+			seen[name] = true
+		}
+		for _, c := range counts {
+			if !seen[c.Name] {
+				out = append(out, c)
+			}
+		}
+		jsonResponse(w, map[string]any{"collections": out})
+	}
+}
+
+func handleListRecords(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		collection := chi.URLParam(r, "collection")
+		records, err := db.QueryCollection(collection)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		if records == nil {
+			records = []map[string]any{}
+		}
+		jsonResponse(w, map[string]any{"records": records})
+	}
+}
+
+func handleGetRecord(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		record, err := db.GetRecordByID(chi.URLParam(r, "id"))
+		if err == sql.ErrNoRows {
+			jsonError(w, "record not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"record": record})
+	}
+}
+
+type recordInput struct {
+	Slug   string `json:"slug"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Status string `json:"status"`
+}
+
+func (in recordInput) status() string {
+	if in.Status == "" {
+		return "draft"
+	}
+	return in.Status
+}
+
+func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in recordInput
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		collection := chi.URLParam(r, "collection")
+		authorID := ""
+		if u := authFunc(r); u != nil {
+			authorID = u.ID
+		}
+		id, err := db.CreateRecord(collection, in.Slug, in.Title, in.Body, in.status(), authorID)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		record, _ := db.GetRecordByID(id)
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"record": record})
+	}
+}
+
+func handleUpdateRecord(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in recordInput
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		id := chi.URLParam(r, "id")
+		err := db.UpdateRecord(id, in.Slug, in.Title, in.Body, in.status())
+		if err == sql.ErrNoRows {
+			jsonError(w, "record not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("update error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		record, _ := db.GetRecordByID(id)
+		jsonResponse(w, map[string]any{"record": record})
+	}
+}
+
+func handleDeleteRecord(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := db.DeleteRecord(chi.URLParam(r, "id"))
+		if err == sql.ErrNoRows {
+			jsonError(w, "record not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // --- Auth (session cookie) ---

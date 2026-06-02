@@ -36,6 +36,28 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
+export type Collection = { name: string; count: number };
+
+export type Record = {
+  id: string;
+  collection?: string;
+  slug: string;
+  title: string;
+  body: string;
+  status: string;
+  author_id?: string;
+  published_at?: string;
+  created?: string;
+  updated?: string;
+};
+
+export type RecordInput = {
+  slug: string;
+  title: string;
+  body: string;
+  status: string;
+};
+
 export const api = {
   me: () => req<{ user: User }>("/me"),
   login: (email: string, password: string) =>
@@ -44,4 +66,21 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   logout: () => req<void>("/auth/logout", { method: "POST" }),
+
+  collections: () => req<{ collections: Collection[] }>("/collections"),
+  records: (collection: string) =>
+    req<{ records: Record[] }>(`/collections/${encodeURIComponent(collection)}/records`),
+  record: (id: string) => req<{ record: Record }>(`/records/${encodeURIComponent(id)}`),
+  createRecord: (collection: string, input: RecordInput) =>
+    req<{ record: Record }>(`/collections/${encodeURIComponent(collection)}/records`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateRecord: (id: string, input: RecordInput) =>
+    req<{ record: Record }>(`/records/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  deleteRecord: (id: string) =>
+    req<void>(`/records/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
