@@ -9,6 +9,11 @@ main = "index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Bundle .sql files as text so migrations can embed them.
+[[rules]]
+type = "Text"
+globs = ["**/*.sql"]
+
 [vars]
 SITE_ID = "testsite"
 SITE_NAME = "testsite"

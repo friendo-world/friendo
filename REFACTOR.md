@@ -346,7 +346,7 @@ Extracted `runtime/edge/index.js` as standalone single-site Worker. Platform kee
 
 - ~~**Provisioning automation:**~~ Done. `POST /api/sites` now creates D1, applies the edge runtime schema, creates an R2 bucket, and deploys the user Worker to the dispatch namespace via Cloudflare API. Requires `CF_ACCOUNT_ID` and `CF_API_TOKEN` secrets, and the edge runtime bundle + schema in the `RUNTIME_BUCKET` R2 bucket.
 - ~~**Site admin auth for CLI:**~~ Done. `friendo push` / `friendo pull` authenticate via `authenticateSite()` (`cli/internal/deploy/auth.go`): they reuse a cached `friendo_session` cookie from `~/.friendo/config`, or prompt for the site admin's email + password and `POST /_/api/auth/login` to obtain one. Sessions are revalidated via `GET /_/api/me` and re-prompted when expired. Verified end-to-end against a running runtime.
-- **D1 migrations:** The edge runtime should check schema version on first request and apply pending migrations. See REFACTOR.md architecture section for the design.
+- ~~**D1 migrations:**~~ Done. The edge runtime applies pending migrations once per isolate on the first request (`runtime/edge/migrations.js`, guarded by `ensureMigrated` in `index.js`), tracked in a `schema_migrations` table. The baseline migration is the schema itself, so a freshly provisioned D1 self-initializes on first request. Add a migration by dropping a `.sql` file in `runtime/edge/migrations/`, importing it, and appending an entry with the next id.
 
 ---
 

@@ -65,9 +65,12 @@ For developing `runtime/edge/index.js` — the template engine, admin UI, and sy
 
 ```bash
 npm run edge:install    # first time only
-npm run edge:schema     # apply schema to local D1
 npm run edge:dev        # start edge runtime on :8788
 ```
+
+The edge runtime applies its D1 schema automatically on the first request (see
+[migrations.js](runtime/edge/migrations.js)), so there's no separate schema step.
+`npm run edge:schema` still exists if you want to apply it manually.
 
 Then push your testsite to it:
 ```bash
@@ -221,6 +224,12 @@ All endpoints require site admin auth (session cookie from `/_/login`).
 - `{{ request.path }}` — current URL path
 - `{{ collections.blog }}` — all posts in a collection
 - `{{ record }}` — matched record on dynamic routes (e.g. `pages/blog/[slug].html`)
+
+Custom filters (implemented identically in both runtimes):
+
+- `{{ "img.jpg"|asset_url }}` → `/public/img.jpg`
+- `{{ post.created|date:"Jan 2, 2006" }}` — format a date
+- `{{ "img.jpg"|asset_url|resize:"300x200" }}` → `/public/img.jpg?w=300&h=200` — a resize *hint* (`W`, `WxH`, or `xH`). An image CDN like Cloudflare Image Resizing honors `w`/`h`; the built-in static server ignores them and serves the original.
 
 ## Tailwind
 

@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/flosch/pongo2/v6"
@@ -61,9 +62,39 @@ func filterDate(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.E
 	}
 }
 
-// resize: stub filter for image resizing.
-// In local dev mode, this returns the value unchanged.
-// Full implementation deferred to Phase 2 (see PHASE_1.md open questions).
+// resize: appends width/height hints to an image URL as query parameters.
+// Usage: {{ post.image|asset_url|resize:"300x200" }} -> /public/img.jpg?w=300&h=200
+// The spec is "W", "WxH", or "xH". These are consumed by an image-resizing CDN
+// (e.g. Cloudflare Image Resizing); the built-in static server ignores them and
+// serves the original, so this degrades gracefully.
 func filterResize(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	return in, nil
+	url := in.String()
+	query := resizeQuery(param.String())
+	if url == "" || query == "" {
+		return in, nil
+	}
+	sep := "?"
+	if strings.Contains(url, "?") {
+		sep = "&"
+	}
+	return pongo2.AsValue(url + sep + query), nil
+}
+
+// resizeQuery turns a resize spec ("300", "300x200", "x200") into a query string.
+func resizeQuery(spec string) string {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return ""
+	}
+	parts := strings.SplitN(spec, "x", 2)
+	var params []string
+	if w := strings.TrimSpace(parts[0]); w != "" {
+		params = append(params, "w="+w)
+	}
+	if len(parts) == 2 {
+		if h := strings.TrimSpace(parts[1]); h != "" {
+			params = append(params, "h="+h)
+		}
+	}
+	return strings.Join(params, "&")
 }

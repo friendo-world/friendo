@@ -12,8 +12,28 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
 import { SPA_INDEX, SPA_ASSETS } from "./spa-bundle.js";
+import { runMigrations } from "./migrations.js";
 
 const app = new Hono();
+
+// Apply pending D1 migrations once per isolate, before any handler runs. The
+// promise is memoized so concurrent requests share one run; a failure clears it
+// so the next request retries.
+let migrationPromise = null;
+function ensureMigrated(db) {
+  if (!migrationPromise) {
+    migrationPromise = runMigrations(db).catch((err) => {
+      migrationPromise = null;
+      throw err;
+    });
+  }
+  return migrationPromise;
+}
+
+app.use("*", async (c, next) => {
+  if (c.env.DB) await ensureMigrated(c.env.DB);
+  await next();
+});
 
 app.use("/_/api/*", cors());
 
@@ -964,7 +984,14 @@ function applyFilter(name, value, arg) {
       if (!value) return "";
       try { const d = new Date(value); return isNaN(d.getTime()) ? value : formatGoDate(d, arg || "2006-01-02"); }
       catch { return value; }
-    case "resize": return value;
+    case "resize": {
+      // Append width/height hints as query params (consumed by an image CDN;
+      // the built-in asset server ignores them). Matches the Go runtime.
+      const url = s();
+      const query = resizeQuery(arg);
+      if (!url || !query) return value;
+      return url + (url.includes("?") ? "&" : "?") + query;
+    }
     case "upper": return s().toUpperCase();
     case "lower": return s().toLowerCase();
     case "capitalize": return s().charAt(0).toUpperCase() + s().slice(1);
@@ -1010,6 +1037,17 @@ function formatGoDate(d, layout) {
     if (!matched) { result += layout[i]; i++; }
   }
   return result;
+}
+
+// resizeQuery turns a resize spec ("300", "300x200", "x200") into a query string.
+function resizeQuery(spec) {
+  spec = (spec || "").trim();
+  if (!spec) return "";
+  const [w, h] = spec.split("x");
+  const params = [];
+  if (w && w.trim()) params.push("w=" + w.trim());
+  if (h !== undefined && h.trim()) params.push("h=" + h.trim());
+  return params.join("&");
 }
 
 function escapeHtml(str) {

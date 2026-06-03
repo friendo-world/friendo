@@ -76,6 +76,6 @@ functional end-to-end.
 
 ## Remaining
 
-### Smaller loose ends
-- **D1 migrations:** edge runtime should check schema version on first request and apply pending migrations (REFACTOR Open TODO)
-- **Image `resize` filter:** stub in [renderer.go](runtime/go/renderer/renderer.go), needs a real implementation
+### Smaller loose ends (done)
+- **D1 migrations:** the edge runtime applies pending migrations once per isolate on the first request ([migrations.js](runtime/edge/migrations.js) + an `ensureMigrated` guard in [index.js](runtime/edge/index.js)). Migrations are tracked in a `schema_migrations` table; the baseline migration is the schema itself, so a fresh D1 self-initializes on first request — no manual `wrangler d1 execute` needed. Verified end-to-end against a wiped miniflare D1.
+- **Image `resize` filter:** implemented in both runtimes ([renderer.go](runtime/go/renderer/renderer.go) + the edge `applyFilter`) as a resize-*hint* — `|resize:"WxH"` appends `?w=…&h=…` to the URL for an image CDN (e.g. Cloudflare Image Resizing) to honor; the built-in static server ignores them and serves the original, so it degrades gracefully. Verified identical output on Go and edge.
