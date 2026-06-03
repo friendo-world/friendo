@@ -65,15 +65,16 @@ and on the edge under miniflare with identical JSON shapes and status codes.
 **Remaining stretch (original M4):** `data-friendo-*` progressive-enhancement
 attributes for public-site comments/reactions/polls (not required by the admin UI).
 
-## Remaining
+### CLI ↔ site admin auth (deploy/push/pull now working)
+The blocker is resolved — the `friendo push` / `pull` / `deploy` workflow is
+functional end-to-end.
+- `friendo push` / `pull` authenticate via `authenticateSite()` ([auth.go](cli/internal/deploy/auth.go)): reuse a cached session, else prompt for the site admin's email + password (no-echo via `golang.org/x/term`)
+- `SiteClient.Login()` POSTs to `/_/api/auth/login` and captures the `friendo_session` cookie ([client.go](cli/internal/deploy/client.go))
+- The session is cached per-target in `~/.friendo/config` (`Config.Sites`) and revalidated via `GET /_/api/me`; expired sessions re-prompt
+- `friendo deploy` reuses the same path for its final push step
+- Verified end-to-end against a running Go runtime: bad password rejected, push uploads files, session cached, subsequent push/pull reuse it without prompting, pulled records land in the local DB
 
-### CLI ↔ site admin auth (blocker)
-The deploy/push/pull workflow is structurally complete but **non-functional** until this lands.
-- `/_/api/*` enforces site admin auth — returns 401 without a valid session ([api.go](runtime/go/api/api.go))
-- The CLI always builds its sync client with an empty cookie: `NewSiteClient(target, "")` in [deploy.go](cli/internal/deploy/deploy.go) (two `TODO`s)
-- Needed: prompt for site admin credentials → `POST /_/api/auth/login` → capture the `friendo_session` cookie → cache in `~/.friendo/config` → pass through to `SiteClient`
-- Both ends already exist (`SiteClient` accepts a cookie; the runtimes now issue sessions at `POST /_/api/auth/login`) — only the handshake is missing
-- Gates `friendo push`, `friendo pull`, and the final push step of `friendo deploy`
+## Remaining
 
 ### Smaller loose ends
 - **D1 migrations:** edge runtime should check schema version on first request and apply pending migrations (REFACTOR Open TODO)

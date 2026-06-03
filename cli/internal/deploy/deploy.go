@@ -179,10 +179,11 @@ func RunPush(opts PushOptions) error {
 
 	fmt.Printf("Pushing to %s\n", target)
 
-	// Authenticate with the site's admin.
-	// TODO: Prompt for site admin credentials and cache session cookie.
-	// For now, use the platform token to establish a site session.
-	siteClient := NewSiteClient(target, "")
+	// Authenticate with the site's admin (cached session, or prompt + cache).
+	siteClient, err := authenticateSite(target)
+	if err != nil {
+		return fmt.Errorf("authenticating with %s: %w", target, err)
+	}
 
 	// Push templates.
 	templates, err := readFilesAsJSON(siteDir, "pages", "templates")
@@ -265,8 +266,10 @@ func RunPull(opts PullOptions) error {
 
 	target := resolveTarget(opts.Target, siteCfg, siteDir)
 
-	// TODO: Use cached site admin session cookie.
-	siteClient := NewSiteClient(target, "")
+	siteClient, err := authenticateSite(target)
+	if err != nil {
+		return fmt.Errorf("authenticating with %s: %w", target, err)
+	}
 
 	db, err := data.Open(siteDir)
 	if err != nil {

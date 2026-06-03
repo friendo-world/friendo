@@ -76,6 +76,62 @@ func NewSiteClient(siteURL, sessionCookie string) *SiteClient {
 	}
 }
 
+// Cookie returns the current session cookie value (for caching).
+func (c *SiteClient) Cookie() string { return c.cookie }
+
+// Login authenticates with the site admin's email + password and stores the
+// resulting friendo_session cookie on the client.
+func (c *SiteClient) Login(email, password string) error {
+	body, err := json.Marshal(map[string]string{"email": email, "password": password})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest("POST", c.siteURL+"/_/api/auth/login", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("invalid email or password")
+	}
+	if resp.StatusCode >= 300 {
+		return readError(resp)
+	}
+
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "friendo_session" && ck.Value != "" {
+			c.cookie = ck.Value
+			return nil
+		}
+	}
+	return fmt.Errorf("login succeeded but no session cookie was returned")
+}
+
+// SessionValid reports whether the current cookie authenticates (GET /_/api/me).
+func (c *SiteClient) SessionValid() bool {
+	if c.cookie == "" {
+		return false
+	}
+	req, err := http.NewRequest("GET", c.siteURL+"/_/api/me", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Cookie", "friendo_session="+c.cookie)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 // PushTemplates uploads template files to the site.
 func (c *SiteClient) PushTemplates(files []map[string]string) error {
 	body := map[string]any{"files": files}

@@ -9,9 +9,35 @@ import (
 
 // Config holds the deploy configuration stored in ~/.friendo/config.
 type Config struct {
-	Token   string `json:"token"`             // Session token from Better Auth
-	BaseURL string `json:"base_url"`          // API base URL (e.g. https://friendo.world or http://localhost:8787)
-	path    string // file path (not serialized)
+	Token   string              `json:"token"`           // Platform session token (Better Auth)
+	BaseURL string              `json:"base_url"`        // Platform API base URL
+	Sites   map[string]SiteAuth `json:"sites,omitempty"` // cached site sessions, keyed by site URL
+	path    string              // file path (not serialized)
+}
+
+// SiteAuth is a cached site admin session for a deployed site.
+type SiteAuth struct {
+	Email  string `json:"email"`
+	Cookie string `json:"cookie"` // friendo_session value
+}
+
+// SiteAuth returns the cached session for a site target, if any.
+func (c *Config) SiteAuth(target string) (SiteAuth, bool) {
+	a, ok := c.Sites[target]
+	return a, ok
+}
+
+// SetSiteAuth caches a site admin session for a target.
+func (c *Config) SetSiteAuth(target, email, cookie string) {
+	if c.Sites == nil {
+		c.Sites = map[string]SiteAuth{}
+	}
+	c.Sites[target] = SiteAuth{Email: email, Cookie: cookie}
+}
+
+// ClearSiteAuth removes a cached site session (e.g. after it expires).
+func (c *Config) ClearSiteAuth(target string) {
+	delete(c.Sites, target)
 }
 
 // DefaultBaseURL is the production friendo.world URL.
