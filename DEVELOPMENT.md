@@ -21,9 +21,9 @@ friendo/
 ├── runtime/
 │   ├── go/               # Go site runtime (local dev server)
 │   │   ├── server/       # HTTP server, routing, hot reload
-│   │   ├── admin/        # Serves the SPA bundle + first-run (setup/migrate)
+│   │   ├── admin/        # Serves the embedded admin SPA bundle
 │   │   │   └── spa/      # Built admin SPA (embedded via go:embed)
-│   │   ├── api/          # /_/api/* REST + sync endpoints (auth, push/pull)
+│   │   ├── api/          # /_/api/* REST + sync endpoints (auth, content, users, push/pull)
 │   │   ├── data/         # SQLite layer + schema
 │   │   ├── renderer/     # Pongo2 filters
 │   │   ├── export/       # Static HTML export
@@ -135,28 +135,9 @@ npm run tunnel            # map *.local.friendo.world → :8787
 
 ## Architecture
 
-Friendo uses [Cloudflare Workers for Platforms](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/) for managed hosting on friendo.world. Each deployed site runs as an isolated user Worker with its own D1 database and R2 bucket.
-
-**Production** (friendo.world):
-```
-testsite.friendo.world/blog/hello
-  → Dispatch Worker (platform/worker.js)
-    → looks up "testsite" in platform D1
-    → env.DISPATCHER.get("testsite")
-  → User Worker (runtime/edge/index.js)
-    → renders the page from its own D1 + R2
-```
-
-**Two levels of D1:**
-
-| Database | Owned by | Contains |
-|---|---|---|
-| Platform D1 | Dispatch Worker | Sites registry, platform user accounts (Better Auth) |
-| Site D1 (per site) | User Worker | Posts, users, sessions, comments — all site data |
-
-Self-hosters deploy `runtime/edge/index.js` directly — the same code, without the dispatch layer.
-
-### Dev environments
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design — the two runtimes, the
+shared admin SPA, the REST/sync API, Workers for Platforms, and migrations. The
+dev environments you'll actually run:
 
 | Environment | What you're testing | Internet required? | Port |
 |---|---|---|---|
@@ -165,8 +146,6 @@ Self-hosters deploy `runtime/edge/index.js` directly — the same code, without 
 | **Platform** | Dispatch, provisioning, platform UI | Yes (remote `dev` namespace) | `:8787` |
 
 The Go and edge runtimes use fully local storage (SQLite / miniflare D1+R2). The platform dispatches to real user Workers in a remote `dev` namespace on Cloudflare — full parity with production.
-
-See the **Quick start** section above for setup commands.
 
 ## Admin UI
 
@@ -189,8 +168,8 @@ npm run admin:dev       # Vite dev server with hot reload
 ```
 
 `npm run build` rebuilds the SPA before compiling, so the embedded bundle stays
-in sync. First-run (`/_/setup`, `/_/migrate`) is still server-rendered in the Go
-runtime; everything else is the SPA.
+in sync. The entire admin UI — including first-run setup/migrate — is the SPA;
+the runtimes only serve the bundle and the REST API.
 
 ## Auth
 
@@ -200,9 +179,10 @@ runtime; everything else is the SPA.
 
 **Platform:** Better Auth at `local.friendo.world/login`. Separate from site auth. Used for managing your platform account and provisioning sites.
 
-## Sync API
+## REST + sync API
 
-Every Friendo site (local or deployed) exposes the same sync endpoints at `/_/api/*`:
+Every Friendo site (local or deployed) exposes the same API at `/_/api/*`, backing
+both the admin SPA and the CLI. The sync endpoints used by `friendo push`/`pull`:
 
 ```
 POST /_/api/push/templates    # upload template files
@@ -214,7 +194,10 @@ GET  /_/api/pull/data          # fetch all records
 GET  /_/api/pull/users         # fetch all user accounts
 ```
 
-All endpoints require site admin auth (session cookie from `/_/login`).
+Most endpoints require site admin auth (a `friendo_session` cookie from
+`POST /_/api/auth/login`); the bootstrap endpoints (`/me`, `/auth/*`, `/setup`,
+`/migrate`) are public. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full
+endpoint surface.
 
 ## Templates
 

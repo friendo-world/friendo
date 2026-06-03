@@ -13,13 +13,17 @@ When you're ready to share it, `friendo deploy` puts it on the internet.
 ```
 friendo/
 ├── cli/                # The friendo command (init, serve, push, pull, deploy, export)
+├── admin/              # Shared admin UI — one Preact SPA, served by both runtimes
 ├── runtime/
 │   ├── go/             # Go site runtime (local dev, self-hosted VPS)
 │   └── edge/           # JS site runtime (Cloudflare Workers, self-hostable)
 ├── platform/           # friendo.world (managed hosting, wraps runtime/edge/)
-├── testsite/           # Example site for development and testing
-└── editor/             # Desktop editor (Phase 2)
+└── testsite/           # Example site for development and testing
 ```
+
+**Docs:** [ARCHITECTURE.md](ARCHITECTURE.md) (how it's designed) ·
+[DEVELOPMENT.md](DEVELOPMENT.md) (how to build & run) ·
+[ROADMAP.md](ROADMAP.md) (shipped & next).
 
 ---
 
@@ -182,10 +186,12 @@ All sync goes through the site's own `/_/api/*` endpoints, authenticated with si
 
 | Phase | Scope | Status |
 |---|---|---|
-| **Phase 1** | CLI + Go runtime + friendo.world | Complete |
-| **Phase 1.5** | Auth, Tailwind UI, JS SDK, codebase refactor, Workers for Platforms | In progress |
+| **Phase 1** | CLI + Go runtime + friendo.world foundation | Complete |
+| **Phase 1.5** | Auth, shared admin SPA + REST API, codebase refactor, Workers for Platforms, working deploy | Complete |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
-| **Phase 3** | Community features, template marketplace | Planned |
+| **Phase 3** | Community features (visitor comments/reactions/polls), template marketplace | Planned |
+
+See [ROADMAP.md](ROADMAP.md) for details and known gaps.
 
 ---
 
