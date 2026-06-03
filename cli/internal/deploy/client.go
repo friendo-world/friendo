@@ -114,6 +114,52 @@ func (c *SiteClient) Login(email, password string) error {
 	return fmt.Errorf("login succeeded but no session cookie was returned")
 }
 
+// NeedsSetup reports whether the site has no admin account yet (first run).
+func (c *SiteClient) NeedsSetup() (bool, error) {
+	var result struct {
+		NeedsSetup bool `json:"needsSetup"`
+	}
+	if err := c.get("/_/api/setup", &result); err != nil {
+		return false, err
+	}
+	return result.NeedsSetup, nil
+}
+
+// Setup creates the site's first admin (superadmin) and stores the resulting
+// session cookie on the client. Only works while the site has no users.
+func (c *SiteClient) Setup(email, name, password string) error {
+	body, err := json.Marshal(map[string]string{"email": email, "name": name, "password": password})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest("POST", c.siteURL+"/_/api/setup", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("setup request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusConflict {
+		return fmt.Errorf("this site already has an admin account")
+	}
+	if resp.StatusCode >= 300 {
+		return readError(resp)
+	}
+
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "friendo_session" && ck.Value != "" {
+			c.cookie = ck.Value
+			return nil
+		}
+	}
+	return fmt.Errorf("setup succeeded but no session cookie was returned")
+}
+
 // SessionValid reports whether the current cookie authenticates (GET /_/api/me).
 func (c *SiteClient) SessionValid() bool {
 	if c.cookie == "" {

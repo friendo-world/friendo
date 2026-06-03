@@ -68,11 +68,11 @@ attributes for public-site comments/reactions/polls (not required by the admin U
 ### CLI ↔ site admin auth (deploy/push/pull now working)
 The blocker is resolved — the `friendo push` / `pull` / `deploy` workflow is
 functional end-to-end.
-- `friendo push` / `pull` authenticate via `authenticateSite()` ([auth.go](cli/internal/deploy/auth.go)): reuse a cached session, else prompt for the site admin's email + password (no-echo via `golang.org/x/term`)
-- `SiteClient.Login()` POSTs to `/_/api/auth/login` and captures the `friendo_session` cookie ([client.go](cli/internal/deploy/client.go))
-- The session is cached per-target in `~/.friendo/config` (`Config.Sites`) and revalidated via `GET /_/api/me`; expired sessions re-prompt
-- `friendo deploy` reuses the same path for its final push step
-- Verified end-to-end against a running Go runtime: bad password rejected, push uploads files, session cached, subsequent push/pull reuse it without prompting, pulled records land in the local DB
+- `friendo push` / `pull` authenticate via `authenticateSite()` ([auth.go](cli/internal/deploy/auth.go)): reuse a cached session, else branch on the site's state
+- **Existing site:** prompt for the admin's email + password → `POST /_/api/auth/login` (no-echo via `golang.org/x/term`)
+- **Fresh/empty site (e.g. just provisioned on friendo.world):** `GET /_/api/setup` reports no admin → walk the user through creating the first admin account → `POST /_/api/setup`. This closes the managed-hosting bootstrap gap — the deploy wizard's final push creates the site admin automatically.
+- `SiteClient` captures the `friendo_session` cookie from login/setup ([client.go](cli/internal/deploy/client.go)); the session is cached per-target in `~/.friendo/config` (`Config.Sites`), revalidated via `GET /_/api/me`, and re-prompted when expired
+- Verified end-to-end against a running Go runtime: login path (bad password rejected, push/pull reuse cached session, pulled records land locally) **and** the first-run path (push to an empty site creates the superadmin via setup, then uploads)
 
 ## Remaining
 

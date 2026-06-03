@@ -151,7 +151,7 @@ Each target runs a recipe:
 
 | Target | What the recipe does |
 |---|---|
-| **friendo.world** | Authenticate with platform → provision site (creates D1 + R2 + user Worker via WfP API) → create site superadmin from local account → push |
+| **friendo.world** | Authenticate with platform → provision site (creates D1 + R2 + user Worker via WfP API) → push (first push prompts to create the site's admin account via `/_/api/setup`) |
 | **Cloudflare** | Walk user through wrangler setup → create D1 + R2 → deploy `runtime/edge/` Worker → push |
 | **VPS** | Give instructions to install the binary and start `friendo serve` → push |
 

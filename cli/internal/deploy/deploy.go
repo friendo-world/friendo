@@ -142,8 +142,10 @@ func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain string) e
 		fmt.Printf("Warning: could not save target to friendo.toml: %v\n", err)
 	}
 
-	// Push everything to the site's sync API.
-	fmt.Println("Pushing templates and assets...")
+	// Push everything to the site's sync API. The freshly provisioned site has
+	// no admin yet, so RunPush -> authenticateSite walks the user through
+	// creating the first admin account before uploading.
+	fmt.Println()
 	pushOpts := PushOptions{Target: target}
 	if err := RunPush(pushOpts); err != nil {
 		return fmt.Errorf("push failed: %w", err)
