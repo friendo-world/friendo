@@ -80,11 +80,19 @@ It reuses the shared-artifact pattern already established by the admin SPA
 (`friendo.js` served by both runtimes). Worth a focused design pass on the
 visitor-identity + moderation model before implementation.
 
+## Testing
+
+A **parity test harness** in [tests/](tests/) runs one shared `scenarios.json`
+against **both** runtimes and asserts identical behavior — encoding the project's
+"one UI, two runtimes, identical behavior" guarantee. It covers the core REST API:
+auth, first-run setup, records CRUD, users + role enforcement, settings, and the
+session lifecycle. Run with `npm test` (or `npm run test:go` / `test:edge`).
+
+Still uncovered (worth growing as those areas land): the template/rendering layer,
+the sync push/pull endpoints, and the CLI deploy flow.
+
 ## Known gaps / tech debt
 
-- **No automated tests.** Verification so far has been manual (curl against running
-  runtimes). This becomes a real liability once a public write API (Phase 3) adds
-  an adversarial surface — a thin test harness is worth standing up first.
 - **friendo.world provisioning is unverified.** The platform Worker's Cloudflare-API
   provisioning (D1 + R2 + user Worker creation) needs a real Cloudflare account and
   `CF_API_TOKEN` to exercise end-to-end; it's never been run against live Cloudflare.

@@ -124,6 +124,9 @@ npm run tunnel            # map *.local.friendo.world → :8787
 | `npm run admin:install` | Install admin SPA deps (first time only) |
 | `npm run admin` | Build the admin SPA (→ `runtime/go/admin/spa` + edge bundle) |
 | `npm run admin:dev` | Vite dev server for the admin SPA (hot reload) |
+| `npm test` | Run the parity tests against both runtimes |
+| `npm run test:go` | Parity tests, Go runtime only (fast) |
+| `npm run test:edge` | Parity tests, edge runtime only (boots wrangler) |
 | `npm run serve` | Build + serve testsite on :3000 (Go runtime) |
 | `npm run serve:open` | Same but skip admin auth |
 | `npm run edge:dev` | Start edge runtime on :8788 (miniflare D1 + R2) |
@@ -132,6 +135,14 @@ npm run tunnel            # map *.local.friendo.world → :8787
 | `npm run tunnel` | Map *.local.friendo.world → :8787 |
 | `npm run dev` | Full dev environment (Go + platform + tunnel) |
 | `npm run clean` | Remove build artifacts |
+
+## Testing
+
+[tests/](tests/) holds a **parity harness**: one shared `scenarios.json` of
+request→assert steps, run against both the Go and edge runtimes, asserting they
+behave identically. `npm test` runs both; `npm run test:go` is a fast
+Cloudflare-free subset. To extend coverage, add a step to `scenarios.json` and it
+runs against both runtimes automatically — see [tests/README.md](tests/README.md).
 
 ## Architecture
 

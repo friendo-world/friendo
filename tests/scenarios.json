@@ -1,0 +1,152 @@
+[
+  {
+    "name": "me is unauthorized before setup",
+    "method": "GET", "path": "/me",
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "setup status reports a first-run site",
+    "method": "GET", "path": "/setup",
+    "expect": { "status": 200, "json": { "needsSetup": true, "hasLegacyAdmin": false } }
+  },
+  {
+    "name": "setup creates the first admin (superadmin)",
+    "method": "POST", "path": "/setup",
+    "body": { "email": "owner@test.com", "name": "Owner", "password": "password12345" },
+    "expect": { "status": 201, "json": { "user.email": "owner@test.com", "user.role": "superadmin" } }
+  },
+  {
+    "name": "me returns the logged-in owner",
+    "method": "GET", "path": "/me",
+    "expect": { "status": 200, "json": { "user.email": "owner@test.com", "user.role": "superadmin" } },
+    "capture": { "ownerId": "user.id" }
+  },
+  {
+    "name": "setup status reports done after setup",
+    "method": "GET", "path": "/setup",
+    "expect": { "status": 200, "json": { "needsSetup": false } }
+  },
+  {
+    "name": "setup is rejected once an admin exists",
+    "method": "POST", "path": "/setup",
+    "body": { "email": "two@test.com", "name": "Two", "password": "password12345" },
+    "expect": { "status": 409 }
+  },
+  {
+    "name": "collections lists the defaults with zero counts",
+    "method": "GET", "path": "/collections",
+    "expect": {
+      "status": 200,
+      "length": { "collections": 3 },
+      "json": { "collections.0.name": "blog", "collections.0.count": 0, "collections.2.name": "posts" }
+    }
+  },
+  {
+    "name": "create a record",
+    "method": "POST", "path": "/collections/blog/records",
+    "body": { "title": "Hello", "slug": "hello", "body": "first post", "status": "published" },
+    "expect": {
+      "status": 201,
+      "json": { "record.title": "Hello", "record.collection": "blog", "record.status": "published" }
+    },
+    "capture": { "recordId": "record.id" }
+  },
+  {
+    "name": "fetch the record by id (round-trips captured id)",
+    "method": "GET", "path": "/records/${recordId}",
+    "expect": { "status": 200, "json": { "record.id": "${recordId}", "record.slug": "hello" } }
+  },
+  {
+    "name": "list records in the collection",
+    "method": "GET", "path": "/collections/blog/records",
+    "expect": { "status": 200, "length": { "records": 1 } }
+  },
+  {
+    "name": "collections count reflects the new record",
+    "method": "GET", "path": "/collections",
+    "expect": { "status": 200, "json": { "collections.0.name": "blog", "collections.0.count": 1 } }
+  },
+  {
+    "name": "update the record",
+    "method": "PUT", "path": "/records/${recordId}",
+    "body": { "title": "Edited", "slug": "hello", "body": "changed", "status": "draft" },
+    "expect": { "status": 200, "json": { "record.title": "Edited", "record.status": "draft" } }
+  },
+  {
+    "name": "delete the record",
+    "method": "DELETE", "path": "/records/${recordId}",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "fetching the deleted record is a 404",
+    "method": "GET", "path": "/records/${recordId}",
+    "expect": { "status": 404 }
+  },
+  {
+    "name": "create an editor user",
+    "method": "POST", "path": "/users",
+    "body": { "email": "ed@test.com", "name": "Ed", "password": "password12345", "role": "editor" },
+    "expect": { "status": 201, "json": { "user.email": "ed@test.com", "user.role": "editor" } },
+    "capture": { "editorId": "user.id" }
+  },
+  {
+    "name": "assigning superadmin is forbidden",
+    "method": "POST", "path": "/users",
+    "body": { "email": "x@test.com", "name": "X", "password": "password12345", "role": "superadmin" },
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "a short password is rejected",
+    "method": "POST", "path": "/users",
+    "body": { "email": "y@test.com", "name": "Y", "password": "short", "role": "member" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "list users (owner + editor)",
+    "method": "GET", "path": "/users",
+    "expect": { "status": 200, "length": { "users": 2 } }
+  },
+  {
+    "name": "update the editor (name + role)",
+    "method": "PUT", "path": "/users/${editorId}",
+    "body": { "name": "Ed Renamed", "role": "member" },
+    "expect": { "status": 200, "json": { "user.name": "Ed Renamed", "user.role": "member" } }
+  },
+  {
+    "name": "settings reflects site name and counts",
+    "method": "GET", "path": "/settings",
+    "expect": { "status": 200, "json": { "site.name": "testsite", "users": 2, "collections": 0 } }
+  },
+  {
+    "name": "delete the editor",
+    "method": "DELETE", "path": "/users/${editorId}",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "deleting your own account is rejected",
+    "method": "DELETE", "path": "/users/${ownerId}",
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "login with the wrong password fails",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "wrongpassword" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "logout ends the session",
+    "method": "POST", "path": "/auth/logout",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "me is unauthorized after logout",
+    "method": "GET", "path": "/me",
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "login with the correct password succeeds",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200, "json": { "user.email": "owner@test.com", "user.role": "superadmin" } }
+  }
+]
