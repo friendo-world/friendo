@@ -111,6 +111,3 @@ with `npm run runtime:bundle && npm run runtime:publish`.
 - **No bulk runtime rollout.** Redeploy is per-site and owner-only; pushing a
   runtime update across *all* sites at once would need an operator role (the
   platform has no admin scope yet) or a script iterating owned sites.
-- **CLI dev ergonomics.** `friendo deploy` has no `--api-url` flag and hardcodes
-  the `*.friendo.world` push domain, so pointing the wizard at a local platform
-  needs a hand-edited `~/.friendo/config`.

@@ -57,6 +57,48 @@ func (c *PlatformClient) CreateSite(name, subdomain string) error {
 	return nil
 }
 
+// Redeploy re-pushes the current runtime bundle to an existing site's user
+// Worker (POST /api/sites/:id/redeploy). Data is untouched.
+func (c *PlatformClient) Redeploy(subdomain string) error {
+	req, err := http.NewRequest("POST", c.baseURL+"/api/sites/"+subdomain+"/redeploy", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("redeploy request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return readError(resp)
+	}
+	return nil
+}
+
+// Destroy deprovisions a site: tears down its Worker, D1, and R2 bucket and
+// removes it from the platform registry (DELETE /api/sites/:id).
+func (c *PlatformClient) Destroy(subdomain string) error {
+	req, err := http.NewRequest("DELETE", c.baseURL+"/api/sites/"+subdomain, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("destroy request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return readError(resp)
+	}
+	return nil
+}
+
 // SiteClient talks to a site's /_/api/* sync endpoints.
 // Auth is via the site admin session cookie.
 type SiteClient struct {

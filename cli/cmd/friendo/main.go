@@ -76,6 +76,7 @@ func main() {
 	exportCmd.Flags().StringVar(&exportMode, "mode", "static", "Export mode: static or bundle")
 
 	// --- deploy ---
+	var deployAPIURL string
 	var deployCmd = &cobra.Command{
 		Use:   "deploy",
 		Short: "Provision and deploy your site to a hosting target",
@@ -87,12 +88,45 @@ Targets:
   2. Cloudflare Workers (your own account)
   3. VPS / self-hosted`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := deploy.RunDeploy(); err != nil {
+			if err := deploy.RunDeploy(deployAPIURL); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
 	}
+	deployCmd.Flags().StringVar(&deployAPIURL, "api-url", "", "Override the platform base URL (default https://friendo.world)")
+
+	// --- redeploy ---
+	var redeployAPIURL string
+	var redeployCmd = &cobra.Command{
+		Use:   "redeploy",
+		Short: "Re-push the current runtime to your deployed site",
+		Long:  "Redeploys the managed-hosting runtime to your site's Worker. Your data is untouched.",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := deploy.RunRedeploy(deploy.RedeployOptions{APIURL: redeployAPIURL}); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+	redeployCmd.Flags().StringVar(&redeployAPIURL, "api-url", "", "Override the platform base URL (default https://friendo.world)")
+
+	// --- destroy ---
+	var destroyAPIURL string
+	var destroyYes bool
+	var destroyCmd = &cobra.Command{
+		Use:   "destroy",
+		Short: "Deprovision your site (deletes its Worker, database, and assets)",
+		Long:  "Permanently tears down the deployed site and all its data on friendo.world. This cannot be undone.",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := deploy.RunDestroy(deploy.DestroyOptions{APIURL: destroyAPIURL, Yes: destroyYes}); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+	destroyCmd.Flags().StringVar(&destroyAPIURL, "api-url", "", "Override the platform base URL (default https://friendo.world)")
+	destroyCmd.Flags().BoolVar(&destroyYes, "yes", false, "Skip the confirmation prompt")
 
 	// --- push ---
 	var pushData bool
@@ -145,7 +179,7 @@ Targets:
 	pullCmd.Flags().BoolVar(&pullUsers, "users", false, "Pull user accounts from the deployed site")
 	pullCmd.Flags().StringVar(&pullTarget, "target", "", "Override deploy target URL")
 
-	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, deployCmd, pushCmd, pullCmd)
+	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

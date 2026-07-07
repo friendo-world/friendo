@@ -17,7 +17,7 @@
     "init": "npm run build && ./bin/friendo init",
     "export": "npm run build && cd testsite && ../bin/friendo export --mode static",
     "deploy:local": "npm run build && cd testsite && ../bin/friendo deploy --api-url https://local.friendo.world",
-    "deploy:dry": "npm run build && cd testsite && ../bin/friendo deploy --dry-run",
+    "deploy:dry": "npm run build && cd testsite && ../bin/friendo push --dry-run",
     "edge:install": "cd runtime/edge && npm install",
     "edge:dev": "cd runtime/edge && npm run dev",
     "edge:schema": "cd runtime/edge && npm run schema",

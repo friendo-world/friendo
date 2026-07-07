@@ -109,7 +109,9 @@ npm run tunnel            # map *.local.friendo.world → :8787
 | `friendo init [name]` | Scaffold a new site |
 | `friendo serve` | Start the local dev server |
 | `friendo export` | Export as static HTML or bundle |
-| `friendo deploy` | Interactive deploy wizard |
+| `friendo deploy` | Interactive deploy wizard (`--api-url` to target a non-default platform) |
+| `friendo redeploy` | Re-push the current managed-hosting runtime to your site's Worker |
+| `friendo destroy` | Deprovision the site (deletes its Worker, D1, and R2; `--yes` to skip confirm) |
 | `friendo push` | Push templates + assets to deployed site |
 | `friendo push --data` | Also push records |
 | `friendo push --users` | Also push user accounts |

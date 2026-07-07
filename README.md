@@ -39,6 +39,8 @@ friendo serve               # start the local dev server
 friendo deploy              # first-time deploy (interactive)
 friendo push                # push updates to your deployed site
 friendo pull --data          # pull remote data into local
+friendo redeploy            # re-push the managed-hosting runtime to your site
+friendo destroy             # tear the deployed site down
 friendo export              # export to static HTML
 ```
 

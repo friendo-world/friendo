@@ -49,8 +49,9 @@ type PullOptions struct {
 	Target string
 }
 
-// RunDeploy is the interactive deploy wizard.
-func RunDeploy() error {
+// RunDeploy is the interactive deploy wizard. apiURL overrides the platform base
+// URL for this run (empty = the configured default, https://friendo.world).
+func RunDeploy(apiURL string) error {
 	siteDir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -79,7 +80,7 @@ func RunDeploy() error {
 
 	switch choice {
 	case "1":
-		return deployFriendoWorld(siteDir, siteCfg, subdomain)
+		return deployFriendoWorld(siteDir, siteCfg, subdomain, apiURL)
 	case "2":
 		fmt.Println()
 		fmt.Println("Cloudflare Workers deploy:")
@@ -101,35 +102,21 @@ func RunDeploy() error {
 	}
 }
 
-func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain string) error {
+func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain, apiURL string) error {
 	fmt.Printf("\nSite name: %s\n", subdomain)
-	fmt.Printf("Creating %s.friendo.world...", subdomain)
 
-	cfg, err := LoadConfig()
+	// Authenticate with the platform (device auth if we have no token yet).
+	platform, base, err := platformClient(apiURL)
 	if err != nil {
 		return err
 	}
 
-	if cfg.Token == "" {
-		fmt.Println()
-		fmt.Println("You need to sign in to deploy. Opening your browser...")
-		token, err := deviceAuth(cfg.BaseURL)
-		if err != nil {
-			return fmt.Errorf("authentication failed: %w", err)
-		}
-		cfg.Token = token
-		if err := cfg.Save(); err != nil {
-			return fmt.Errorf("saving config: %w", err)
-		}
-		fmt.Println("Authenticated successfully.")
-	}
-
 	// Provision site on the platform (creates D1 + R2 + user Worker).
-	platform := NewPlatformClient(cfg.BaseURL, cfg.Token)
+	target := siteURLForSubdomain(base, subdomain)
+	fmt.Printf("Creating %s...", strings.TrimPrefix(target, "https://"))
 	if err := platform.CreateSite(siteCfg.Site.Name, subdomain); err != nil {
 		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "expired") {
-			cfg.Token = ""
-			cfg.Save()
+			clearPlatformToken()
 			return fmt.Errorf("session expired — run `friendo deploy` again to re-authenticate")
 		}
 		return err
@@ -137,7 +124,6 @@ func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain string) e
 	fmt.Println(" done")
 
 	// Save target to friendo.toml.
-	target := fmt.Sprintf("https://%s.friendo.world", subdomain)
 	if err := saveDeployTarget(siteDir, target); err != nil {
 		fmt.Printf("Warning: could not save target to friendo.toml: %v\n", err)
 	}
@@ -500,6 +486,151 @@ func openBrowser(url string) {
 	if cmd != nil {
 		cmd.Start()
 	}
+}
+
+// --- Platform commands (redeploy / destroy) ---
+
+// RedeployOptions controls redeploy behavior.
+type RedeployOptions struct {
+	APIURL string
+}
+
+// DestroyOptions controls destroy behavior.
+type DestroyOptions struct {
+	APIURL string
+	Yes    bool
+}
+
+// RunRedeploy re-pushes the current runtime bundle to the site's user Worker.
+func RunRedeploy(opts RedeployOptions) error {
+	siteDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	siteCfg, err := loadSiteConfig(siteDir)
+	if err != nil {
+		return err
+	}
+	subdomain := subdomainForSite(siteCfg, siteDir)
+
+	platform, _, err := platformClient(opts.APIURL)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Redeploying %s...", subdomain)
+	if err := platform.Redeploy(subdomain); err != nil {
+		fmt.Println()
+		return handlePlatformErr(err, "run the command again to re-authenticate")
+	}
+	fmt.Println(" done")
+	return nil
+}
+
+// RunDestroy deprovisions the site (tears down its Worker, D1, and R2 bucket).
+func RunDestroy(opts DestroyOptions) error {
+	siteDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	siteCfg, err := loadSiteConfig(siteDir)
+	if err != nil {
+		return err
+	}
+	subdomain := subdomainForSite(siteCfg, siteDir)
+
+	if !opts.Yes {
+		fmt.Printf("This permanently deletes %q and all its data (D1 + R2). This cannot be undone.\n", subdomain)
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := readLine(reader, fmt.Sprintf("Type the site name %q to confirm: ", subdomain))
+		if answer != subdomain {
+			return fmt.Errorf("aborted")
+		}
+	}
+
+	platform, _, err := platformClient(opts.APIURL)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Destroying %s...", subdomain)
+	if err := platform.Destroy(subdomain); err != nil {
+		fmt.Println()
+		return handlePlatformErr(err, "run the command again to re-authenticate")
+	}
+	fmt.Println(" done")
+	return nil
+}
+
+// platformClient returns an authenticated platform API client. apiURL overrides
+// the configured base URL for this run (without persisting it); if no token is
+// cached yet it walks the user through device auth and saves the token.
+func platformClient(apiURL string) (*PlatformClient, string, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, "", err
+	}
+	base := cfg.BaseURL
+	if apiURL != "" {
+		base = apiURL
+	}
+
+	if cfg.Token == "" {
+		fmt.Println("You need to sign in. Opening your browser...")
+		token, err := deviceAuth(base)
+		if err != nil {
+			return nil, "", fmt.Errorf("authentication failed: %w", err)
+		}
+		cfg.Token = token
+		if err := cfg.Save(); err != nil {
+			return nil, "", fmt.Errorf("saving config: %w", err)
+		}
+		fmt.Println("Authenticated successfully.")
+	}
+
+	return NewPlatformClient(base, cfg.Token), base, nil
+}
+
+// clearPlatformToken drops the cached platform session token.
+func clearPlatformToken() {
+	if cfg, err := LoadConfig(); err == nil {
+		cfg.Token = ""
+		cfg.Save()
+	}
+}
+
+// handlePlatformErr maps expired-session errors to a clear re-auth message and
+// clears the stale token; other errors pass through.
+func handlePlatformErr(err error, reauthHint string) error {
+	if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "expired") {
+		clearPlatformToken()
+		return fmt.Errorf("session expired — %s", reauthHint)
+	}
+	return err
+}
+
+// subdomainForSite resolves the site's subdomain from its deploy target if set,
+// else from the (sanitized) site name, else the directory name.
+func subdomainForSite(siteCfg *SiteConfig, siteDir string) string {
+	if siteCfg.Deploy.Target != "" {
+		return subdomainFromTarget(siteCfg.Deploy.Target)
+	}
+	s := sanitizeSubdomain(siteCfg.Site.Name)
+	if s == "" {
+		s = filepath.Base(siteDir)
+	}
+	return s
+}
+
+// siteURLForSubdomain derives a site's URL from the platform base URL's host, so
+// a site on https://friendo.world lives at https://<sub>.friendo.world and one
+// on https://local.friendo.world at https://<sub>.local.friendo.world.
+func siteURLForSubdomain(baseURL, subdomain string) string {
+	host := strings.TrimPrefix(strings.TrimPrefix(baseURL, "https://"), "http://")
+	if i := strings.IndexByte(host, '/'); i >= 0 {
+		host = host[:i]
+	}
+	return fmt.Sprintf("https://%s.%s", subdomain, host)
 }
 
 // --- Site config ---
