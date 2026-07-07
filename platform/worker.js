@@ -59,11 +59,20 @@ async function applyD1Schema(env, databaseId) {
   if (!obj) throw new Error("edge-runtime-schema.sql not found in RUNTIME_BUCKET");
   const sql = await obj.text();
 
-  // Split into individual statements (D1 HTTP API requires one at a time)
+  // Split into individual statements (D1 HTTP API requires one at a time).
+  // Strip comment lines line-by-line BEFORE splitting on ";" — mirrors
+  // runtime/edge/migrations.js `splitStatements`. Filtering whole statements by
+  // `startsWith("--")` would wrongly drop the first CREATE TABLE, since
+  // schema.sql opens with comment lines attached to it.
+  // (Constraint: assumes no triggers / BEGIN…END / semicolons inside string
+  // literals — none exist in the current schema.)
   const statements = sql
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n")
     .split(";")
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith("--"));
+    .filter((s) => s.length > 0);
 
   for (const stmt of statements) {
     await cfApi(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${databaseId}/query`, {
@@ -74,13 +83,14 @@ async function applyD1Schema(env, databaseId) {
 
 async function createR2Bucket(env, siteName) {
   const bucketName = `friendo-site-${siteName}`;
-  await cfApi(env, "PUT", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets`, {
+  // R2 create-bucket is POST /r2/buckets (PUT returns "No route matches this url").
+  await cfApi(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets`, {
     name: bucketName,
   });
   return bucketName;
 }
 
-async function deployUserWorker(env, siteName, d1Id, r2Bucket) {
+async function deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket) {
   const obj = await env.RUNTIME_BUCKET.get("edge-runtime.js");
   if (!obj) throw new Error("edge-runtime.js not found in RUNTIME_BUCKET");
   const scriptContent = await obj.text();
@@ -92,7 +102,8 @@ async function deployUserWorker(env, siteName, d1Id, r2Bucket) {
     bindings: [
       { type: "d1", name: "DB", id: d1Id },
       { type: "r2_bucket", name: "ASSETS", bucket_name: r2Bucket },
-      { type: "plain_text", name: "SITE_ID", text: siteName },
+      { type: "plain_text", name: "SITE_ID", text: subdomain },
+      { type: "plain_text", name: "SITE_NAME", text: displayName || subdomain },
     ],
     compatibility_date: "2024-01-01",
     compatibility_flags: ["nodejs_compat"],
@@ -111,7 +122,7 @@ async function deployUserWorker(env, siteName, d1Id, r2Bucket) {
   );
 
   const res = await fetch(
-    `${CF_API}/accounts/${env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${namespace}/scripts/${siteName}`,
+    `${CF_API}/accounts/${env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${namespace}/scripts/${subdomain}`,
     {
       method: "PUT",
       headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
@@ -125,18 +136,18 @@ async function deployUserWorker(env, siteName, d1Id, r2Bucket) {
   }
 }
 
-async function provisionSite(env, siteName) {
+async function provisionSite(env, subdomain, displayName) {
   // 1. Create D1 database
-  const d1 = await createD1Database(env, siteName);
+  const d1 = await createD1Database(env, subdomain);
 
   // 2. Apply edge runtime schema
   await applyD1Schema(env, d1.uuid);
 
   // 3. Create R2 bucket for site assets
-  const r2Bucket = await createR2Bucket(env, siteName);
+  const r2Bucket = await createR2Bucket(env, subdomain);
 
   // 4. Deploy edge runtime as user Worker with per-site bindings
-  await deployUserWorker(env, siteName, d1.uuid, r2Bucket);
+  await deployUserWorker(env, subdomain, displayName, d1.uuid, r2Bucket);
 
   return { d1Id: d1.uuid, r2Bucket };
 }
@@ -262,11 +273,31 @@ async function requirePlatformAuth(c, next) {
   return next();
 }
 
+// A valid subdomain is used verbatim as the Worker script, D1, and R2 names
+// (Cloudflare's rules: lowercase alphanumeric + hyphens, no leading/trailing
+// hyphen, ≤63 chars) and is interpolated into the CF API URL. Reject anything
+// else up front with a clear 400 instead of a generic "Provisioning failed" 500.
+const SUBDOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+const RESERVED_SUBDOMAINS = new Set(["www", "api", "dashboard", "login", "local"]);
+
+function validateSubdomain(subdomain) {
+  if (!SUBDOMAIN_RE.test(subdomain)) {
+    return "Subdomain must be lowercase letters, numbers, and hyphens (no leading/trailing hyphen), up to 63 characters";
+  }
+  if (RESERVED_SUBDOMAINS.has(subdomain)) {
+    return `Subdomain "${subdomain}" is reserved`;
+  }
+  return null;
+}
+
 // POST /api/sites — provision a new site
 app.post("/api/sites", requirePlatformAuth, async (c) => {
   const userId = c.get("userId");
   const { name, subdomain } = await c.req.json();
   if (!subdomain || !name) return c.json({ error: "name and subdomain required" }, 400);
+
+  const subdomainError = validateSubdomain(subdomain);
+  if (subdomainError) return c.json({ error: subdomainError }, 400);
 
   const existing = await c.env.DB.prepare(
     "SELECT id, owner_id FROM sites WHERE subdomain = ?"
@@ -291,7 +322,7 @@ app.post("/api/sites", requirePlatformAuth, async (c) => {
   // Provision per-site Cloudflare resources (D1, R2, user Worker)
   let d1Id, r2Bucket;
   try {
-    const result = await provisionSite(c.env, subdomain);
+    const result = await provisionSite(c.env, subdomain, name);
     d1Id = result.d1Id;
     r2Bucket = result.r2Bucket;
   } catch (err) {

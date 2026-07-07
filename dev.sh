@@ -17,16 +17,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Build CSS + binary (this must succeed)
+# Build admin SPA + binary (this must succeed)
 echo "Building friendo..."
-npm run css || { echo "CSS build failed"; exit 1; }
+npm run admin || { echo "Admin build failed"; exit 1; }
 go build -o bin/friendo ./cli/cmd/friendo/ || { echo "Go build failed"; exit 1; }
 
-# Sync testsite to local D1/R2 (non-fatal if wrangler isn't set up)
-echo "Syncing testsite to edge..."
-if [ -f platform/sync.sh ]; then
-  (cd platform && bash sync.sh ../testsite 2>&1 | tail -1) || echo "  Skipped (sync failed)"
-fi
+# Note: to seed a site on the edge, deploy it through the site API:
+#   cd testsite && ../bin/friendo deploy   (or `friendo push`)
 
 ROOT="$(pwd)"
 

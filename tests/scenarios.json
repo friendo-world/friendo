@@ -148,5 +148,34 @@
     "method": "POST", "path": "/auth/login",
     "body": { "email": "owner@test.com", "password": "password12345" },
     "expect": { "status": 200, "json": { "user.email": "owner@test.com", "user.role": "superadmin" } }
+  },
+  {
+    "name": "request an OTP code for a new member",
+    "method": "POST", "path": "/auth/request-code",
+    "body": { "email": "member@test.com" },
+    "expect": { "status": 200, "json": { "sent": true } },
+    "capture": { "otp": "code" }
+  },
+  {
+    "name": "verifying a wrong code fails",
+    "method": "POST", "path": "/auth/verify-code",
+    "body": { "email": "member@test.com", "code": "wrong-code" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "verifying the OTP code logs in as a member",
+    "method": "POST", "path": "/auth/verify-code",
+    "body": { "email": "member@test.com", "code": "${otp}" },
+    "expect": { "status": 200, "json": { "user.email": "member@test.com", "user.role": "member" } }
+  },
+  {
+    "name": "me returns the verified member",
+    "method": "GET", "path": "/me",
+    "expect": { "status": 200, "json": { "user.email": "member@test.com", "user.role": "member" } }
+  },
+  {
+    "name": "a member cannot reach admin endpoints",
+    "method": "GET", "path": "/users",
+    "expect": { "status": 403 }
   }
 ]

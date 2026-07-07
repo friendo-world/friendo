@@ -1,10 +1,12 @@
 package api
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"log"
 	"net/http"
 	"os"
@@ -31,6 +33,8 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/setup", handleSetupStatus(db))
 		r.Post("/setup", handleSetupCreate(db))
 		r.Post("/migrate", handleMigrate(db))
+		r.Post("/auth/request-code", handleRequestCode(db))
+		r.Post("/auth/verify-code", handleVerifyCode(db))
 
 		// Authenticated endpoints (admin+).
 		r.Group(func(r chi.Router) {
@@ -166,7 +170,7 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		collection := chi.URLParam(r, "collection")
 		authorID := ""
 		if u := authFunc(r); u != nil {
-			authorID = u.ID
+			authorID = db.DefaultAuthorID(u.ID)
 		}
 		id, err := db.CreateRecord(collection, in.Slug, in.Title, in.Body, in.status(), authorID)
 		if err != nil {
@@ -662,6 +666,84 @@ func handleMigrate(db *data.DB) http.HandlerFunc {
 			return
 		}
 		jsonResponse(w, map[string]any{"ok": true})
+	}
+}
+
+// --- OTP (passwordless member login) ---
+
+// emailConfigured reports whether an email provider is wired up. Until one is
+// (Phase 3e), request-code returns the code in its response for dev/test.
+func emailConfigured() bool { return false }
+
+func generateOTP() string {
+	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
+	return fmt.Sprintf("%06d", n.Int64())
+}
+
+// handleRequestCode finds-or-creates a member account for the email and issues a
+// one-time login code.
+func handleRequestCode(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		email := strings.TrimSpace(in.Email)
+		if email == "" {
+			jsonError(w, "email is required", http.StatusBadRequest)
+			return
+		}
+
+		user, err := db.GetUserByEmail(email)
+		if err != nil {
+			user, err = db.CreateMember(email, "")
+			if err != nil {
+				jsonError(w, "could not create account: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		code := generateOTP()
+		if err := db.CreateOTP(user.ID, code, 10*time.Minute); err != nil {
+			jsonError(w, "could not issue code", http.StatusInternalServerError)
+			return
+		}
+		// TODO (Phase 3e): send the code by email.
+
+		resp := map[string]any{"sent": true}
+		if !emailConfigured() {
+			resp["code"] = code // dev/test only — no email provider configured
+		}
+		jsonResponse(w, resp)
+	}
+}
+
+// handleVerifyCode validates a one-time code and starts a session.
+func handleVerifyCode(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Email string `json:"email"`
+			Code  string `json:"code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		user, err := db.GetUserByEmail(strings.TrimSpace(in.Email))
+		if err != nil || !db.VerifyOTP(user.ID, in.Code) {
+			jsonError(w, "invalid or expired code", http.StatusUnauthorized)
+			return
+		}
+		token, err := db.CreateSession(user.ID, r.RemoteAddr, r.UserAgent())
+		if err != nil {
+			jsonError(w, "could not create session", http.StatusInternalServerError)
+			return
+		}
+		setSessionCookie(w, token)
+		jsonResponse(w, map[string]any{"user": userJSON(user)})
 	}
 }
 

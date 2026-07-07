@@ -65,7 +65,7 @@ can start cold.
 
 | Area | Endpoints | Auth |
 |---|---|---|
-| Bootstrap | `GET /me`, `POST /auth/login`, `POST /auth/logout`, `GET/POST /setup`, `POST /migrate` | public |
+| Bootstrap | `GET /me`, `POST /auth/login`, `POST /auth/logout`, `GET/POST /setup`, `POST /migrate`, `POST /auth/request-code`, `POST /auth/verify-code` | public |
 | Content | `GET /collections`, CRUD under `/collections/:c/records` and `/records/:id` | admin+ |
 | Users | `GET/POST /users`, `PUT/DELETE /users/:id` (role rules enforced) | admin+ |
 | Settings | `GET /settings` | admin+ |
@@ -124,20 +124,31 @@ bound to them, and records the site in the platform registry. The CLI then pushe
 
 ## Schema migrations
 
-The Go runtime applies its embedded schema idempotently on open. The edge runtime
-applies pending migrations once per isolate on the first request
-(`runtime/edge/migrations.js`, guarded by `ensureMigrated` in `index.js`), tracked
-in a `schema_migrations` table. The baseline migration is the schema itself, so a
-freshly provisioned D1 self-initializes on first request. Add a migration by
-dropping a `.sql` file in `runtime/edge/migrations/`, importing it, and appending
-an entry with the next id.
+Both runtimes share a migration mechanism: an ordered list whose baseline (id 1)
+is the schema itself, tracked in a `schema_migrations` table. The Go runtime
+applies pending migrations in `data.Open`; the edge runtime applies them once per
+isolate on the first request (guarded by `ensureMigrated`). A freshly provisioned
+database self-initializes from the baseline. Add a migration by dropping the same
+`NNNN_*.sql` file in **both** runtime trees (`runtime/go/data/migrations/` and
+`runtime/edge/migrations/`) — the schema stays identical across SQLite and D1.
 
 ## Auth model
 
 | Scope | What | Where |
 |---|---|---|
-| **Site admin** | Per-site users with roles (superadmin > admin > editor > member), bcrypt passwords, DB-stored sessions. Identical model in both runtimes. | site D1 / SQLite |
+| **Site** | Per-site **accounts** (`users`) with roles (superadmin > admin > editor > member), bcrypt passwords, DB-stored sessions. Identical model in both runtimes. | site D1 / SQLite |
 | **Platform** | friendo.world account auth (Better Auth) for managing your account and provisioning sites — independent of site auth. | platform D1 |
+
+**Accounts vs. profiles.** A `users` row is an *account* (the auth identity).
+Display **profiles** live in `authors`, linked by `authors.user_id` — one account
+can have several. All content (`posts`, `comments`, …) references a profile via
+`author_id` → `authors.id`; every account gets a default profile on creation.
+
+**Members** are visitors who verify their email via a one-time code
+(`/auth/request-code` → `/auth/verify-code`, backed by `otp_codes`) to get a
+passwordless `member` account. They share the same session/cookie and role gate,
+so they authenticate but can't reach admin endpoints. See
+[docs/phase-3-community.md](docs/phase-3-community.md).
 
 Bcrypt hashes are portable, so `friendo push --users` carries accounts to a
 deployed site unchanged — the same password works everywhere.

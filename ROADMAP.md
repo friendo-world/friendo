@@ -8,7 +8,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Phase 1** | CLI + Go runtime + friendo.world foundation | ✅ Complete |
 | **Phase 1.5** | Auth, shared admin SPA, codebase refactor, Workers for Platforms, working deploy | ✅ Complete |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
-| **Phase 3** | Community features, template marketplace | Planned |
+| **Phase 3** | Community features, template marketplace | 🔧 In progress |
 
 ---
 
@@ -59,34 +59,33 @@ A Tauri-based WYSIWYG editor for authoring sites without hand-editing templates.
 An independent track — it doesn't depend on the community work below. (No `editor/`
 code exists in the repo yet.)
 
-## Phase 3 — Community features (planned)
+## Phase 3 — Community features (in progress)
 
-This is where the rest of the data model comes alive. The schema already ships
-`comments`, `reactions`, `channels`, `messages`, `polls`/`poll_votes`, and
-`authors`, but today they're **read-only**: templates can display them, and the
-admin/sync can write them, but a site **visitor** has no way to comment, react, or
-vote. The original "M4" SDK idea (`data-friendo-*` progressive-enhancement
-attributes + a `friendo.js` client) is really the opening of this phase.
+Bringing the rest of the data model to life: comments, reactions, and polls
+written by site **visitors**. Visitors become passwordless `member` accounts by
+verifying their email (OTP). Full design + slices in
+[docs/phase-3-community.md](docs/phase-3-community.md).
 
-Building it means crossing a trust boundary the project hasn't yet:
-
-- A **public (visitor-facing) API**, distinct from the admin-gated REST API
-- **Visitor identity** — the `authors` + `otp_codes` tables anticipate this
-  (email-verified members vs. anonymous), but it's unbuilt
-- **Moderation** — a new admin SPA surface (a moderation queue)
-- **Abuse handling** — spam, rate limiting
-
-It reuses the shared-artifact pattern already established by the admin SPA
-(`friendo.js` served by both runtimes). Worth a focused design pass on the
-visitor-identity + moderation model before implementation.
+- **3a — Identity foundation** ✅ — a shared Go/edge migration mechanism; the
+  accounts/profiles split (`users` = accounts, `authors` = profiles linked by
+  `user_id`, one account → many profiles); a default profile per account;
+  `author_id` → `authors.id`; OTP `request-code` / `verify-code`. Edge schema
+  brought to full parity with Go. Verified by the parity harness on both runtimes.
+- **3b** — comments + moderation queue.
+- **3c** — reactions + polls.
+- **3d** — `friendo.js` SDK (`data-friendo-*` progressive enhancement).
+- **3e** — hardening: rate limiting, real email provider, moderation toggle,
+  persona switcher.
 
 ## Testing
 
 A **parity test harness** in [tests/](tests/) runs one shared `scenarios.json`
 against **both** runtimes and asserts identical behavior — encoding the project's
 "one UI, two runtimes, identical behavior" guarantee. It covers the core REST API:
-auth, first-run setup, records CRUD, users + role enforcement, settings, and the
-session lifecycle. Run with `npm test` (or `npm run test:go` / `test:edge`).
+auth, first-run setup, records CRUD, users + role enforcement, settings, the
+session lifecycle, and OTP member login. Run with `npm test` (or `npm run test:go`
+/ `test:edge`). It already earned its keep — it caught a 401-vs-403 divergence
+between the runtimes during Phase 3a.
 
 Still uncovered (worth growing as those areas land): the template/rendering layer,
 the sync push/pull endpoints, and the CLI deploy flow.

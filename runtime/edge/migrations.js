@@ -7,9 +7,11 @@
 // with the next id. Keep statements idempotent where practical.
 
 import baselineSchema from "./schema.sql";
+import authorProfiles from "./migrations/0002_author_profiles.sql";
 
 export const MIGRATIONS = [
   { id: 1, name: "baseline", sql: baselineSchema },
+  { id: 2, name: "author_profiles", sql: authorProfiles },
 ];
 
 // splitStatements drops full-line comments and splits SQL into statements.

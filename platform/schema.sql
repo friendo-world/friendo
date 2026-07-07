@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS sites (
     name        TEXT NOT NULL DEFAULT '',
     subdomain   TEXT NOT NULL DEFAULT '',
     owner_id    TEXT NOT NULL DEFAULT '',
+    d1_id       TEXT NOT NULL DEFAULT '',   -- per-site D1 database UUID (set at provision time)
+    r2_bucket   TEXT NOT NULL DEFAULT '',   -- per-site R2 bucket name (set at provision time)
     created     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );

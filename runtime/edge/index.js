@@ -298,16 +298,93 @@ app.post("/_/api/setup", async (c) => {
   return c.json({ user: userJSON(user) }, 201);
 });
 
+// --- OTP (passwordless member login) ---
+
+// Until an email provider is wired up (Phase 3e), request-code returns the code
+// in its response for dev/test.
+function emailConfigured() {
+  return false;
+}
+
+app.post("/_/api/auth/request-code", async (c) => {
+  const siteId = getSiteId(c);
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const email = (body.email || "").trim();
+  if (!email) return c.json({ error: "email is required" }, 400);
+
+  let user = await c.env.DB.prepare("SELECT id FROM users WHERE site_id = ? AND email = ?")
+    .bind(siteId, email).first();
+  if (!user) user = await createMember(c.env, siteId, email, "");
+
+  const code = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+  const hash = await bcrypt.hash(code, 10);
+  const now = new Date();
+  await c.env.DB.prepare(
+    `INSERT INTO otp_codes (id, site_id, user_id, code_hash, channel, expires_at, used, created)
+     VALUES (?, ?, ?, ?, 'email', ?, 0, ?)`
+  ).bind(
+    crypto.randomUUID().replace(/-/g, "").slice(0, 24), siteId, user.id, hash,
+    new Date(now.getTime() + 10 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    nowISO()
+  ).run();
+  // TODO (Phase 3e): send the code by email.
+
+  const resp = { sent: true };
+  if (!emailConfigured()) resp.code = code; // dev/test only
+  return c.json(resp);
+});
+
+app.post("/_/api/auth/verify-code", async (c) => {
+  const siteId = getSiteId(c);
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const email = (body.email || "").trim();
+  const user = await c.env.DB.prepare("SELECT id, email, name, role FROM users WHERE site_id = ? AND email = ?")
+    .bind(siteId, email).first();
+  if (!user) return c.json({ error: "invalid or expired code" }, 401);
+
+  const otp = await c.env.DB.prepare(
+    `SELECT id, code_hash, expires_at FROM otp_codes
+     WHERE site_id = ? AND user_id = ? AND used = 0 ORDER BY created DESC LIMIT 1`
+  ).bind(siteId, user.id).first();
+  if (!otp || new Date(otp.expires_at) < new Date() || !(await bcrypt.compare(body.code || "", otp.code_hash))) {
+    return c.json({ error: "invalid or expired code" }, 401);
+  }
+  await c.env.DB.prepare("UPDATE otp_codes SET used = 1 WHERE id = ?").bind(otp.id).run();
+
+  const token = await createSiteSession(
+    c.env, user.id,
+    c.req.header("CF-Connecting-IP") || "", c.req.header("User-Agent") || ""
+  );
+  c.header("Set-Cookie", setSiteSessionCookie(token));
+  return c.json({ user: userJSON(user) });
+});
+
 // --- Content (collections + records) ---
 
 // Always present so a fresh site has somewhere to create the first record.
 // Must match defaultCollections in the Go runtime.
 const DEFAULT_COLLECTIONS = ["blog", "pages", "posts"];
 
+// requireAdmin distinguishes unauthenticated (401) from authenticated-but-
+// insufficient-role (403), matching the Go runtime. Returns { auth } on success
+// or { deny } with the error response to return.
 async function requireAdmin(c) {
-  const auth = await requireSiteAdmin(c);
-  if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return null;
-  return auth;
+  const user = await getSiteSessionUser(c);
+  if (!user) return { deny: c.json({ error: "unauthorized" }, 401) };
+  if (!["superadmin", "admin"].includes(user.role)) {
+    return { deny: c.json({ error: "forbidden" }, 403) };
+  }
+  return { auth: { user, siteId: getSiteId(c) } };
 }
 
 function nowISO() {
@@ -315,8 +392,8 @@ function nowISO() {
 }
 
 app.get("/_/api/collections", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   const { results } = await c.env.DB.prepare(
     "SELECT collection, COUNT(*) AS count FROM posts WHERE site_id = ? GROUP BY collection ORDER BY collection"
@@ -338,8 +415,8 @@ app.get("/_/api/collections", async (c) => {
 });
 
 app.get("/_/api/collections/:collection/records", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   const { results } = await c.env.DB.prepare(
     `SELECT id, slug, title, body, author_id, status, published_at, created, updated
@@ -349,8 +426,8 @@ app.get("/_/api/collections/:collection/records", async (c) => {
 });
 
 app.post("/_/api/collections/:collection/records", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   let body;
   try {
@@ -360,13 +437,14 @@ app.post("/_/api/collections/:collection/records", async (c) => {
   }
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   const now = nowISO();
+  const authorId = await defaultAuthorId(c.env, auth.siteId, auth.user.id);
   await c.env.DB.prepare(
     `INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, created, updated)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     id, auth.siteId, c.req.param("collection"),
     body.slug || "", body.title || "", body.body || "", body.status || "draft",
-    auth.user.id, now, now
+    authorId, now, now
   ).run();
 
   const record = await c.env.DB.prepare(
@@ -377,8 +455,8 @@ app.post("/_/api/collections/:collection/records", async (c) => {
 });
 
 app.get("/_/api/records/:id", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   const record = await c.env.DB.prepare(
     `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
@@ -389,8 +467,8 @@ app.get("/_/api/records/:id", async (c) => {
 });
 
 app.put("/_/api/records/:id", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   let body;
   try {
@@ -416,8 +494,8 @@ app.put("/_/api/records/:id", async (c) => {
 });
 
 app.delete("/_/api/records/:id", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   const res = await c.env.DB.prepare("DELETE FROM posts WHERE id = ? AND site_id = ?")
     .bind(c.req.param("id"), auth.siteId).run();
@@ -448,12 +526,45 @@ async function createUser(env, siteId, email, name, password, role) {
     `INSERT INTO users (id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated)
      VALUES (?, ?, ?, '', ?, '', ?, ?, '["password"]', ?, ?)`
   ).bind(id, siteId, email, name, hash, role, now, now).run();
+  await createDefaultAuthor(env, siteId, id, name, email);
   return { id, email, name, role, created: now };
 }
 
+// createDefaultAuthor gives an account its default display profile.
+async function createDefaultAuthor(env, siteId, userId, name, email) {
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  await env.DB.prepare(
+    `INSERT INTO authors (id, site_id, user_id, name, email, role, created, updated)
+     VALUES (?, ?, ?, ?, ?, 'member', ?, ?)`
+  ).bind(id, siteId, userId, name, email, now, now).run();
+  return id;
+}
+
+// defaultAuthorId returns the account's default (earliest) profile id, or "".
+async function defaultAuthorId(env, siteId, userId) {
+  const row = await env.DB.prepare(
+    "SELECT id FROM authors WHERE site_id = ? AND user_id = ? ORDER BY created LIMIT 1"
+  ).bind(siteId, userId).first();
+  return row?.id || "";
+}
+
+// createMember creates a passwordless OTP account (role member) + default profile.
+async function createMember(env, siteId, email, name) {
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  const display = name || email.split("@")[0];
+  await env.DB.prepare(
+    `INSERT INTO users (id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated)
+     VALUES (?, ?, ?, '', ?, '', '', 'member', '["otp"]', ?, ?)`
+  ).bind(id, siteId, email, display, now, now).run();
+  await createDefaultAuthor(env, siteId, id, display, email);
+  return { id, email, name: display, role: "member", created: now };
+}
+
 app.get("/_/api/users", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   const { results } = await c.env.DB.prepare(
     "SELECT id, email, name, role, created FROM users WHERE site_id = ? ORDER BY created"
@@ -462,8 +573,8 @@ app.get("/_/api/users", async (c) => {
 });
 
 app.post("/_/api/users", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   let body;
   try {
@@ -491,8 +602,8 @@ app.post("/_/api/users", async (c) => {
 });
 
 app.put("/_/api/users/:id", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   const id = c.req.param("id");
   const target = await c.env.DB.prepare("SELECT id, name, role FROM users WHERE id = ? AND site_id = ?")
@@ -531,8 +642,8 @@ app.put("/_/api/users/:id", async (c) => {
 });
 
 app.delete("/_/api/users/:id", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   const id = c.req.param("id");
   if (id === auth.user.id) return c.json({ error: "you cannot delete your own account" }, 400);
@@ -551,8 +662,8 @@ app.delete("/_/api/users/:id", async (c) => {
 });
 
 app.get("/_/api/settings", async (c) => {
-  const auth = await requireAdmin(c);
-  if (!auth) return c.json({ error: "unauthorized" }, 401);
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
 
   const cols = await c.env.DB.prepare(
     "SELECT COUNT(DISTINCT collection) AS n FROM posts WHERE site_id = ?"
