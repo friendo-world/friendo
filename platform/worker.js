@@ -111,6 +111,32 @@ async function createR2Bucket(env, siteName) {
   return bucketName;
 }
 
+// createDnsRecord points {subdomain}.{zone} at Cloudflare with a proxied record so
+// the `*.{zone}/*` Worker route intercepts and dispatches it. The content is
+// irrelevant for proxied traffic (Cloudflare terminates at the edge), so we use
+// the IPv6 discard prefix. Idempotent, and a no-op when CF_ZONE_ID is unset (dev,
+// where a tunnel handles `*.local.friendo.world` instead).
+async function createDnsRecord(env, subdomain) {
+  if (!env.CF_ZONE_ID) return;
+  const name = `${subdomain}.${env.CF_ZONE_NAME}`;
+
+  const existing = await cfApi(
+    env,
+    "GET",
+    `/zones/${env.CF_ZONE_ID}/dns_records?name=${name}`
+  );
+  if (existing && existing.length > 0) return;
+
+  await cfApi(env, "POST", `/zones/${env.CF_ZONE_ID}/dns_records`, {
+    type: "AAAA",
+    name,
+    content: "100::",
+    proxied: true,
+    ttl: 1,
+    comment: "friendo site (managed)",
+  });
+}
+
 async function deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket) {
   const obj = await env.RUNTIME_BUCKET.get("edge-runtime.js");
   if (!obj) throw new Error("edge-runtime.js not found in RUNTIME_BUCKET");
@@ -182,10 +208,21 @@ async function emptyAndDeleteR2Bucket(env, bucketName) {
   await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucketName}`);
 }
 
-// Tear down every per-site Cloudflare resource. Order: Worker first (stop
+// Delete the site's proxied DNS record(s). No-op when CF_ZONE_ID is unset.
+async function deleteDnsRecord(env, subdomain) {
+  if (!env.CF_ZONE_ID) return;
+  const name = `${subdomain}.${env.CF_ZONE_NAME}`;
+  const res = await cfApiSafe(env, "GET", `/zones/${env.CF_ZONE_ID}/dns_records?name=${name}`);
+  for (const r of res?.result || []) {
+    await cfApiSafe(env, "DELETE", `/zones/${env.CF_ZONE_ID}/dns_records/${r.id}`);
+  }
+}
+
+// Tear down every per-site Cloudflare resource. Order: DNS + Worker first (stop
 // serving), then the data stores. Safe to call with null ids (skips those).
 async function teardownSite(env, subdomain, d1Id, r2Bucket) {
   const namespace = env.DISPATCH_NAMESPACE || "production";
+  await deleteDnsRecord(env, subdomain);
   await cfApiSafe(
     env,
     "DELETE",
@@ -213,6 +250,10 @@ async function provisionSite(env, subdomain, displayName) {
 
     // 4. Deploy edge runtime as user Worker with per-site bindings
     await deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket);
+
+    // 5. Point the subdomain at Cloudflare so the *.{zone}/* route dispatches it
+    //    (no-op in dev, where a tunnel handles routing).
+    await createDnsRecord(env, subdomain);
 
     return { d1Id, r2Bucket };
   } catch (err) {

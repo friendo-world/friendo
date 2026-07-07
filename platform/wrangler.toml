@@ -27,20 +27,22 @@ DISPATCH_NAMESPACE = "dev"
 
 # --- Production ---
 # Activate with: wrangler deploy --env production
-# Before first use:
-#   wrangler d1 create friendo-world
-# Then paste the real database_id below.
+#
+# The apex is a Workers Custom Domain — deploying auto-provisions its DNS record
+# and TLS cert. The `*.friendo.world/*` route dispatches tenant subdomains, but on
+# the Free plan each site also needs its own proxied DNS record created at
+# provision time (proxied wildcard DNS is Enterprise-only).
 
 [env.production]
 routes = [
-  { pattern = "friendo.world/*", zone_name = "friendo.world" },
+  { pattern = "friendo.world", custom_domain = true },
   { pattern = "*.friendo.world/*", zone_name = "friendo.world" }
 ]
 
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "friendo-world"
-database_id = "REPLACE_WITH_REAL_D1_ID"
+database_id = "570c7ac6-fb4c-4a61-8301-6efd43cd27c9"
 
 [[env.production.dispatch_namespaces]]
 binding = "DISPATCHER"
@@ -52,4 +54,9 @@ bucket_name = "friendo-runtime"
 
 [env.production.vars]
 DISPATCH_NAMESPACE = "production"
-# CF_ACCOUNT_ID and CF_API_TOKEN should be set via `wrangler secret put --env production`
+CF_ACCOUNT_ID = "e6b33d4e3d3fedb38311ab7539341d77"
+# Per-site DNS: the provisioner creates a proxied {sub}.friendo.world record so the
+# *.friendo.world/* route dispatches it. Unset in dev (tunnel handles routing).
+CF_ZONE_ID = "647da8f22be9e8b804cdb5ad5425971b"
+CF_ZONE_NAME = "friendo.world"
+# CF_API_TOKEN (needs Zone:DNS:Edit) and AUTH_SECRET are set via `wrangler secret put --env production`

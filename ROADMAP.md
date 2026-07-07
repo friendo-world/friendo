@@ -103,11 +103,21 @@ bundle to an existing site's Worker, so runtime fixes reach already-provisioned
 sites. The runtime artifacts the provisioner deploys are built + published to R2
 with `npm run runtime:bundle && npm run runtime:publish`.
 
+## Production
+
+The platform is **live at [friendo.world](https://friendo.world)** with full
+multi-tenancy — the dispatch Worker runs in the `production` dispatch namespace
+with its own prod D1 (`friendo-world`), the apex is a Workers Custom Domain (auto
+DNS + TLS), and the `*.friendo.world/*` route dispatches tenant sites. Because the
+zone is on the Free plan (no proxied wildcard DNS), the provisioner creates a
+**proxied `{sub}.friendo.world` DNS record per site** at provision time and removes
+it at teardown; Universal SSL covers `*.friendo.world` so HTTPS is automatic. The
+whole lifecycle — provision → live tenant serving over HTTPS → destroy (all
+resources incl. DNS cleaned up) — is verified live. Requires a `CF_API_TOKEN` with
+Zone:DNS:Edit (set as the prod secret).
+
 ## Known gaps / tech debt
 
-- **No production platform deploy yet.** `platform/wrangler.toml` still has a
-  placeholder `database_id`, and custom domains (`friendo.toml deploy.domain` →
-  CF custom hostnames) aren't wired up — only `*.friendo.world` subdomains route.
 - **No bulk runtime rollout.** Redeploy is per-site and owner-only; pushing a
   runtime update across *all* sites at once would need an operator role (the
   platform has no admin scope yet) or a script iterating owned sites.
