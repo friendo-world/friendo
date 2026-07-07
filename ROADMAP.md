@@ -90,8 +90,27 @@ between the runtimes during Phase 3a.
 Still uncovered (worth growing as those areas land): the template/rendering layer,
 the sync push/pull endpoints, and the CLI deploy flow.
 
+## friendo.world provisioning — validated
+
+The platform Worker's Cloudflare-API provisioning (D1 + R2 + user Worker
+creation) was **validated end-to-end against live Cloudflare** on the `dev`
+dispatch namespace: `POST /api/sites` provisions the resources, and a request to
+`{sub}.local.friendo.world` dispatches through to the per-site user Worker
+serving from its own D1. `DELETE /api/sites/:id` tears all of it back down, and
+partial-provision failures roll back their own resources. Re-running
+`friendo deploy` (or `POST /api/sites/:id/redeploy`) re-pushes the current runtime
+bundle to an existing site's Worker, so runtime fixes reach already-provisioned
+sites. The runtime artifacts the provisioner deploys are built + published to R2
+with `npm run runtime:bundle && npm run runtime:publish`.
+
 ## Known gaps / tech debt
 
-- **friendo.world provisioning is unverified.** The platform Worker's Cloudflare-API
-  provisioning (D1 + R2 + user Worker creation) needs a real Cloudflare account and
-  `CF_API_TOKEN` to exercise end-to-end; it's never been run against live Cloudflare.
+- **No production platform deploy yet.** `platform/wrangler.toml` still has a
+  placeholder `database_id`, and custom domains (`friendo.toml deploy.domain` →
+  CF custom hostnames) aren't wired up — only `*.friendo.world` subdomains route.
+- **No bulk runtime rollout.** Redeploy is per-site and owner-only; pushing a
+  runtime update across *all* sites at once would need an operator role (the
+  platform has no admin scope yet) or a script iterating owned sites.
+- **CLI dev ergonomics.** `friendo deploy` has no `--api-url` flag and hardcodes
+  the `*.friendo.world` push domain, so pointing the wizard at a local platform
+  needs a hand-edited `~/.friendo/config`.

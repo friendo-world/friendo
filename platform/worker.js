@@ -48,6 +48,27 @@ async function cfApi(env, method, path, body) {
   return data.result;
 }
 
+// Best-effort variant for teardown: never throws, logs failures, returns the
+// parsed body. Used when tearing down resources during rollback/deprovision,
+// where a missing/already-deleted resource must not abort the rest of the cleanup.
+async function cfApiSafe(env, method, path) {
+  try {
+    const res = await fetch(`${CF_API}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
+    });
+    const data = await res.json().catch(() => ({ success: false }));
+    if (!data.success) {
+      const msg = data.errors?.map((e) => e.message).join(", ") || `HTTP ${res.status}`;
+      console.error(`[teardown] ${method} ${path}: ${msg}`);
+    }
+    return data;
+  } catch (err) {
+    console.error(`[teardown] ${method} ${path} threw: ${err.message}`);
+    return { success: false };
+  }
+}
+
 async function createD1Database(env, siteName) {
   return await cfApi(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/d1/database`, {
     name: `friendo-site-${siteName}`,
@@ -136,20 +157,70 @@ async function deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket) {
   }
 }
 
+// --- Teardown (best-effort) ---
+
+// Empty then delete an R2 bucket. The bucket must be empty before it can be
+// deleted, so list + delete objects in pages until none remain.
+async function emptyAndDeleteR2Bucket(env, bucketName) {
+  if (!bucketName) return;
+  for (let guard = 0; guard < 10000; guard++) {
+    const res = await cfApiSafe(
+      env,
+      "GET",
+      `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucketName}/objects?per_page=1000`
+    );
+    const objects = res?.result || [];
+    if (objects.length === 0) break;
+    for (const obj of objects) {
+      await cfApiSafe(
+        env,
+        "DELETE",
+        `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucketName}/objects/${obj.key}`
+      );
+    }
+  }
+  await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucketName}`);
+}
+
+// Tear down every per-site Cloudflare resource. Order: Worker first (stop
+// serving), then the data stores. Safe to call with null ids (skips those).
+async function teardownSite(env, subdomain, d1Id, r2Bucket) {
+  const namespace = env.DISPATCH_NAMESPACE || "production";
+  await cfApiSafe(
+    env,
+    "DELETE",
+    `/accounts/${env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${namespace}/scripts/${subdomain}`
+  );
+  if (d1Id) {
+    await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${d1Id}`);
+  }
+  await emptyAndDeleteR2Bucket(env, r2Bucket);
+}
+
 async function provisionSite(env, subdomain, displayName) {
-  // 1. Create D1 database
-  const d1 = await createD1Database(env, subdomain);
+  let d1Id = null;
+  let r2Bucket = null;
+  try {
+    // 1. Create D1 database
+    const d1 = await createD1Database(env, subdomain);
+    d1Id = d1.uuid;
 
-  // 2. Apply edge runtime schema
-  await applyD1Schema(env, d1.uuid);
+    // 2. Apply edge runtime schema
+    await applyD1Schema(env, d1Id);
 
-  // 3. Create R2 bucket for site assets
-  const r2Bucket = await createR2Bucket(env, subdomain);
+    // 3. Create R2 bucket for site assets
+    r2Bucket = await createR2Bucket(env, subdomain);
 
-  // 4. Deploy edge runtime as user Worker with per-site bindings
-  await deployUserWorker(env, subdomain, displayName, d1.uuid, r2Bucket);
+    // 4. Deploy edge runtime as user Worker with per-site bindings
+    await deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket);
 
-  return { d1Id: d1.uuid, r2Bucket };
+    return { d1Id, r2Bucket };
+  } catch (err) {
+    // Roll back whatever was created so a partial failure doesn't leak resources.
+    console.error(`[provision] Rolling back ${subdomain}: ${err.message}`);
+    await teardownSite(env, subdomain, d1Id, r2Bucket);
+    throw err;
+  }
 }
 
 // ============================================================================
@@ -300,44 +371,112 @@ app.post("/api/sites", requirePlatformAuth, async (c) => {
   if (subdomainError) return c.json({ error: subdomainError }, 400);
 
   const existing = await c.env.DB.prepare(
-    "SELECT id, owner_id FROM sites WHERE subdomain = ?"
+    "SELECT id, owner_id, d1_id, r2_bucket FROM sites WHERE subdomain = ?"
   ).bind(subdomain).first();
 
   if (existing && existing.owner_id && existing.owner_id !== userId) {
     return c.json({ error: "Subdomain already taken" }, 409);
   }
 
+  const id = existing ? existing.id : subdomain;
+
   if (existing) {
     await c.env.DB.prepare(
       `UPDATE sites SET name = ?, owner_id = ?, updated = datetime('now') WHERE id = ?`
-    ).bind(name, userId, existing.id).run();
-    return c.json({ id: existing.id, subdomain, name });
+    ).bind(name, userId, id).run();
+
+    // Re-deploying an already-provisioned site refreshes its user Worker with the
+    // current runtime bundle from RUNTIME_BUCKET, so runtime fixes reach existing
+    // sites. If resources are missing (a row without a completed provision), fall
+    // through to provision them below.
+    if (existing.d1_id && existing.r2_bucket) {
+      try {
+        await deployUserWorker(c.env, subdomain, name, existing.d1_id, existing.r2_bucket);
+      } catch (err) {
+        console.error(`[redeploy] Failed for ${subdomain}:`, err.message);
+        return c.json({ error: "Redeploy failed", detail: err.message }, 500);
+      }
+      return c.json({ id, subdomain, name, redeployed: true });
+    }
+  } else {
+    await c.env.DB.prepare(
+      `INSERT INTO sites (id, name, subdomain, owner_id) VALUES (?, ?, ?, ?)`
+    ).bind(id, name, subdomain, userId).run();
   }
 
-  const id = subdomain;
-  await c.env.DB.prepare(
-    `INSERT INTO sites (id, name, subdomain, owner_id) VALUES (?, ?, ?, ?)`
-  ).bind(id, name, subdomain, userId).run();
-
-  // Provision per-site Cloudflare resources (D1, R2, user Worker)
-  let d1Id, r2Bucket;
+  // Provision per-site Cloudflare resources (D1, R2, user Worker), then record
+  // their IDs. The registry UPDATE is inside the try so that if it fails the
+  // live resources are torn down too — otherwise they'd leak with no registry
+  // pointer to find them again.
+  let result = null;
   try {
-    const result = await provisionSite(c.env, subdomain, name);
-    d1Id = result.d1Id;
-    r2Bucket = result.r2Bucket;
+    result = await provisionSite(c.env, subdomain, name);
+    await c.env.DB.prepare(
+      `UPDATE sites SET d1_id = ?, r2_bucket = ?, updated = datetime('now') WHERE id = ?`
+    ).bind(result.d1Id, result.r2Bucket, id).run();
   } catch (err) {
     console.error(`[provision] Failed for ${subdomain}:`, err.message);
-    // Roll back the registry entry
+    // If provisionSite itself failed it already cleaned up (result is null, so
+    // teardown is a no-op). If it succeeded but the registry UPDATE failed, its
+    // resources are live — tear them down. Then drop the registry row.
+    if (result) await teardownSite(c.env, subdomain, result.d1Id, result.r2Bucket);
     await c.env.DB.prepare("DELETE FROM sites WHERE id = ?").bind(id).run();
     return c.json({ error: "Provisioning failed", detail: err.message }, 500);
   }
 
-  // Store resource IDs in the registry
-  await c.env.DB.prepare(
-    `UPDATE sites SET d1_id = ?, r2_bucket = ?, updated = datetime('now') WHERE id = ?`
-  ).bind(d1Id, r2Bucket, id).run();
+  return c.json({ id, subdomain, name, d1_id: result.d1Id, r2_bucket: result.r2Bucket }, 201);
+});
 
-  return c.json({ id, subdomain, name, d1_id: d1Id, r2_bucket: r2Bucket }, 201);
+// DELETE /api/sites/:id — deprovision a site: tear down its D1, R2, and user
+// Worker, then remove it from the registry. Owner-only.
+app.delete("/api/sites/:id", requirePlatformAuth, async (c) => {
+  const userId = c.get("userId");
+  const siteId = c.req.param("id");
+
+  const site = await c.env.DB.prepare(
+    "SELECT id, subdomain, owner_id, d1_id, r2_bucket FROM sites WHERE subdomain = ?"
+  ).bind(siteId).first();
+
+  if (!site) return c.json({ error: "Site not found" }, 404);
+  if (site.owner_id !== userId) return c.json({ error: "Not owned by you" }, 403);
+
+  // Best-effort teardown of all per-site Cloudflare resources, then the row.
+  await teardownSite(c.env, site.subdomain, site.d1_id, site.r2_bucket);
+  await c.env.DB.prepare("DELETE FROM sites WHERE id = ?").bind(site.id).run();
+
+  return c.json({ ok: true, id: site.id });
+});
+
+// POST /api/sites/:id/redeploy — re-push the current runtime bundle from
+// RUNTIME_BUCKET to the site's existing user Worker (same D1 + R2 bindings), so
+// a runtime update reaches an already-provisioned site without touching its data.
+// Owner-only. Requires the site to have completed provisioning.
+app.post("/api/sites/:id/redeploy", requirePlatformAuth, async (c) => {
+  const userId = c.get("userId");
+  const siteId = c.req.param("id");
+
+  const site = await c.env.DB.prepare(
+    "SELECT id, name, subdomain, owner_id, d1_id, r2_bucket FROM sites WHERE subdomain = ?"
+  ).bind(siteId).first();
+
+  if (!site) return c.json({ error: "Site not found" }, 404);
+  if (site.owner_id !== userId) return c.json({ error: "Not owned by you" }, 403);
+  if (!site.d1_id || !site.r2_bucket) {
+    return c.json({ error: "Site is not fully provisioned" }, 409);
+  }
+
+  try {
+    await deployUserWorker(c.env, site.subdomain, site.name, site.d1_id, site.r2_bucket);
+  } catch (err) {
+    console.error(`[redeploy] Failed for ${site.subdomain}:`, err.message);
+    return c.json({ error: "Redeploy failed", detail: err.message }, 500);
+  }
+
+  await c.env.DB.prepare(
+    "UPDATE sites SET updated = datetime('now') WHERE id = ?"
+  ).bind(site.id).run();
+
+  return c.json({ ok: true, id: site.id, redeployed: true });
 });
 
 // GET /api/sites/:id — site info

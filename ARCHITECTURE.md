@@ -116,11 +116,26 @@ testsite.friendo.world
 True isolation: each site has its own D1 and R2 — no `site_id` partitioning, no
 shared hotspot, no noisy neighbors.
 
+**Runtime artifacts.** The provisioner deploys a *bundled* edge runtime, not the
+source tree. `npm run runtime:bundle` esbuild-bundles `runtime/edge/index.js`
+(hono + bcryptjs inlined, `.sql` files loaded as text) into
+`runtime/edge/dist/edge-runtime.js` and copies the baseline schema alongside it;
+`npm run runtime:publish` uploads both to the `friendo-runtime` R2 bucket
+(`RUNTIME_BUCKET`). Re-run these whenever `runtime/edge/` changes so new sites
+get the current runtime.
+
 **Provisioning** (`friendo deploy` → friendo.world): the CLI authenticates with
-the platform (device-auth flow), then `POST /api/sites` creates a D1 database and
-R2 bucket, applies the schema, deploys `runtime/edge/index.js` as a user Worker
-bound to them, and records the site in the platform registry. The CLI then pushes
-(and bootstraps the admin) over the new site's `/_/api/*`.
+the platform (device-auth flow), then `POST /api/sites` creates a D1 database,
+applies the baseline schema, creates an R2 bucket, and deploys the bundled runtime
+from `RUNTIME_BUCKET` as a user Worker bound to them (`DB`, `ASSETS`, `SITE_ID`,
+`SITE_NAME`), recording the resource IDs in the platform registry. Any partial
+failure rolls back the resources it created. The CLI then pushes (and bootstraps
+the admin) over the new site's `/_/api/*`. Re-running `friendo deploy` for an
+existing site (or `POST /api/sites/:id/redeploy`) re-pushes the current bundle to
+its user Worker with the same bindings, so runtime updates reach live sites
+without touching their data. `DELETE /api/sites/:id` deprovisions a site — tearing
+down its user Worker, D1, and R2 bucket (emptying it first) — then removes the
+registry row.
 
 ## Schema migrations
 
