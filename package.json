@@ -10,7 +10,7 @@
     "test:edge": "node tests/edge-parity.mjs",
     "build": "npm run admin && go build -o bin/friendo ./cli/cmd/friendo/",
     "runtime:bundle": "node platform/scripts/build-runtime.mjs",
-    "runtime:publish": "wrangler r2 object put friendo-runtime/edge-runtime.js --file=runtime/edge/dist/edge-runtime.js --remote && wrangler r2 object put friendo-runtime/edge-runtime-schema.sql --file=runtime/edge/dist/edge-runtime-schema.sql --remote",
+    "runtime:publish": "wrangler r2 object put friendo-runtime/edge-runtime.js --file=runtime/edge/dist/edge-runtime.js --remote",
     "serve": "npm run build && cd testsite && ../bin/friendo serve",
     "serve:open": "npm run build && cd testsite && ../bin/friendo serve --open-admin",
     "clean": "rm -rf bin/ testsite/dist/",

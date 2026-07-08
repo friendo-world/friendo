@@ -75,33 +75,6 @@ async function createD1Database(env, siteName) {
   });
 }
 
-async function applyD1Schema(env, databaseId) {
-  const obj = await env.RUNTIME_BUCKET.get("edge-runtime-schema.sql");
-  if (!obj) throw new Error("edge-runtime-schema.sql not found in RUNTIME_BUCKET");
-  const sql = await obj.text();
-
-  // Split into individual statements (D1 HTTP API requires one at a time).
-  // Strip comment lines line-by-line BEFORE splitting on ";" — mirrors
-  // runtime/edge/migrations.js `splitStatements`. Filtering whole statements by
-  // `startsWith("--")` would wrongly drop the first CREATE TABLE, since
-  // schema.sql opens with comment lines attached to it.
-  // (Constraint: assumes no triggers / BEGIN…END / semicolons inside string
-  // literals — none exist in the current schema.)
-  const statements = sql
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("--"))
-    .join("\n")
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-
-  for (const stmt of statements) {
-    await cfApi(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${databaseId}/query`, {
-      sql: stmt,
-    });
-  }
-}
-
 async function createR2Bucket(env, siteName) {
   const bucketName = `friendo-site-${siteName}`;
   // R2 create-bucket is POST /r2/buckets (PUT returns "No route matches this url").
@@ -111,31 +84,9 @@ async function createR2Bucket(env, siteName) {
   return bucketName;
 }
 
-// createDnsRecord points {subdomain}.{zone} at Cloudflare with a proxied record so
-// the `*.{zone}/*` Worker route intercepts and dispatches it. The content is
-// irrelevant for proxied traffic (Cloudflare terminates at the edge), so we use
-// the IPv6 discard prefix. Idempotent, and a no-op when CF_ZONE_ID is unset (dev,
-// where a tunnel handles `*.local.friendo.world` instead).
-async function createDnsRecord(env, subdomain) {
-  if (!env.CF_ZONE_ID) return;
-  const name = `${subdomain}.${env.CF_ZONE_NAME}`;
-
-  const existing = await cfApi(
-    env,
-    "GET",
-    `/zones/${env.CF_ZONE_ID}/dns_records?name=${name}`
-  );
-  if (existing && existing.length > 0) return;
-
-  await cfApi(env, "POST", `/zones/${env.CF_ZONE_ID}/dns_records`, {
-    type: "AAAA",
-    name,
-    content: "100::",
-    proxied: true,
-    ttl: 1,
-    comment: "friendo site (managed)",
-  });
-}
+// Tenant subdomains are served by a single proxied `*.friendo.world` wildcard DNS
+// record (created once), so provisioning creates no per-site DNS — any subdomain
+// resolves instantly and the `*.friendo.world/*` Worker route dispatches it.
 
 async function deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket) {
   const obj = await env.RUNTIME_BUCKET.get("edge-runtime.js");
@@ -208,21 +159,11 @@ async function emptyAndDeleteR2Bucket(env, bucketName) {
   await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucketName}`);
 }
 
-// Delete the site's proxied DNS record(s). No-op when CF_ZONE_ID is unset.
-async function deleteDnsRecord(env, subdomain) {
-  if (!env.CF_ZONE_ID) return;
-  const name = `${subdomain}.${env.CF_ZONE_NAME}`;
-  const res = await cfApiSafe(env, "GET", `/zones/${env.CF_ZONE_ID}/dns_records?name=${name}`);
-  for (const r of res?.result || []) {
-    await cfApiSafe(env, "DELETE", `/zones/${env.CF_ZONE_ID}/dns_records/${r.id}`);
-  }
-}
-
-// Tear down every per-site Cloudflare resource. Order: DNS + Worker first (stop
+// Tear down every per-site Cloudflare resource. Order: Worker first (stop
 // serving), then the data stores. Safe to call with null ids (skips those).
+// No DNS to remove — tenant subdomains share the `*.friendo.world` wildcard.
 async function teardownSite(env, subdomain, d1Id, r2Bucket) {
   const namespace = env.DISPATCH_NAMESPACE || "production";
-  await deleteDnsRecord(env, subdomain);
   await cfApiSafe(
     env,
     "DELETE",
@@ -238,22 +179,18 @@ async function provisionSite(env, subdomain, displayName) {
   let d1Id = null;
   let r2Bucket = null;
   try {
-    // 1. Create D1 database
+    // 1. Create D1 database. The schema self-initializes on the site's first
+    //    request (the runtime's migration runner), so we don't pre-apply it.
     const d1 = await createD1Database(env, subdomain);
     d1Id = d1.uuid;
 
-    // 2. Apply edge runtime schema
-    await applyD1Schema(env, d1Id);
-
-    // 3. Create R2 bucket for site assets
+    // 2. Create R2 bucket for site assets
     r2Bucket = await createR2Bucket(env, subdomain);
 
-    // 4. Deploy edge runtime as user Worker with per-site bindings
+    // 4. Deploy edge runtime as user Worker with per-site bindings. The
+    //    `*.friendo.world` wildcard already routes the subdomain here — no
+    //    per-site DNS needed.
     await deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket);
-
-    // 5. Point the subdomain at Cloudflare so the *.{zone}/* route dispatches it
-    //    (no-op in dev, where a tunnel handles routing).
-    await createDnsRecord(env, subdomain);
 
     return { d1Id, r2Bucket };
   } catch (err) {

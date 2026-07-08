@@ -137,23 +137,13 @@ func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain, apiURL s
 		fmt.Printf("Warning: could not save target to friendo.toml: %v\n", err)
 	}
 
-	// A just-provisioned site's DNS record needs a moment to become resolvable
-	// before the push can reach it. Poll until it responds (or time out).
-	fmt.Print("Waiting for site to come online (DNS may take a minute)..")
+	// Wait for the just-deployed Worker to go live (the subdomain already resolves
+	// via the platform wildcard).
+	fmt.Print("Waiting for site to come online..")
 	if err := waitForSite(target); err != nil {
-		host := strings.TrimPrefix(target, "https://")
 		fmt.Println(" not reachable yet")
-		fmt.Printf(`
-%s is provisioned and live, but it isn't resolving from your machine yet —
-almost always local DNS caching a lookup made before the site existed. The site
-itself is fine.
-
-To finish:
-  1. Wait a minute (or flush DNS — macOS: sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder)
-  2. Confirm it resolves:  dig +short %s
-  3. Complete the deploy:  friendo push --data
-`, target, host)
-		return fmt.Errorf("timed out waiting for %s to resolve locally", host)
+		fmt.Printf("\n%s is provisioned. If it isn't reachable from here yet, wait a moment and finish with `friendo push --data`.\n", target)
+		return fmt.Errorf("timed out waiting for %s", target)
 	}
 	fmt.Println(" ready")
 
@@ -688,10 +678,9 @@ func siteURLForSubdomain(baseURL, subdomain string) string {
 // answers (any HTTP status < 500), or an error after the timeout.
 func waitForSite(target string) error {
 	client := &http.Client{Timeout: 10 * time.Second}
-	// Generous window: a resolver that negative-cached the hostname before the
-	// record existed can hold NXDOMAIN for several minutes, longer than the record
-	// takes to actually propagate.
-	deadline := time.Now().Add(4 * time.Minute)
+	// The subdomain resolves immediately via the platform's `*` wildcard, so this
+	// only waits for the just-deployed Worker to go live (a few seconds).
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(target + "/_/api/setup")
 		if err == nil {
