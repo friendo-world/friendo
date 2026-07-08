@@ -80,7 +80,7 @@ func Start(port int, openAdmin bool) error {
 
 	// Create a template set rooted at the site directory. Template paths
 	// are relative to the site root, e.g. "pages/index.html" and
-	// "templates/base.html". This means {% extends "templates/base.html" %}
+	// "layouts/base.html". This means {% extends "layouts/base.html" %}
 	// resolves naturally from any page template.
 	// Debug mode disables caching so template changes take effect immediately.
 	loader := pongo2.MustNewLocalFileSystemLoader(siteDir)
@@ -104,10 +104,10 @@ func Start(port int, openAdmin bool) error {
 	// Live reload SSE endpoint.
 	r.Get("/_/reload", handleReloadSSE)
 
-	// Serve static assets from public/.
-	publicDir := filepath.Join(siteDir, "public")
-	if _, err := os.Stat(publicDir); err == nil {
-		r.Handle("/public/*", http.StripPrefix("/public/", http.FileServer(http.Dir(publicDir))))
+	// Serve static files from assets/ at /assets/.
+	assetsDir := filepath.Join(siteDir, "assets")
+	if _, err := os.Stat(assetsDir); err == nil {
+		r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir))))
 	}
 
 	// Catch-all: template rendering.
@@ -191,7 +191,7 @@ func watchForChanges(siteDir string, db *data.DB) {
 	defer watcher.Close()
 
 	// Watch pages/, templates/, public/, and content/ recursively.
-	for _, dir := range []string{"pages", "templates", "public", "content"} {
+	for _, dir := range []string{"pages", "layouts", "assets", "content"} {
 		dirPath := filepath.Join(siteDir, dir)
 		if _, err := os.Stat(dirPath); err != nil {
 			continue

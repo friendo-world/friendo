@@ -48,11 +48,11 @@ func exportStatic() error {
 		return fmt.Errorf("creating dist: %w", err)
 	}
 
-	// Copy public/ assets to dist/public/
-	publicDir := filepath.Join(siteDir, "public")
-	if _, err := os.Stat(publicDir); err == nil {
-		if err := copyDir(publicDir, filepath.Join(distDir, "public")); err != nil {
-			return fmt.Errorf("copying public assets: %w", err)
+	// Copy assets/ to dist/assets/
+	assetsDir := filepath.Join(siteDir, "assets")
+	if _, err := os.Stat(assetsDir); err == nil {
+		if err := copyDir(assetsDir, filepath.Join(distDir, "assets")); err != nil {
+			return fmt.Errorf("copying assets: %w", err)
 		}
 	}
 
@@ -231,7 +231,7 @@ func exportBundle() error {
 	defer tw.Close()
 
 	// Directories to include in the bundle.
-	dirs := []string{"pages", "templates", "public", "data"}
+	dirs := []string{"pages", "layouts", "assets", "data"}
 	for _, dir := range dirs {
 		dirPath := filepath.Join(siteDir, dir)
 		if _, err := os.Stat(dirPath); os.IsNotExist(err) {

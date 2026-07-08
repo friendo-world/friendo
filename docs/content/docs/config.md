@@ -48,5 +48,5 @@ target = "https://my-site.friendo.world"
 
 ## The rest of the folder
 
-Everything else about a site is convention, not config — `templates/`, `pages/`,
-`public/`, and `data/`. See [A site is a folder](/docs/site-is-a-folder).
+Everything else about a site is convention, not config — `layouts/`, `pages/`,
+`assets/`, and `data/`. See [A site is a folder](/docs/site-is-a-folder).

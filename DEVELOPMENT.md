@@ -226,9 +226,9 @@ endpoint surface.
 
 Custom filters (implemented identically in both runtimes):
 
-- `{{ "img.jpg"|asset_url }}` → `/public/img.jpg`
+- `{{ "img.jpg"|asset_url }}` → `/assets/img.jpg`
 - `{{ post.created|date:"Jan 2, 2006" }}` — format a date
-- `{{ "img.jpg"|asset_url|resize:"300x200" }}` → `/public/img.jpg?w=300&h=200` — a resize *hint* (`W`, `WxH`, or `xH`). An image CDN like Cloudflare Image Resizing honors `w`/`h`; the built-in static server ignores them and serves the original.
+- `{{ "img.jpg"|asset_url|resize:"300x200" }}` → `/assets/img.jpg?w=300&h=200` — a resize *hint* (`W`, `WxH`, or `xH`). An image CDN like Cloudflare Image Resizing honors `w`/`h`; the built-in static server ignores them and serves the original.
 
 ## Tailwind
 

@@ -94,14 +94,14 @@ func filterMarkdown(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pong
 	return pongo2.AsSafeValue(buf.String()), nil
 }
 
-// asset_url: resolves a file reference to a public URL.
-// Both locally and on the edge, assets are served from /public/.
+// asset_url: resolves a file reference to its served URL.
+// Both locally and on the edge, files in assets/ are served from /assets/.
 func filterAssetURL(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	val := in.String()
 	if val == "" {
 		return pongo2.AsValue(""), nil
 	}
-	return pongo2.AsValue(fmt.Sprintf("/public/%s", val)), nil
+	return pongo2.AsValue(fmt.Sprintf("/assets/%s", val)), nil
 }
 
 // date: formats a date string using Go's time format.
@@ -138,7 +138,7 @@ func filterDate(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.E
 }
 
 // resize: appends width/height hints to an image URL as query parameters.
-// Usage: {{ post.image|asset_url|resize:"300x200" }} -> /public/img.jpg?w=300&h=200
+// Usage: {{ post.image|asset_url|resize:"300x200" }} -> /assets/img.jpg?w=300&h=200
 // The spec is "W", "WxH", or "xH". These are consumed by an image-resizing CDN
 // (e.g. Cloudflare Image Resizing); the built-in static server ignores them and
 // serves the original, so this degrades gracefully.

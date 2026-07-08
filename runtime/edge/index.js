@@ -106,7 +106,7 @@ app.post("/_/api/push/templates", async (c) => {
 
   let written = 0;
   for (const f of files) {
-    if (!f.path || (!f.path.startsWith("pages/") && !f.path.startsWith("templates/"))) continue;
+    if (!f.path || (!f.path.startsWith("pages/") && !f.path.startsWith("layouts/"))) continue;
     const key = `sites/${auth.siteId}/${f.path}`;
     await c.env.ASSETS.put(key, f.content, { httpMetadata: { contentType: "text/html" } });
     written++;
@@ -123,7 +123,7 @@ app.post("/_/api/push/assets", async (c) => {
 
   let written = 0;
   for (const f of files) {
-    if (!f.path || !f.path.startsWith("public/")) continue;
+    if (!f.path || !f.path.startsWith("assets/")) continue;
     const key = `sites/${auth.siteId}/${f.path}`;
     await c.env.ASSETS.put(key, f.content, { httpMetadata: { contentType: guessContentType(f.path) } });
     written++;
@@ -698,7 +698,7 @@ app.get("/_/*", (c) => c.html(SPA_INDEX));
 
 // --- Site rendering ---
 
-app.get("/public/*", async (c) => {
+app.get("/assets/*", async (c) => {
   const siteId = getSiteId(c);
   return serveAsset(c.env, siteId, c.req.path);
 });
@@ -1120,7 +1120,7 @@ function applyFilter(name, value, arg) {
   const s = () => String(value ?? "");
   const arr = () => (Array.isArray(value) ? value : []);
   switch (name) {
-    case "asset_url": return value ? `/public/${value}` : "";
+    case "asset_url": return value ? `/assets/${value}` : "";
     case "date":
       if (!value) return "";
       try { const d = new Date(value); return isNaN(d.getTime()) ? value : formatGoDate(d, arg || "2006-01-02"); }

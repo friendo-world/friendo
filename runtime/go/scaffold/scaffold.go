@@ -20,8 +20,8 @@ func Init(name string) error {
 	dirs := []string{
 		filepath.Join(name, "pages"),
 		filepath.Join(name, "pages", "blog"),
-		filepath.Join(name, "templates"),
-		filepath.Join(name, "public"),
+		filepath.Join(name, "layouts"),
+		filepath.Join(name, "assets"),
 		filepath.Join(name, "content", "blog"),
 	}
 
@@ -33,11 +33,11 @@ func Init(name string) error {
 
 	files := map[string]string{
 		filepath.Join(name, "friendo.toml"):                 friendoToml(name),
-		filepath.Join(name, "templates", "base.html"):       baseHTML,
+		filepath.Join(name, "layouts", "base.html"):         baseHTML,
 		filepath.Join(name, "pages", "index.html"):          indexHTML,
 		filepath.Join(name, "pages", "404.html"):            notFoundHTML,
 		filepath.Join(name, "pages", "blog", "[slug].html"): blogPostHTML,
-		filepath.Join(name, "public", "style.css"):          styleCSS,
+		filepath.Join(name, "assets", "style.css"):          styleCSS,
 		filepath.Join(name, "content", "blog", "hello-world.md"): helloPostMD,
 	}
 
@@ -68,7 +68,7 @@ const baseHTML = `<!DOCTYPE html>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ site.name }}</title>
-    <link rel="stylesheet" href="/public/style.css">
+    <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
     <nav>
@@ -81,7 +81,7 @@ const baseHTML = `<!DOCTYPE html>
 </html>
 `
 
-const indexHTML = `{% extends "templates/base.html" %}
+const indexHTML = `{% extends "layouts/base.html" %}
 {% block content %}
 <h1>Welcome to {{ site.name }}</h1>
 
@@ -96,7 +96,7 @@ const indexHTML = `{% extends "templates/base.html" %}
 {% endblock %}
 `
 
-const notFoundHTML = `{% extends "templates/base.html" %}
+const notFoundHTML = `{% extends "layouts/base.html" %}
 {% block content %}
 <h1>404 — Page not found</h1>
 <p>There's nothing at <code>{{ request.path }}</code>.</p>
@@ -104,7 +104,7 @@ const notFoundHTML = `{% extends "templates/base.html" %}
 {% endblock %}
 `
 
-const blogPostHTML = `{% extends "templates/base.html" %}
+const blogPostHTML = `{% extends "layouts/base.html" %}
 {% block content %}
 <article>
     <h1>{{ record.title }}</h1>

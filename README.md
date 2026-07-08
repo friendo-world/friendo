@@ -103,7 +103,7 @@ The platform is optional. Everything it does, the runtimes can do on their own.
 ```
 my-site/
 ├── friendo.toml        # Site config (name, content types)
-├── templates/          # Base layouts and partials
+├── layouts/            # Shared layouts and partials that wrap pages
 │   └── base.html
 ├── pages/              # Page templates — file path maps to URL path
 │   ├── index.html
@@ -112,7 +112,7 @@ my-site/
 ├── content/            # Optional: author content as markdown files
 │   └── blog/
 │       └── hello.md    # → a record in the "blog" collection
-├── public/             # Static assets (CSS, JS, images)
+├── assets/             # Static files — CSS, JS, images (served at /assets/)
 │   └── style.css
 └── data/               # SQLite database
     └── friendo.db
@@ -204,7 +204,7 @@ All sync goes through the site's own `/_/api/*` endpoints, authenticated with si
 [Pongo2](https://github.com/flosch/pongo2) (Jinja2-compatible). Plain `.html` files with logic.
 
 ```html
-{% extends "templates/base.html" %}
+{% extends "layouts/base.html" %}
 
 {% block content %}
   <h1>{{ site.name }}</h1>

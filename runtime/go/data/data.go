@@ -2,6 +2,7 @@ package data
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
 	"encoding/hex"
@@ -347,9 +348,19 @@ func (db *DB) UpdateRecord(id, slug, title, body, status string) error {
 	return nil
 }
 
+// contentID derives a stable record id from (collection, slug). File-based content
+// uses it so re-importing the same file always produces the same id — otherwise a
+// rebuilt local database mints fresh random ids, and `push --data` (which upserts
+// by id) would *add* duplicates on the target instead of replacing.
+func contentID(collection, slug string) string {
+	sum := sha256.Sum256([]byte(collection + "\n" + slug))
+	return hex.EncodeToString(sum[:])[:24]
+}
+
 // UpsertRecordBySlug inserts or updates a record identified by (collection, slug).
 // Used by the file-based content importer — unlike CreateRecord/UpdateRecord it
-// also sets published_at and the arbitrary `data` JSON blob. Returns the record id.
+// also sets published_at and the arbitrary `data` JSON blob, and uses a stable
+// (collection, slug)-derived id. Returns the record id.
 func (db *DB) UpsertRecordBySlug(collection, slug, title, body, status, publishedAt, data string) (string, error) {
 	if data == "" {
 		data = "{}"
@@ -363,7 +374,7 @@ func (db *DB) UpsertRecordBySlug(collection, slug, title, body, status, publishe
 	).Scan(&id)
 
 	if err == sql.ErrNoRows {
-		id = GenerateID()
+		id = contentID(collection, slug)
 		_, err = db.Conn.Exec(
 			`INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, published_at, data, created, updated)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,

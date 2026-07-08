@@ -12,10 +12,10 @@ locally and when deployed.
 
 ## Layouts and blocks
 
-Put shared chrome in `templates/` and extend it from pages:
+Put shared chrome in `layouts/` and extend it from pages:
 
 ```html
-{# templates/base.html #}
+{# layouts/base.html #}
 <!DOCTYPE html>
 <html>
   <head><title>{% block title %}{{ site.name }}{% endblock %}</title></head>
@@ -25,7 +25,7 @@ Put shared chrome in `templates/` and extend it from pages:
 
 ```html
 {# pages/index.html #}
-{% extends "templates/base.html" %}
+{% extends "layouts/base.html" %}
 {% block content %}<h1>Hello</h1>{% endblock %}
 ```
 
@@ -42,7 +42,7 @@ matches a record in the `blog` collection by its `slug` — available as `record
 
 ```html
 {# pages/blog/[slug].html #}
-{% extends "templates/base.html" %}
+{% extends "layouts/base.html" %}
 {% block content %}
   <h1>{{ record.title }}</h1>
   <div>{{ record.body|markdown }}</div>
@@ -72,9 +72,9 @@ set (`truncate`, `upper`, `lower`, `date`, `default`, `length`, …):
 
 | Filter | Example | Result |
 |---|---|---|
-| `asset_url` | `{{ "logo.png"\|asset_url }}` | `/public/logo.png` |
+| `asset_url` | `{{ "logo.png"\|asset_url }}` | `/assets/logo.png` |
 | `date` | `{{ post.created\|date:"Jan 2, 2006" }}` | a formatted date |
-| `resize` | `{{ img\|asset_url\|resize:"300x200" }}` | `/public/img?w=300&h=200` (a CDN hint) |
+| `resize` | `{{ img\|asset_url\|resize:"300x200" }}` | `/assets/img?w=300&h=200` (a CDN hint) |
 | `markdown` | `{{ post.body\|markdown }}` | markdown rendered to HTML |
 | `sort_by` | `{% for d in collections.docs\|sort_by:"data.weight" %}` | a list sorted by a (dotted) field |
 

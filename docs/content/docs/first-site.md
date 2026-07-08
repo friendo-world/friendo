@@ -19,14 +19,14 @@ This creates a small, complete site:
 ```
 my-site/
 ├── friendo.toml        # site config
-├── templates/
+├── layouts/
 │   └── base.html       # shared layout
 ├── pages/              # each file maps to a URL
 │   ├── index.html
 │   ├── 404.html
 │   └── blog/
 │       └── [slug].html # dynamic route for a single blog post
-├── public/
+├── assets/
 │   └── style.css
 └── data/               # created on first run (SQLite)
 ```
@@ -56,7 +56,7 @@ you can write posts, manage collections, and add users.
 Pages live in `pages/` and are plain templates. Open `pages/index.html`:
 
 ```html
-{% extends "templates/base.html" %}
+{% extends "layouts/base.html" %}
 
 {% block content %}
   <h1>{{ site.name }}</h1>

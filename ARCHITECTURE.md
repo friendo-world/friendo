@@ -15,7 +15,7 @@ provides managed hosting**:
 | **Runtimes** | The thing that actually runs a site: serves pages, stores data, hosts the admin UI and API. Two implementations (Go and edge), same behavior. | `runtime/go/`, `runtime/edge/` |
 | **Platform** | friendo.world managed hosting. Optional — everything it does, the runtimes can do on their own. | `platform/` |
 
-A **site is a folder**: `friendo.toml`, `templates/`, `pages/`, `public/`, and a
+A **site is a folder**: `friendo.toml`, `layouts/`, `pages/`, `assets/`, and a
 `data/` database. It's portable, checkable into git, and outlives any single tool.
 
 ## Two runtimes, one site
@@ -32,7 +32,7 @@ There are two runtimes that implement it:
 |---|---|---|
 | Runs as | A single Go binary (`friendo serve`), e.g. on a VPS | A Cloudflare Worker (Hono app) |
 | Data | SQLite (`modernc.org/sqlite`, no CGO) | D1 |
-| Assets | `public/` on disk | R2 |
+| Assets | `assets/` on disk | R2 |
 | Templates | [Pongo2](https://github.com/flosch/pongo2) (Jinja2) | a custom Jinja2-compatible engine (no `eval`, Workers-safe) |
 
 **Common schema.** Both use identical table definitions (`posts`, `comments`,

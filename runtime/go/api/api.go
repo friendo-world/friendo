@@ -329,7 +329,7 @@ func handlePushTemplates(siteDir string) http.HandlerFunc {
 		written := 0
 		for _, f := range body.Files {
 			// Only allow template directories.
-			if !strings.HasPrefix(f.Path, "pages/") && !strings.HasPrefix(f.Path, "templates/") {
+			if !strings.HasPrefix(f.Path, "pages/") && !strings.HasPrefix(f.Path, "layouts/") {
 				continue
 			}
 			// Sanitize path to prevent directory traversal.
@@ -354,9 +354,9 @@ func handlePushTemplates(siteDir string) http.HandlerFunc {
 	}
 }
 
-// handlePushAssets accepts static asset files and writes them to public/.
+// handlePushAssets accepts static asset files and writes them to assets/.
 // Expects multipart form or JSON body with base64-encoded content.
-// Simple JSON mode: {"files": [{"path": "public/style.css", "content": "..."}]}
+// Simple JSON mode: {"files": [{"path": "assets/style.css", "content": "..."}]}
 func handlePushAssets(siteDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -372,7 +372,7 @@ func handlePushAssets(siteDir string) http.HandlerFunc {
 
 		written := 0
 		for _, f := range body.Files {
-			if !strings.HasPrefix(f.Path, "public/") {
+			if !strings.HasPrefix(f.Path, "assets/") {
 				continue
 			}
 			cleanPath := filepath.Clean(f.Path)

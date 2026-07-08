@@ -203,7 +203,7 @@ func RunPush(opts PushOptions) error {
 	}
 
 	// Push templates.
-	templates, err := readFilesAsJSON(siteDir, "pages", "templates")
+	templates, err := readFilesAsJSON(siteDir, "pages", "layouts")
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func RunPush(opts PushOptions) error {
 	}
 
 	// Push assets.
-	assets, err := readFilesAsJSON(siteDir, "public")
+	assets, err := readFilesAsJSON(siteDir, "assets")
 	if err != nil {
 		return err
 	}
@@ -810,7 +810,7 @@ func dryRun(siteDir string, cfg *SiteConfig, subdomain string) error {
 	records, _ := readLocalRecords(siteDir)
 	fmt.Printf("  Records:   %d\n", len(records))
 
-	files, _ := readFilesAsJSON(siteDir, "pages", "templates", "public")
+	files, _ := readFilesAsJSON(siteDir, "pages", "layouts", "assets")
 	fmt.Printf("  Files:     %d\n", len(files))
 
 	fmt.Println()

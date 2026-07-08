@@ -12,9 +12,9 @@ git, and outlives any single tool — including Friendo.
 ```
 my-site/
 ├── friendo.toml     # config: name, content types, deploy target
-├── templates/       # shared layouts and partials
+├── layouts/       # shared layouts and partials
 ├── pages/           # page templates — file path maps to URL path
-├── public/          # static assets (CSS, JS, images)
+├── assets/          # static assets (CSS, JS, images)
 └── data/            # the SQLite database
 ```
 
@@ -30,7 +30,7 @@ identically:
 |---|---|---|
 | Runs as | a single binary (`friendo serve`), e.g. on a VPS | a Cloudflare Worker |
 | Data | SQLite | D1 |
-| Assets | `public/` on disk | R2 |
+| Assets | `assets/` on disk | R2 |
 | Templates | Pongo2 (Jinja2) | a Jinja2-compatible engine |
 
 Both expose the same interface — your site at `/`, the admin UI at `/_/`, and a
