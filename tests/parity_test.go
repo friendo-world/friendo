@@ -17,8 +17,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/henryholtgeerts/friendo/runtime/go/admin"
-	"github.com/henryholtgeerts/friendo/runtime/go/data"
+	"github.com/friendo-world/friendo/runtime/go/admin"
+	"github.com/friendo-world/friendo/runtime/go/data"
 )
 
 type step struct {

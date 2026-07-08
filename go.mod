@@ -1,4 +1,4 @@
-module github.com/henryholtgeerts/friendo
+module github.com/friendo-world/friendo
 
 go 1.25.0
 

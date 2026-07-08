@@ -16,7 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/henryholtgeerts/friendo/runtime/go/data"
+	"github.com/friendo-world/friendo/runtime/go/data"
 )
 
 // Mount registers the REST + sync API routes under /api on the given router,

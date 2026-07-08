@@ -16,9 +16,9 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/henryholtgeerts/friendo/runtime/go/admin"
-	"github.com/henryholtgeerts/friendo/runtime/go/data"
-	_ "github.com/henryholtgeerts/friendo/runtime/go/renderer" // registers filters
+	"github.com/friendo-world/friendo/runtime/go/admin"
+	"github.com/friendo-world/friendo/runtime/go/data"
+	_ "github.com/friendo-world/friendo/runtime/go/renderer" // registers filters
 )
 
 // siteConfig represents the friendo.toml file.

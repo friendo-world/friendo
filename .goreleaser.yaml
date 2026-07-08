@@ -1,0 +1,60 @@
+# GoReleaser — builds the `friendo` executable for every platform and publishes
+# them as GitHub Release assets. See .github/workflows/release.yml for the CI that
+# runs this on a `v*` tag push.
+#
+# The admin SPA is embedded via go:embed from runtime/go/admin/spa. That directory
+# must be current before a release — CI runs `npm run admin` first; locally, run
+# `npm run admin` and commit before tagging. Test without publishing:
+#   goreleaser release --snapshot --clean
+version: 2
+
+project_name: friendo
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: friendo
+    main: ./cli/cmd/friendo
+    binary: friendo
+    # Pure-Go SQLite (modernc.org/sqlite) means no CGO — clean cross-compilation.
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: friendo
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: friendo-world
+    name: friendo

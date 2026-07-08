@@ -11,8 +11,8 @@ import (
 
 	"github.com/flosch/pongo2/v6"
 
-	"github.com/henryholtgeerts/friendo/runtime/go/data"
-	_ "github.com/henryholtgeerts/friendo/runtime/go/renderer"
+	"github.com/friendo-world/friendo/runtime/go/data"
+	_ "github.com/friendo-world/friendo/runtime/go/renderer"
 )
 
 // Run exports the site in the given mode.

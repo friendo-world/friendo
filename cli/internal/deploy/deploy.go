@@ -17,7 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/henryholtgeerts/friendo/runtime/go/data"
+	"github.com/friendo-world/friendo/runtime/go/data"
 )
 
 // SiteConfig represents the friendo.toml file.
@@ -127,6 +127,14 @@ func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain, apiURL s
 	if err := saveDeployTarget(siteDir, target); err != nil {
 		fmt.Printf("Warning: could not save target to friendo.toml: %v\n", err)
 	}
+
+	// A just-provisioned site's DNS record needs a moment to become resolvable
+	// before the push can reach it. Poll until it responds (or time out).
+	fmt.Print("Waiting for site to come online..")
+	if err := waitForSite(target); err != nil {
+		return fmt.Errorf("%w\nThe site was provisioned — retry with `friendo push` in a moment", err)
+	}
+	fmt.Println(" ready")
 
 	// Push everything to the site's sync API. The freshly provisioned site has
 	// no admin yet, so RunPush -> authenticateSite walks the user through
@@ -631,6 +639,26 @@ func siteURLForSubdomain(baseURL, subdomain string) string {
 		host = host[:i]
 	}
 	return fmt.Sprintf("https://%s.%s", subdomain, host)
+}
+
+// waitForSite polls a freshly provisioned site until it responds, tolerating the
+// window where its DNS record isn't resolvable yet. Returns nil once the site
+// answers (any HTTP status < 500), or an error after the timeout.
+func waitForSite(target string) error {
+	client := &http.Client{Timeout: 10 * time.Second}
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(target + "/_/api/setup")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode < 500 {
+				return nil
+			}
+		}
+		fmt.Print(".")
+		time.Sleep(3 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for %s to come online", target)
 }
 
 // --- Site config ---

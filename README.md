@@ -8,6 +8,34 @@ When you're ready to share it, `friendo deploy` puts it on the internet.
 
 ---
 
+## Install
+
+**macOS / Linux — one line:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/friendo-world/friendo/main/scripts/install.sh | sh
+```
+
+This downloads the right prebuilt `friendo` binary for your OS/arch and installs it
+to a directory on your PATH.
+
+**Manual download:** grab a binary for your platform from the
+[latest release](https://github.com/friendo-world/friendo/releases/latest)
+(macOS/Linux `.tar.gz`, Windows `.zip`), extract it, and put `friendo` on your PATH.
+
+**With Go** (installs to `$(go env GOPATH)/bin`):
+
+```bash
+go install github.com/friendo-world/friendo/cli/cmd/friendo@latest
+```
+
+**From source:** `git clone` this repo, then `npm run build` (builds the admin UI +
+compiles the binary to `bin/friendo`).
+
+Check your version with `friendo --version`.
+
+---
+
 ## What's in this repo
 
 ```

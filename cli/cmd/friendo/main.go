@@ -6,16 +6,20 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/henryholtgeerts/friendo/cli/internal/deploy"
-	"github.com/henryholtgeerts/friendo/runtime/go/export"
-	"github.com/henryholtgeerts/friendo/runtime/go/scaffold"
-	"github.com/henryholtgeerts/friendo/runtime/go/server"
+	"github.com/friendo-world/friendo/cli/internal/deploy"
+	"github.com/friendo-world/friendo/runtime/go/export"
+	"github.com/friendo-world/friendo/runtime/go/scaffold"
+	"github.com/friendo-world/friendo/runtime/go/server"
 )
+
+// version is set at build time via -ldflags "-X main.version=…" (see .goreleaser.yaml).
+var version = "dev"
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "friendo",
-		Short: "Your site is a folder. Build it locally. Publish it anywhere.",
+		Use:     "friendo",
+		Short:   "Your site is a folder. Build it locally. Publish it anywhere.",
+		Version: version,
 	}
 
 	// --- init ---
