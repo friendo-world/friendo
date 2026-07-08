@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -17,6 +18,19 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
+
+// decodeData parses a record's `data` JSON column into a map for template access
+// (record.data.<field>). Empty or invalid JSON yields an empty map.
+func decodeData(raw string) map[string]any {
+	if raw == "" || raw == "{}" {
+		return map[string]any{}
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return map[string]any{}
+	}
+	return m
+}
 
 //go:embed schema.sql
 var schemaSQL string
@@ -154,7 +168,7 @@ func (db *DB) Close() error {
 // a slice of maps for injection into a template context.
 func (db *DB) QueryCollection(collection string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
-		`SELECT id, slug, title, body, author_id, status, published_at, created, updated
+		`SELECT id, slug, title, body, author_id, status, published_at, created, updated, data
 		 FROM posts WHERE site_id = ? AND collection = ? ORDER BY created DESC`,
 		db.SiteID, collection,
 	)
@@ -165,8 +179,8 @@ func (db *DB) QueryCollection(collection string) ([]map[string]any, error) {
 
 	var results []map[string]any
 	for rows.Next() {
-		var id, slug, title, body, authorID, status, publishedAt, created, updated string
-		if err := rows.Scan(&id, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated); err != nil {
+		var id, slug, title, body, authorID, status, publishedAt, created, updated, data string
+		if err := rows.Scan(&id, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated, &data); err != nil {
 			return nil, err
 		}
 		results = append(results, map[string]any{
@@ -179,6 +193,7 @@ func (db *DB) QueryCollection(collection string) ([]map[string]any, error) {
 			"published_at": publishedAt,
 			"created":      created,
 			"updated":      updated,
+			"data":         decodeData(data),
 		})
 	}
 	return results, rows.Err()
@@ -194,13 +209,13 @@ func (db *DB) QueryCollectionByField(collection, fieldName, value string) (map[s
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, slug, title, body, author_id, status, published_at, created, updated
+		`SELECT id, slug, title, body, author_id, status, published_at, created, updated, data
 		 FROM posts WHERE site_id = ? AND collection = ? AND %s = ? LIMIT 1`, fieldName,
 	)
 	row := db.Conn.QueryRow(query, db.SiteID, collection, value)
 
-	var id, slug, title, body, authorID, status, publishedAt, created, updated string
-	if err := row.Scan(&id, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated); err != nil {
+	var id, slug, title, body, authorID, status, publishedAt, created, updated, data string
+	if err := row.Scan(&id, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated, &data); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("no %s found with %s=%s", collection, fieldName, value)
 		}
@@ -217,6 +232,7 @@ func (db *DB) QueryCollectionByField(collection, fieldName, value string) (map[s
 		"published_at": publishedAt,
 		"created":      created,
 		"updated":      updated,
+		"data":         decodeData(data),
 	}, nil
 }
 
@@ -273,12 +289,12 @@ func (db *DB) CollectionCounts() ([]CollectionCount, error) {
 // GetRecordByID returns a single post by id, scoped to the site.
 func (db *DB) GetRecordByID(id string) (map[string]any, error) {
 	row := db.Conn.QueryRow(
-		`SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
+		`SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated, data
 		 FROM posts WHERE id = ? AND site_id = ?`,
 		id, db.SiteID,
 	)
-	var rid, collection, slug, title, body, authorID, status, publishedAt, created, updated string
-	if err := row.Scan(&rid, &collection, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated); err != nil {
+	var rid, collection, slug, title, body, authorID, status, publishedAt, created, updated, data string
+	if err := row.Scan(&rid, &collection, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated, &data); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, sql.ErrNoRows
 		}
@@ -295,6 +311,7 @@ func (db *DB) GetRecordByID(id string) (map[string]any, error) {
 		"published_at": publishedAt,
 		"created":      created,
 		"updated":      updated,
+		"data":         decodeData(data),
 	}, nil
 }
 
@@ -328,6 +345,42 @@ func (db *DB) UpdateRecord(id, slug, title, body, status string) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// UpsertRecordBySlug inserts or updates a record identified by (collection, slug).
+// Used by the file-based content importer — unlike CreateRecord/UpdateRecord it
+// also sets published_at and the arbitrary `data` JSON blob. Returns the record id.
+func (db *DB) UpsertRecordBySlug(collection, slug, title, body, status, publishedAt, data string) (string, error) {
+	if data == "" {
+		data = "{}"
+	}
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+
+	var id string
+	err := db.Conn.QueryRow(
+		`SELECT id FROM posts WHERE site_id = ? AND collection = ? AND slug = ? LIMIT 1`,
+		db.SiteID, collection, slug,
+	).Scan(&id)
+
+	if err == sql.ErrNoRows {
+		id = GenerateID()
+		_, err = db.Conn.Exec(
+			`INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, published_at, data, created, updated)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
+			id, db.SiteID, collection, slug, title, body, status, publishedAt, data, now, now,
+		)
+		return id, err
+	}
+	if err != nil {
+		return "", err
+	}
+
+	_, err = db.Conn.Exec(
+		`UPDATE posts SET title = ?, body = ?, status = ?, published_at = ?, data = ?, updated = ?
+		 WHERE id = ? AND site_id = ?`,
+		title, body, status, publishedAt, data, now, id, db.SiteID,
+	)
+	return id, err
 }
 
 // DeleteRecord removes a post by id, scoped to the site.

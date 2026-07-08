@@ -11,6 +11,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
+import { marked } from "marked";
 import { SPA_INDEX, SPA_ASSETS } from "./spa-bundle.js";
 import { runMigrations } from "./migrations.js";
 
@@ -139,17 +140,19 @@ app.post("/_/api/push/data", async (c) => {
 
   let synced = 0;
   for (const r of records) {
+    // `data` (arbitrary front matter) arrives as an object; store it as JSON text.
+    const data = r.data == null ? "{}" : (typeof r.data === "string" ? r.data : JSON.stringify(r.data));
     await c.env.DB.prepare(
-      `INSERT INTO posts (id, site_id, collection, slug, title, body, author_id, status, published_at, created, updated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO posts (id, site_id, collection, slug, title, body, author_id, status, published_at, data, created, updated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          collection=excluded.collection, slug=excluded.slug, title=excluded.title,
          body=excluded.body, author_id=excluded.author_id, status=excluded.status,
-         published_at=excluded.published_at, updated=excluded.updated`
+         published_at=excluded.published_at, data=excluded.data, updated=excluded.updated`
     ).bind(
       r.id, auth.siteId, r.collection || "posts", r.slug || "", r.title || "",
       r.body || "", r.author_id || "", r.status || "draft",
-      r.published_at || "", r.created || "", r.updated || ""
+      r.published_at || "", data, r.created || "", r.updated || ""
     ).run();
     synced++;
   }
@@ -187,7 +190,7 @@ app.get("/_/api/pull/data", async (c) => {
   if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return c.json({ error: "unauthorized" }, 401);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
+    `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated, data
      FROM posts WHERE site_id = ? ORDER BY created DESC`
   ).bind(auth.siteId).all();
 
@@ -849,6 +852,15 @@ async function buildRoutes(env, siteId) {
   return routes;
 }
 
+// decodeRecordData parses a record's `data` JSON column into an object so
+// templates can read record.data.<field> (matching the Go runtime).
+function decodeRecordData(row) {
+  if (!row) return row;
+  let data = {};
+  if (row.data) { try { data = JSON.parse(row.data); } catch { data = {}; } }
+  return { ...row, data };
+}
+
 async function buildCollections(env, siteId) {
   const collections = {};
   const { results: names } = await env.DB.prepare(
@@ -857,10 +869,10 @@ async function buildCollections(env, siteId) {
 
   for (const { collection } of names) {
     const { results } = await env.DB.prepare(
-      `SELECT id, slug, title, body, author_id, status, published_at, created, updated
+      `SELECT id, slug, title, body, author_id, status, published_at, created, updated, data
        FROM posts WHERE site_id = ? AND collection = ? ORDER BY created DESC`
     ).bind(siteId, collection).all();
-    collections[collection] = results;
+    collections[collection] = (results || []).map(decodeRecordData);
   }
   return collections;
 }
@@ -868,10 +880,11 @@ async function buildCollections(env, siteId) {
 async function queryRecordByField(env, siteId, collection, field, value) {
   const allowed = ["id", "slug", "title"];
   if (!allowed.includes(field)) return null;
-  return await env.DB.prepare(
-    `SELECT id, slug, title, body, author_id, status, published_at, created, updated
+  const row = await env.DB.prepare(
+    `SELECT id, slug, title, body, author_id, status, published_at, created, updated, data
      FROM posts WHERE site_id = ? AND collection = ? AND ${field} = ? LIMIT 1`
-  ).bind(siteId, collection, value).first() || null;
+  ).bind(siteId, collection, value).first();
+  return row ? decodeRecordData(row) : null;
 }
 
 // --- Template engine (Jinja2-compatible, no eval) ---
@@ -934,6 +947,7 @@ async function renderString(template, ctx, loader) {
     rawSlots.push(content);
     return `__RAW_${rawSlots.length - 1}__`;
   });
+  template = template.replace(/\{#[\s\S]*?#\}/g, ""); // strip {# comments #}
   template = processSet(template, ctx);
   template = await processIncludes(template, ctx, loader);
   template = await processForLoops(template, ctx, loader);
@@ -966,13 +980,29 @@ async function processIncludes(template, ctx, loader) {
   return template;
 }
 
+// evalFiltered resolves an expression that may include |filters (same syntax as
+// {{ }}), returning the raw value. Used for {% for x in collection|filter:"arg" %}.
+function evalFiltered(expr, ctx) {
+  const parts = expr.split("|");
+  let value = resolveValue(parts[0].trim(), ctx);
+  for (let i = 1; i < parts.length; i++) {
+    const f = parts[i].trim();
+    const ci = f.indexOf(":");
+    const name = ci >= 0 ? f.slice(0, ci).trim() : f;
+    const arg = ci >= 0 ? f.slice(ci + 1).trim().replace(/^["']|["']$/g, "") : null;
+    if (name === "safe") continue;
+    value = applyFilter(name, value, arg);
+  }
+  return value instanceof SafeString ? value.val : value;
+}
+
 async function processForLoops(template, ctx, loader) {
-  const re = /\{%\s*for\s+(\w+)\s+in\s+([\w.]+)\s*%\}([\s\S]*?)\{%\s*endfor\s*%\}/g;
+  const re = /\{%\s*for\s+(\w+)\s+in\s+(.+?)\s*%\}([\s\S]*?)\{%\s*endfor\s*%\}/g;
   let match, result = "", lastIndex = 0;
   while ((match = re.exec(template)) !== null) {
     result += template.slice(lastIndex, match.index);
     const [, varName, listExpr, body] = match;
-    const list = resolve(listExpr, ctx);
+    const list = evalFiltered(listExpr.trim(), ctx);
     const parts = body.split(/\{%\s*else\s*%\}/);
     if (!Array.isArray(list) || list.length === 0) {
       result += await renderString(parts[1] || "", ctx, loader);
@@ -1119,6 +1149,20 @@ function applyFilter(name, value, arg) {
     case "safe": return new SafeString(s());
     case "urlencode": return encodeURIComponent(s());
     case "nl2br": return new SafeString(s().replace(/\n/g, "<br>"));
+    // markdown → HTML (GFM). Auto-safe so {{ body|markdown }} renders, matching Go.
+    case "markdown": return new SafeString(marked.parse(s()));
+    // sort_by: stable sort a list of records by a dotted key (numeric when both
+    // values are numbers, else lexicographic). {{ collections.docs|sort_by:"data.weight" }}
+    case "sort_by": {
+      const path = (arg || "").split(".");
+      const get = (o) => path.reduce((v, k) => (v == null ? v : v[k]), o);
+      return arr().slice().sort((a, b) => {
+        const av = get(a), bv = get(b);
+        const an = Number(av), bn = Number(bv);
+        if (!isNaN(an) && !isNaN(bn)) return an - bn;
+        return String(av).localeCompare(String(bv));
+      });
+    }
     default: return value;
   }
 }

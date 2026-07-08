@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site.name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/public/style.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a href="/" class="brand">Friendo <span>Docs</span></a>
+    <a href="https://friendo.world" class="topbar-link">friendo.world &rarr;</a>
+  </header>
+
+  <div class="layout">
+    <input type="checkbox" id="navtoggle" class="navtoggle">
+    <label for="navtoggle" class="navtoggle-btn" aria-label="Toggle navigation">☰ Menu</label>
+    <aside class="sidebar">
+      <nav>
+        {# Nav generated from content/docs/*.md — group order editorial, links/order from data.group/data.weight. Active link is marked client-side (see script) to keep the template free of nested tags. #}
+        <p class="nav-group">Getting started</p>
+        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Getting started" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+
+        <p class="nav-group">Concepts</p>
+        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Concepts" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+
+        <p class="nav-group">Reference</p>
+        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Reference" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+
+        <p class="nav-group">Roadmap</p>
+        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Roadmap" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+      </nav>
+      <script>
+        (function () {
+          var slug = location.pathname.replace(/^\/docs\//, "");
+          var link = document.querySelector('.sidebar a[data-slug="' + slug + '"]');
+          if (link) link.classList.add("active");
+        })();
+      </script>
+    </aside>
+
+    <main id="content" class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

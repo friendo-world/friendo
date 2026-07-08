@@ -162,8 +162,9 @@ can have several. All content (`posts`, `comments`, …) references a profile vi
 **Members** are visitors who verify their email via a one-time code
 (`/auth/request-code` → `/auth/verify-code`, backed by `otp_codes`) to get a
 passwordless `member` account. They share the same session/cookie and role gate,
-so they authenticate but can't reach admin endpoints. See
-[docs/phase-3-community.md](docs/phase-3-community.md).
+so they authenticate but can't reach admin endpoints. See the Phase 3 design in
+[docs/content/docs/phase-3-community.md](docs/content/docs/phase-3-community.md)
+(also published at `docs.friendo.world/docs/phase-3-community`).
 
 Bcrypt hashes are portable, so `friendo push --users` carries accounts to a
 deployed site unchanged — the same password works everywhere.

@@ -1,0 +1,8 @@
+[site]
+name = "Friendo Docs"
+
+[content]
+types = ["docs"]
+
+[deploy]
+target = "https://docs.friendo.world"

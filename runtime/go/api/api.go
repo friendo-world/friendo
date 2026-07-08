@@ -421,16 +421,24 @@ func handlePushData(db *data.DB) http.HandlerFunc {
 			}
 			now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
+			// `data` (arbitrary front matter) arrives as a nested object; store as JSON.
+			dataJSON := "{}"
+			if d, ok := rec["data"]; ok && d != nil {
+				if b, err := json.Marshal(d); err == nil {
+					dataJSON = string(b)
+				}
+			}
+
 			_, err := db.Conn.Exec(
-				`INSERT INTO posts (id, site_id, collection, slug, title, body, author_id, status, published_at, created, updated)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO posts (id, site_id, collection, slug, title, body, author_id, status, published_at, data, created, updated)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(id) DO UPDATE SET
 				   collection=excluded.collection, slug=excluded.slug, title=excluded.title,
 				   body=excluded.body, author_id=excluded.author_id, status=excluded.status,
-				   published_at=excluded.published_at, updated=excluded.updated`,
+				   published_at=excluded.published_at, data=excluded.data, updated=excluded.updated`,
 				id, db.SiteID, str("collection"), str("slug"), str("title"),
 				str("body"), str("author_id"), str("status"),
-				str("published_at"),
+				str("published_at"), dataJSON,
 				func() string {
 					if c := str("created"); c != "" {
 						return c
@@ -521,7 +529,7 @@ func handlePushUsers(db *data.DB) http.HandlerFunc {
 func handlePullData(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Conn.Query(
-			`SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
+			`SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated, data
 			 FROM posts WHERE site_id = ? ORDER BY created DESC`,
 			db.SiteID,
 		)
@@ -533,8 +541,8 @@ func handlePullData(db *data.DB) http.HandlerFunc {
 
 		var records []map[string]any
 		for rows.Next() {
-			var id, collection, slug, title, body, authorID, status, publishedAt, created, updated string
-			if err := rows.Scan(&id, &collection, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated); err != nil {
+			var id, collection, slug, title, body, authorID, status, publishedAt, created, updated, dataJSON string
+			if err := rows.Scan(&id, &collection, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated, &dataJSON); err != nil {
 				continue
 			}
 			records = append(records, map[string]any{
@@ -548,6 +556,7 @@ func handlePullData(db *data.DB) http.HandlerFunc {
 				"published_at": publishedAt,
 				"created":      created,
 				"updated":      updated,
+				"data":         dataJSON,
 			})
 		}
 

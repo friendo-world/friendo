@@ -22,6 +22,7 @@ func Init(name string) error {
 		filepath.Join(name, "pages", "blog"),
 		filepath.Join(name, "templates"),
 		filepath.Join(name, "public"),
+		filepath.Join(name, "content", "blog"),
 	}
 
 	for _, dir := range dirs {
@@ -31,12 +32,13 @@ func Init(name string) error {
 	}
 
 	files := map[string]string{
-		filepath.Join(name, "friendo.toml"):                friendoToml(name),
-		filepath.Join(name, "templates", "base.html"):      baseHTML,
-		filepath.Join(name, "pages", "index.html"):         indexHTML,
-		filepath.Join(name, "pages", "404.html"):           notFoundHTML,
+		filepath.Join(name, "friendo.toml"):                 friendoToml(name),
+		filepath.Join(name, "templates", "base.html"):       baseHTML,
+		filepath.Join(name, "pages", "index.html"):          indexHTML,
+		filepath.Join(name, "pages", "404.html"):            notFoundHTML,
 		filepath.Join(name, "pages", "blog", "[slug].html"): blogPostHTML,
-		filepath.Join(name, "public", "style.css"):         styleCSS,
+		filepath.Join(name, "public", "style.css"):          styleCSS,
+		filepath.Join(name, "content", "blog", "hello-world.md"): helloPostMD,
 	}
 
 	for path, content := range files {
@@ -106,10 +108,25 @@ const blogPostHTML = `{% extends "templates/base.html" %}
 {% block content %}
 <article>
     <h1>{{ record.title }}</h1>
-    <div>{{ record.body }}</div>
+    <div>{{ record.body|markdown }}</div>
     <p><a href="/">&larr; Back</a></p>
 </article>
 {% endblock %}
+`
+
+// helloPostMD is a starter content file. Running ` + "`friendo build`" + ` (or
+// ` + "`friendo serve`" + `) compiles content/blog/*.md into the blog collection.
+const helloPostMD = `---
+title: Hello, world
+slug: hello-world
+---
+
+Welcome to your new **Friendo** site.
+
+This post lives in ` + "`content/blog/hello-world.md`" + ` — a plain markdown file.
+Edit it, add more files under ` + "`content/`" + `, and run ` + "`friendo serve`" + ` to see
+changes live. The folder under ` + "`content/`" + ` is the collection; the front matter
+above sets the title and slug.
 `
 
 const styleCSS = `/* Friendo starter styles */

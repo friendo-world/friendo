@@ -1,0 +1,36 @@
+{% extends "templates/base.html" %}
+
+{% block title %}{{ site.name }} — Your site is a folder{% endblock %}
+
+{% block content %}
+<article class="doc">
+  <div class="hero">
+    <h1>Friendo Documentation</h1>
+    <p class="lead">A local-first website builder. Your site is a folder — build it
+      locally, publish it anywhere.</p>
+    <a class="cta" href="/docs/installation">Get started &rarr;</a>
+  </div>
+
+  <div class="cards">
+    <a class="card" href="/docs/installation">
+      <h3>Install</h3>
+      <p>Get the <code>friendo</code> command on your machine.</p>
+    </a>
+    <a class="card" href="/docs/first-site">
+      <h3>Your first site</h3>
+      <p><code>init</code> → <code>serve</code> → a running site in a minute.</p>
+    </a>
+    <a class="card" href="/docs/deploy">
+      <h3>Deploy</h3>
+      <p>One command to put your site on the internet.</p>
+    </a>
+    <a class="card" href="/docs/site-is-a-folder">
+      <h3>Concepts</h3>
+      <p>How Friendo thinks about sites, content, and templates.</p>
+    </a>
+  </div>
+
+  <p class="meta">This site is itself a Friendo site — dogfooded, rendered from
+    markdown, and deployed to <code>docs.friendo.world</code>.</p>
+</article>
+{% endblock %}

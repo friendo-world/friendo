@@ -8,10 +8,12 @@
 
 import baselineSchema from "./schema.sql";
 import authorProfiles from "./migrations/0002_author_profiles.sql";
+import postData from "./migrations/0003_post_data.sql";
 
 export const MIGRATIONS = [
   { id: 1, name: "baseline", sql: baselineSchema },
   { id: 2, name: "author_profiles", sql: authorProfiles },
+  { id: 3, name: "post_data", sql: postData },
 ];
 
 // splitStatements drops full-line comments and splits SQL into statements.

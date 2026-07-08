@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 
 	"github.com/friendo-world/friendo/cli/internal/deploy"
+	"github.com/friendo-world/friendo/runtime/go/content"
 	"github.com/friendo-world/friendo/runtime/go/export"
 	"github.com/friendo-world/friendo/runtime/go/scaffold"
 	"github.com/friendo-world/friendo/runtime/go/server"
@@ -15,11 +17,26 @@ import (
 // version is set at build time via -ldflags "-X main.version=…" (see .goreleaser.yaml).
 var version = "dev"
 
+// resolveVersion returns the ldflags-injected version for release binaries, and
+// otherwise falls back to the module version stamped by `go install …@vX.Y.Z`
+// (which can't apply ldflags), so both install paths report a real version.
+func resolveVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return version
+}
+
 func main() {
 	var rootCmd = &cobra.Command{
 		Use:     "friendo",
 		Short:   "Your site is a folder. Build it locally. Publish it anywhere.",
-		Version: version,
+		Version: resolveVersion(),
 	}
 
 	// --- init ---
@@ -78,6 +95,32 @@ func main() {
 		},
 	}
 	exportCmd.Flags().StringVar(&exportMode, "mode", "static", "Export mode: static or bundle")
+
+	// --- build ---
+	var buildCmd = &cobra.Command{
+		Use:   "build",
+		Short: "Compile the content/ folder (markdown files) into the site database",
+		Run: func(cmd *cobra.Command, args []string) {
+			dir, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			if !content.HasContent(dir) {
+				fmt.Println("No content/ directory — nothing to build.")
+				return
+			}
+			res, err := content.Build(dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("Build complete — %s\n", res.Summary())
+			for _, w := range res.Warnings {
+				fmt.Fprintf(os.Stderr, "  warning: %s\n", w)
+			}
+		},
+	}
 
 	// --- deploy ---
 	var deployAPIURL string
@@ -183,7 +226,7 @@ Targets:
 	pullCmd.Flags().BoolVar(&pullUsers, "users", false, "Pull user accounts from the deployed site")
 	pullCmd.Flags().StringVar(&pullTarget, "target", "", "Override deploy target URL")
 
-	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd)
+	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

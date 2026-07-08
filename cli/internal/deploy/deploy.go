@@ -17,6 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/friendo-world/friendo/runtime/go/content"
 	"github.com/friendo-world/friendo/runtime/go/data"
 )
 
@@ -62,7 +63,15 @@ func RunDeploy(apiURL string) error {
 		return err
 	}
 
-	subdomain := sanitizeSubdomain(siteCfg.Site.Name)
+	// Prefer an explicit deploy target's subdomain (e.g. friendo.toml already
+	// declares docs.friendo.world) over deriving one from the display name.
+	subdomain := ""
+	if siteCfg.Deploy.Target != "" {
+		subdomain = subdomainFromTarget(siteCfg.Deploy.Target)
+	}
+	if subdomain == "" {
+		subdomain = sanitizeSubdomain(siteCfg.Site.Name)
+	}
 	if subdomain == "" {
 		subdomain = filepath.Base(siteDir)
 	}
@@ -130,9 +139,21 @@ func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain, apiURL s
 
 	// A just-provisioned site's DNS record needs a moment to become resolvable
 	// before the push can reach it. Poll until it responds (or time out).
-	fmt.Print("Waiting for site to come online..")
+	fmt.Print("Waiting for site to come online (DNS may take a minute)..")
 	if err := waitForSite(target); err != nil {
-		return fmt.Errorf("%w\nThe site was provisioned — retry with `friendo push` in a moment", err)
+		host := strings.TrimPrefix(target, "https://")
+		fmt.Println(" not reachable yet")
+		fmt.Printf(`
+%s is provisioned and live, but it isn't resolving from your machine yet —
+almost always local DNS caching a lookup made before the site existed. The site
+itself is fine.
+
+To finish:
+  1. Wait a minute (or flush DNS — macOS: sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder)
+  2. Confirm it resolves:  dig +short %s
+  3. Complete the deploy:  friendo push --data
+`, target, host)
+		return fmt.Errorf("timed out waiting for %s to resolve locally", host)
 	}
 	fmt.Println(" ready")
 
@@ -167,6 +188,16 @@ func RunPush(opts PushOptions) error {
 	}
 
 	target := resolveTarget(opts.Target, siteCfg, siteDir)
+
+	// Compile the file-based content/ folder into the local DB first, so imported
+	// records (and their assets) are included in the push.
+	if content.HasContent(siteDir) {
+		res, err := content.Build(siteDir)
+		if err != nil {
+			return fmt.Errorf("building content: %w", err)
+		}
+		fmt.Printf("Content: %s\n", res.Summary())
+	}
 
 	if opts.DryRun {
 		subdomain := subdomainFromTarget(target)
@@ -289,16 +320,27 @@ func RunPull(opts PullOptions) error {
 				return v
 			}
 
+			dataJSON := "{}"
+			if d, ok := r["data"]; ok && d != nil {
+				if s, isStr := d.(string); isStr {
+					if s != "" {
+						dataJSON = s
+					}
+				} else if b, err := json.Marshal(d); err == nil {
+					dataJSON = string(b)
+				}
+			}
+
 			_, err := db.Conn.Exec(
-				`INSERT INTO posts (id, site_id, collection, slug, title, body, author_id, status, published_at, created, updated)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO posts (id, site_id, collection, slug, title, body, author_id, status, published_at, data, created, updated)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(id) DO UPDATE SET
 				   collection=excluded.collection, slug=excluded.slug, title=excluded.title,
 				   body=excluded.body, author_id=excluded.author_id, status=excluded.status,
-				   published_at=excluded.published_at, updated=excluded.updated`,
+				   published_at=excluded.published_at, data=excluded.data, updated=excluded.updated`,
 				str("id"), db.SiteID, str("collection"), str("slug"), str("title"),
 				str("body"), str("author_id"), str("status"),
-				str("published_at"), str("created"), str("updated"),
+				str("published_at"), dataJSON, str("created"), str("updated"),
 			)
 			if err != nil {
 				fmt.Printf("\n  Warning: failed to insert record %s: %v\n", str("id"), err)
@@ -646,7 +688,10 @@ func siteURLForSubdomain(baseURL, subdomain string) string {
 // answers (any HTTP status < 500), or an error after the timeout.
 func waitForSite(target string) error {
 	client := &http.Client{Timeout: 10 * time.Second}
-	deadline := time.Now().Add(90 * time.Second)
+	// Generous window: a resolver that negative-cached the hostname before the
+	// record existed can hold NXDOMAIN for several minutes, longer than the record
+	// takes to actually propagate.
+	deadline := time.Now().Add(4 * time.Minute)
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(target + "/_/api/setup")
 		if err == nil {

@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/friendo-world/friendo/runtime/go/admin"
+	"github.com/friendo-world/friendo/runtime/go/content"
 	"github.com/friendo-world/friendo/runtime/go/data"
 	_ "github.com/friendo-world/friendo/runtime/go/renderer" // registers filters
 )
@@ -67,6 +68,13 @@ func Start(port int, openAdmin bool) error {
 	}
 	defer db.Close()
 
+	// Compile the file-based content/ folder into the database (no-op if absent).
+	if res, err := content.Import(siteDir, db); err != nil {
+		log.Printf("Content import failed: %v", err)
+	} else if res != nil {
+		log.Printf("Content: %s", res.Summary())
+	}
+
 	// Load site configuration from friendo.toml (or use directory name).
 	siteCfg := loadSiteConfig(siteDir)
 
@@ -86,7 +94,7 @@ func Start(port int, openAdmin bool) error {
 	}
 
 	// Start file watcher for hot reload.
-	go watchForChanges(siteDir)
+	go watchForChanges(siteDir, db)
 
 	r := chi.NewRouter()
 
@@ -172,8 +180,9 @@ func handleReloadSSE(w http.ResponseWriter, r *http.Request) {
 }
 
 // watchForChanges watches the site directory for file changes and triggers
-// a browser reload via SSE. Debounced to avoid rapid-fire reloads.
-func watchForChanges(siteDir string) {
+// a browser reload via SSE. Debounced to avoid rapid-fire reloads. Changes under
+// content/ trigger a re-import into the database before the reload.
+func watchForChanges(siteDir string, db *data.DB) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Printf("Hot reload disabled: %v", err)
@@ -181,8 +190,8 @@ func watchForChanges(siteDir string) {
 	}
 	defer watcher.Close()
 
-	// Watch pages/, templates/, and public/ recursively.
-	for _, dir := range []string{"pages", "templates", "public"} {
+	// Watch pages/, templates/, public/, and content/ recursively.
+	for _, dir := range []string{"pages", "templates", "public", "content"} {
 		dirPath := filepath.Join(siteDir, dir)
 		if _, err := os.Stat(dirPath); err != nil {
 			continue
@@ -209,8 +218,18 @@ func watchForChanges(siteDir string) {
 				if debounce != nil {
 					debounce.Stop()
 				}
+				changed := event.Name
 				debounce = time.AfterFunc(100*time.Millisecond, func() {
-					log.Printf("File changed: %s", event.Name)
+					log.Printf("File changed: %s", changed)
+					// A content/ change means a markdown edit — recompile into the DB
+					// (collections are re-queried per request, so the reload picks it up).
+					if strings.Contains(filepath.ToSlash(changed), "/content/") {
+						if res, err := content.Import(siteDir, db); err != nil {
+							log.Printf("Content import failed: %v", err)
+						} else if res != nil {
+							log.Printf("Content: %s", res.Summary())
+						}
+					}
 					liveReload.notify()
 				})
 			}

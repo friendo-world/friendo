@@ -1,0 +1,12 @@
+{% extends "templates/base.html" %}
+
+{% block title %}{{ record.title }} — {{ site.name }}{% endblock %}
+
+{% block content %}
+<article class="doc">
+  <h1 class="doc-title">{{ record.title }}</h1>
+  <div class="doc-body">
+    {{ record.body|markdown }}
+  </div>
+</article>
+{% endblock %}

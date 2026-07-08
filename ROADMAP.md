@@ -64,7 +64,8 @@ code exists in the repo yet.)
 Bringing the rest of the data model to life: comments, reactions, and polls
 written by site **visitors**. Visitors become passwordless `member` accounts by
 verifying their email (OTP). Full design + slices in
-[docs/phase-3-community.md](docs/phase-3-community.md).
+[docs/content/docs/phase-3-community.md](docs/content/docs/phase-3-community.md)
+(also published at `docs.friendo.world/docs/phase-3-community`).
 
 - **3a — Identity foundation** ✅ — a shared Go/edge migration mechanism; the
   accounts/profiles split (`users` = accounts, `authors` = profiles linked by

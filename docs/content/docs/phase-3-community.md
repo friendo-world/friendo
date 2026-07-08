@@ -1,8 +1,13 @@
-# Phase 3 — Community
+---
+title: Phase 3 — Community
+slug: phase-3-community
+group: Roadmap
+weight: 10
+---
 
 Activating the visitor-facing half of the data model: comments, reactions, and
-polls, written by verified visitors. See [ARCHITECTURE.md](../ARCHITECTURE.md) for
-the base design this builds on.
+polls, written by verified visitors. See [Auth & users](/docs/auth) for the
+identity model this builds on.
 
 ## Identity model: accounts vs. profiles
 
