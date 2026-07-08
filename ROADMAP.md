@@ -107,18 +107,37 @@ with `npm run runtime:bundle && npm run runtime:publish`.
 ## Production
 
 The platform is **live at [friendo.world](https://friendo.world)** with full
-multi-tenancy — the dispatch Worker runs in the `production` dispatch namespace
-with its own prod D1 (`friendo-world`), the apex is a Workers Custom Domain (auto
-DNS + TLS), and the `*.friendo.world/*` route dispatches tenant sites. Because the
-zone is on the Free plan (no proxied wildcard DNS), the provisioner creates a
-**proxied `{sub}.friendo.world` DNS record per site** at provision time and removes
-it at teardown; Universal SSL covers `*.friendo.world` so HTTPS is automatic. The
-whole lifecycle — provision → live tenant serving over HTTPS → destroy (all
-resources incl. DNS cleaned up) — is verified live. Requires a `CF_API_TOKEN` with
-Zone:DNS:Edit (set as the prod secret).
+multi-tenancy. The dispatch Worker runs in the `production` dispatch namespace
+with its own prod D1 (`friendo-world`); the apex is a Workers Custom Domain (auto
+DNS + TLS); the `*.friendo.world/*` route dispatches tenant sites; and a single
+proxied **`*.friendo.world` wildcard DNS record** makes every subdomain resolve
+instantly (Universal SSL covers it). The whole lifecycle — provision → live tenant
+over HTTPS → destroy — is verified live.
+
+**Provisioning is DNS-free and fast (~3s):** `POST /api/sites` creates just a D1
+database, an R2 bucket, and the user Worker. No per-site DNS (the wildcard handles
+it) and no schema pre-apply (the site's D1 self-initializes on first request).
+This removed the old per-site-DNS record management and the propagation/negative-
+cache wait entirely. (Runs on **Workers Paid** — WfP requires it, and it lifts
+D1's per-account cap from 10 to 50,000.)
+
+## Recently shipped
+
+- **File-based `content/` authoring** — Hugo-style markdown → DB, with a `data`
+  JSON column for arbitrary front matter, `friendo build`, serve/push integration,
+  and a `sort_by` filter. See [ARCHITECTURE.md](ARCHITECTURE.md).
+- **`markdown` filter** in both runtimes (goldmark / marked), plus edge template
+  engine fixes (`{# comments #}`, filters in `{% for %}` iterables).
+- **Distribution** — GoReleaser cross-platform binaries + `curl | sh` installer +
+  `go install`; `friendo --version`.
+- **Site lifecycle CLI** — `friendo build` / `redeploy` / `destroy`.
 
 ## Known gaps / tech debt
 
 - **No bulk runtime rollout.** Redeploy is per-site and owner-only; pushing a
   runtime update across *all* sites at once would need an operator role (the
   platform has no admin scope yet) or a script iterating owned sites.
+- **Customer custom domains** (`friendo.toml deploy.domain` → a user's own
+  domain, e.g. Cloudflare for SaaS) aren't wired up yet.
+- **Image galleries / page bundles** (folder of images + `index.md`) are the
+  planned phase 2 of file-based content — needs a binary-safe asset push.

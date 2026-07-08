@@ -64,6 +64,7 @@ The command-line tool. Init a site, serve it locally, push it to the internet, p
 ```bash
 friendo init my-site        # scaffold a new site
 friendo serve               # start the local dev server
+friendo build               # compile content/ markdown into the site database
 friendo deploy              # first-time deploy (interactive)
 friendo push                # push updates to your deployed site
 friendo pull --data          # pull remote data into local
@@ -108,11 +109,18 @@ my-site/
 │   ├── index.html
 │   └── blog/
 │       └── [slug].html
+├── content/            # Optional: author content as markdown files
+│   └── blog/
+│       └── hello.md    # → a record in the "blog" collection
 ├── public/             # Static assets (CSS, JS, images)
 │   └── style.css
 └── data/               # SQLite database
     └── friendo.db
 ```
+
+Content lives in the database, but you can author it as **markdown files** in
+`content/` (Hugo-style): the folder is the collection, YAML front matter sets the
+fields, and `friendo serve`/`build`/`push` compile it into the DB.
 
 ---
 

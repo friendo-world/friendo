@@ -88,6 +88,25 @@ reuse a cached session from `~/.friendo/config`, else log in. If the target has
 the CLI walks the user through creating the first admin via `POST /_/api/setup` —
 so the deploy wizard's final push bootstraps the site owner automatically.
 
+## File-based content (`content/`)
+
+Content normally lives in the DB (edited via the admin UI or API). A site can
+*also* be authored as **files** — a Hugo-style `content/` folder that compiles
+into that same DB, so the runtimes are untouched and parity holds.
+
+- `content/<collection>/<slug>.md` → a record in `<collection>` with that slug;
+  YAML front matter supplies `title`/`slug`/`status`/`date`, and **any other keys
+  land in a `data` JSON column** (migration `0003`), readable in templates as
+  `record.data.<field>`. The markdown body is stored verbatim and rendered by the
+  `markdown` filter at template time.
+- The importer (`runtime/go/content`) is a Go/CLI-side layer. `friendo build` runs
+  it; `friendo serve` runs it on startup and re-imports on every `content/` edit
+  (hot reload); `friendo push`/`deploy` run it before uploading. Upserts by
+  `(collection, slug)`, so `content/` is the source of truth when present.
+
+This documentation site is authored this way (`docs/content/docs/*.md`), with its
+sidebar generated from the docs collection via `collections.docs|sort_by:"data.weight"`.
+
 ## Managed hosting: Workers for Platforms
 
 friendo.world runs each site as its own isolated Worker via
@@ -118,17 +137,25 @@ shared hotspot, no noisy neighbors.
 
 **Runtime artifacts.** The provisioner deploys a *bundled* edge runtime, not the
 source tree. `npm run runtime:bundle` esbuild-bundles `runtime/edge/index.js`
-(hono + bcryptjs inlined, `.sql` files loaded as text) into
-`runtime/edge/dist/edge-runtime.js` and copies the baseline schema alongside it;
-`npm run runtime:publish` uploads both to the `friendo-runtime` R2 bucket
-(`RUNTIME_BUCKET`). Re-run these whenever `runtime/edge/` changes so new sites
-get the current runtime.
+(hono + bcryptjs + marked inlined, `.sql` files loaded as text) into
+`runtime/edge/dist/edge-runtime.js`; `npm run runtime:publish` uploads it to the
+`friendo-runtime` R2 bucket (`RUNTIME_BUCKET`). Re-run these whenever
+`runtime/edge/` changes so new sites get the current runtime. (No schema artifact
+is shipped — the schema is embedded in the bundle and self-applies; see below.)
+
+**Tenant DNS is one wildcard.** A single proxied `*.friendo.world` DNS record
+(created once) means every subdomain resolves instantly to Cloudflare's edge,
+where the `*.friendo.world/*` route hands it to the dispatch Worker. So
+provisioning creates **no per-site DNS** — a brand-new subdomain is reachable the
+moment its Worker is live, with no propagation wait. Universal SSL covers
+`*.friendo.world`, so HTTPS is automatic.
 
 **Provisioning** (`friendo deploy` → friendo.world): the CLI authenticates with
-the platform (device-auth flow), then `POST /api/sites` creates a D1 database,
-applies the baseline schema, creates an R2 bucket, and deploys the bundled runtime
-from `RUNTIME_BUCKET` as a user Worker bound to them (`DB`, `ASSETS`, `SITE_ID`,
-`SITE_NAME`), recording the resource IDs in the platform registry. Any partial
+the platform (device-auth flow), then `POST /api/sites` creates a **D1 database +
+R2 bucket + user Worker** (the bundled runtime from `RUNTIME_BUCKET`, bound as
+`DB`, `ASSETS`, `SITE_ID`, `SITE_NAME`) and records the resource IDs in the
+platform registry — no DNS, no schema pre-apply (the site's D1 self-initializes
+from the embedded baseline on its first request). It's ~3 seconds. Any partial
 failure rolls back the resources it created. The CLI then pushes (and bootstraps
 the admin) over the new site's `/_/api/*`. Re-running `friendo deploy` for an
 existing site (or `POST /api/sites/:id/redeploy`) re-pushes the current bundle to

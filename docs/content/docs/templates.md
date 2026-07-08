@@ -59,6 +59,11 @@ Every page is rendered with:
 | `request.path` | The current URL path |
 | `collections.<name>` | All records in a collection |
 | `record` | The matched record on a dynamic `[param]` route |
+| `record.data.<field>` | Custom [front matter](/docs/content) fields (tags, weight, …) |
+
+A record's built-in fields are `id`, `slug`, `title`, `body`, `status`,
+`published_at`, `created`, `updated`. Any extra keys from a content file's front
+matter are available under `record.data` — e.g. `{{ record.data.weight }}`.
 
 ## Filters
 
@@ -71,6 +76,19 @@ set (`truncate`, `upper`, `lower`, `date`, `default`, `length`, …):
 | `date` | `{{ post.created\|date:"Jan 2, 2006" }}` | a formatted date |
 | `resize` | `{{ img\|asset_url\|resize:"300x200" }}` | `/public/img?w=300&h=200` (a CDN hint) |
 | `markdown` | `{{ post.body\|markdown }}` | markdown rendered to HTML |
+| `sort_by` | `{% for d in collections.docs\|sort_by:"data.weight" %}` | a list sorted by a (dotted) field |
+
+### sort_by
+
+`sort_by` orders a list of records by a field — including a nested one like
+`data.weight` — numerically when the values are numbers, else alphabetically.
+This site's sidebar is built with it:
+
+```html
+{% for d in collections.docs|sort_by:"data.weight" %}
+  <a href="/docs/{{ d.slug }}">{{ d.title }}</a>
+{% endfor %}
+```
 
 ### markdown
 

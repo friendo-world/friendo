@@ -107,7 +107,8 @@ npm run tunnel            # map *.local.friendo.world → :8787
 | Command | Description |
 |---|---|
 | `friendo init [name]` | Scaffold a new site |
-| `friendo serve` | Start the local dev server |
+| `friendo serve` | Start the local dev server (compiles `content/`, hot reload) |
+| `friendo build` | Compile the `content/` folder (markdown) into the site database |
 | `friendo export` | Export as static HTML or bundle |
 | `friendo deploy` | Interactive deploy wizard (`--api-url` to target a non-default platform) |
 | `friendo redeploy` | Re-push the current managed-hosting runtime to your site's Worker |
@@ -133,6 +134,8 @@ npm run tunnel            # map *.local.friendo.world → :8787
 | `npm run serve:open` | Same but skip admin auth |
 | `npm run edge:dev` | Start edge runtime on :8788 (miniflare D1 + R2) |
 | `npm run edge:schema` | Apply schema to local edge D1 |
+| `npm run runtime:bundle` | Bundle `runtime/edge/` → `dist/edge-runtime.js` (the per-site Worker) |
+| `npm run runtime:publish` | Publish the bundle to the `friendo-runtime` R2 bucket (provisioning reads it) |
 | `npm run platform:dev` | Start platform dispatch Worker on :8787 |
 | `npm run tunnel` | Map *.local.friendo.world → :8787 |
 | `npm run dev` | Full dev environment (Go + platform + tunnel) |

@@ -16,12 +16,18 @@ version.
 Scaffold a new site in `./name` (default `my-site`).
 
 ### `friendo serve`
-Start the local dev server with hot reload.
+Start the local dev server with hot reload. Compiles the `content/` folder on
+startup and re-imports on every edit.
 
 | Flag | Default | What |
 |---|---|---|
 | `--port`, `-p` | `3000` | Port to serve on |
 | `--open-admin` | `false` | Skip admin auth (local convenience) |
+
+### `friendo build`
+Compile the [`content/`](/docs/content) folder (markdown files) into the site
+database. Runs automatically inside `serve` and `push`/`deploy`; use it on its own
+for one-off compiles or CI.
 
 ### `friendo export`
 Export the site as static output.
