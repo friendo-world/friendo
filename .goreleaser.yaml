@@ -3,16 +3,13 @@
 # runs this on a `v*` tag push.
 #
 # The admin SPA is embedded via go:embed from runtime/go/admin/spa. That directory
-# must be current before a release — CI runs `npm run admin` first; locally, run
-# `npm run admin` and commit before tagging. Test without publishing:
+# must be current and committed before a release (the release builds from the
+# committed tree — a dirty tree aborts the release). Run `npm run admin` and commit
+# before tagging. Test without publishing:
 #   goreleaser release --snapshot --clean
 version: 2
 
 project_name: friendo
-
-before:
-  hooks:
-    - go mod tidy
 
 builds:
   - id: friendo

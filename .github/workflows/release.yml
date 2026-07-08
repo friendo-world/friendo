@@ -1,6 +1,12 @@
 name: release
 
 # Cut a release by pushing a tag:  git tag v0.1.0 && git push origin v0.1.0
+#
+# The admin SPA is embedded via go:embed from runtime/go/admin/spa, so the
+# committed build is what ships. CI does NOT rebuild it — a rebuild here would
+# produce different content-hashed filenames than what's committed and leave the
+# tree dirty, which GoReleaser refuses to release from. Keep the committed SPA
+# current: run `npm run build` (or `npm run admin`) and commit before tagging.
 on:
   push:
     tags:
@@ -16,15 +22,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # Build + embed the admin SPA so the released binary has the current UI,
-      # regardless of what's committed in runtime/go/admin/spa.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      # package-lock.json is gitignored repo-wide, so use install (not ci).
-      - run: npm --prefix admin install
-      - run: npm run admin
 
       - uses: actions/setup-go@v5
         with:
