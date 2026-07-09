@@ -1,6 +1,6 @@
 import type { User } from "../api";
 
-type Tab = "dashboard" | "users" | "settings";
+type Tab = "dashboard" | "users" | "moderation" | "settings";
 
 export function Nav({
   user,
@@ -28,6 +28,7 @@ export function Nav({
       <span class="font-bold text-gray-900">Friendo</span>
       {link("/_/", "Dashboard", "dashboard")}
       {link("/_/users", "Users", "users")}
+      {link("/_/moderation", "Comments", "moderation")}
       {link("/_/settings", "Settings", "settings")}
       <a href="/" class="text-sm text-gray-500 hover:text-gray-900">
         View site

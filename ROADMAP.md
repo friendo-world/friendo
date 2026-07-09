@@ -8,7 +8,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Phase 1** | CLI + Go runtime + friendo.world foundation | ✅ Complete |
 | **Phase 1.5** | Auth, shared admin SPA, codebase refactor, Workers for Platforms, working deploy | ✅ Complete |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
-| **Phase 3** | Community features, template marketplace | 🔧 In progress |
+| **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
 
 ---
 
@@ -59,11 +59,12 @@ A Tauri-based WYSIWYG editor for authoring sites without hand-editing templates.
 An independent track — it doesn't depend on the community work below. (No `editor/`
 code exists in the repo yet.)
 
-## Phase 3 — Community features (in progress)
+## Phase 3 — Community features (core complete)
 
-Bringing the rest of the data model to life: comments, reactions, and polls
+Brings the rest of the data model to life: comments, reactions, and polls
 written by site **visitors**. Visitors become passwordless `member` accounts by
-verifying their email (OTP). Full design + slices in
+verifying their email (OTP). Slices 3a–3e are shipped and parity-tested on both
+runtimes (deferred items noted per slice below). Full design + slices in
 [docs/content/docs/phase-3-community.md](docs/content/docs/phase-3-community.md)
 (also published at `docs.friendo.world/docs/phase-3-community`).
 
@@ -72,11 +73,27 @@ verifying their email (OTP). Full design + slices in
   `user_id`, one account → many profiles); a default profile per account;
   `author_id` → `authors.id`; OTP `request-code` / `verify-code`. Edge schema
   brought to full parity with Go. Verified by the parity harness on both runtimes.
-- **3b** — comments + moderation queue.
-- **3c** — reactions + polls.
-- **3d** — `friendo.js` SDK (`data-friendo-*` progressive enhancement).
-- **3e** — hardening: rate limiting, real email provider, moderation toggle,
-  persona switcher.
+- **3b — Comments + moderation** ✅ — `GET/POST /_/api/posts/:id/comments`
+  (member-gated write, public reads see approved only), a `comments.status`
+  column (migration `0004`), admin moderation endpoints (`GET /comments`,
+  `PUT/DELETE /comments/:id`) and a Comments queue in the admin SPA.
+- **3c — Reactions + polls** ✅ — toggle `GET/POST /_/api/reactions`; poll
+  `POST /_/api/polls` (admin), `GET /_/api/polls/:id`, `POST /_/api/polls/:id/vote`
+  (member, one vote each, closed-poll guard); unique indexes (migration `0005`).
+- **3d — `friendo.js` SDK** ✅ — dependency-free **Web Components**
+  (`<friendo-auth>`, `<friendo-comments>`, `<friendo-reactions>`, `<friendo-poll>`)
+  styleable via `::part()`. Built by `npm run sdk` and served byte-identically at
+  `/friendo.js` by both runtimes. (Supersedes the earlier `data-friendo-*` sketch.)
+- **3e — Hardening** ✅ (core) — comment auto-approve toggle (persisted
+  `site_settings`, migration `0006`, `GET/PUT /_/api/settings` + SPA switch);
+  a durable `request-code` rate limit (429); and an email-provider seam
+  (Resend via `RESEND_API_KEY` + `FRIENDO_EMAIL_FROM`; the OTP echo disables once
+  configured). **Deferred:** the persona switcher UI and per-member comment-rate
+  limiting.
+
+Not yet wired: exposing approved comments/reactions/polls in the *server-side*
+template context (`{{ post.comments }}`). The SDK delivers them client-side
+today; server-side relations need a lazy-load mechanism in both template engines.
 
 ## Testing
 

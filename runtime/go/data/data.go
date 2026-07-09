@@ -406,6 +406,343 @@ func (db *DB) DeleteRecord(id string) error {
 	return nil
 }
 
+// --- Comments ---
+
+// commentJSON is the shape returned for a comment, with its author profile's
+// display fields joined in.
+func scanComment(scan func(dest ...any) error) (map[string]any, error) {
+	var id, postID, parentID, authorID, body, status, created string
+	var authorName, authorAvatar sql.NullString
+	if err := scan(&id, &postID, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"id":            id,
+		"post_id":       postID,
+		"parent_id":     parentID,
+		"author_id":     authorID,
+		"author_name":   authorName.String,
+		"author_avatar": authorAvatar.String,
+		"body":          body,
+		"status":        status,
+		"created":       created,
+	}, nil
+}
+
+const commentSelect = `SELECT c.id, c.post_id, c.parent_id, c.author_id, c.body, c.status, c.created,
+       a.name, a.avatar
+FROM comments c LEFT JOIN authors a ON a.id = c.author_id`
+
+// ListCommentsByPost returns a post's comments, oldest first. When
+// includeUnapproved is false (public reads) only approved comments are returned.
+func (db *DB) ListCommentsByPost(postID string, includeUnapproved bool) ([]map[string]any, error) {
+	q := commentSelect + ` WHERE c.site_id = ? AND c.post_id = ?`
+	args := []any{db.SiteID, postID}
+	if !includeUnapproved {
+		q += ` AND c.status = 'approved'`
+	}
+	q += ` ORDER BY c.created ASC`
+	rows, err := db.Conn.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		c, err := scanComment(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListCommentsByStatus returns all comments across the site with the given
+// status (the moderation queue), newest first.
+func (db *DB) ListCommentsByStatus(status string) ([]map[string]any, error) {
+	q := commentSelect + ` WHERE c.site_id = ?`
+	args := []any{db.SiteID}
+	if status != "" {
+		q += ` AND c.status = ?`
+		args = append(args, status)
+	}
+	q += ` ORDER BY c.created DESC`
+	rows, err := db.Conn.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		c, err := scanComment(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// GetComment returns a single comment by id, or sql.ErrNoRows.
+func (db *DB) GetComment(id string) (map[string]any, error) {
+	row := db.Conn.QueryRow(commentSelect+` WHERE c.id = ? AND c.site_id = ?`, id, db.SiteID)
+	return scanComment(row.Scan)
+}
+
+// CreateComment inserts a comment (status 'pending') and returns its id.
+func (db *DB) CreateComment(postID, parentID, authorID, body, status string) (string, error) {
+	if status == "" {
+		status = "pending"
+	}
+	id := GenerateID()
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO comments (id, site_id, post_id, parent_id, author_id, body, status, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, postID, parentID, authorID, body, status, now, now,
+	)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// UpdateCommentStatus changes a comment's moderation status.
+func (db *DB) UpdateCommentStatus(id, status string) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	res, err := db.Conn.Exec(
+		`UPDATE comments SET status = ?, updated = ? WHERE id = ? AND site_id = ?`,
+		status, now, id, db.SiteID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// DeleteComment removes a comment by id, scoped to the site.
+func (db *DB) DeleteComment(id string) error {
+	res, err := db.Conn.Exec(`DELETE FROM comments WHERE id = ? AND site_id = ?`, id, db.SiteID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// --- Reactions (community) ---
+
+// ToggleReaction adds a reaction if the author hasn't made it, or removes it if
+// they have. Returns the resulting state (true = now reacted).
+func (db *DB) ToggleReaction(targetType, targetID, authorID, emoji string) (bool, error) {
+	var id string
+	err := db.Conn.QueryRow(
+		`SELECT id FROM reactions
+		 WHERE site_id = ? AND target_type = ? AND target_id = ? AND author_id = ? AND emoji = ?`,
+		db.SiteID, targetType, targetID, authorID, emoji,
+	).Scan(&id)
+	if err == nil {
+		_, derr := db.Conn.Exec(`DELETE FROM reactions WHERE id = ?`, id)
+		return false, derr
+	}
+	if err != sql.ErrNoRows {
+		return false, err
+	}
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, ierr := db.Conn.Exec(
+		`INSERT INTO reactions (id, site_id, target_type, target_id, author_id, emoji, created)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		GenerateID(), db.SiteID, targetType, targetID, authorID, emoji, now,
+	)
+	return true, ierr
+}
+
+// ReactionCounts returns per-emoji counts for a target. When authorID is set,
+// each entry's `reacted` reports whether that author made the reaction.
+func (db *DB) ReactionCounts(targetType, targetID, authorID string) ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT emoji, COUNT(*) AS count,
+		        SUM(CASE WHEN author_id = ? THEN 1 ELSE 0 END) AS mine
+		 FROM reactions WHERE site_id = ? AND target_type = ? AND target_id = ?
+		 GROUP BY emoji ORDER BY emoji`,
+		authorID, db.SiteID, targetType, targetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var emoji string
+		var count, mine int
+		if err := rows.Scan(&emoji, &count, &mine); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"emoji": emoji, "count": count, "reacted": mine > 0})
+	}
+	return out, rows.Err()
+}
+
+// --- Polls (community) ---
+
+// Sentinel errors from CastVote so handlers can map them to status codes.
+var (
+	ErrPollNotFound = fmt.Errorf("poll not found")
+	ErrPollClosed   = fmt.Errorf("poll closed")
+	ErrAlreadyVoted = fmt.Errorf("already voted")
+)
+
+// CreatePoll inserts a poll and returns its id. options is stored as a JSON array.
+func (db *DB) CreatePoll(postID, question string, options []string, closesAt string) (string, error) {
+	opts, err := json.Marshal(options)
+	if err != nil {
+		return "", err
+	}
+	id := GenerateID()
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err = db.Conn.Exec(
+		`INSERT INTO polls (id, site_id, post_id, question, options, closes_at, created)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, postID, question, string(opts), closesAt, now,
+	)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// GetPoll returns a poll with per-option vote tallies. When authorID is set,
+// `my_vote` is the option index that author chose, or nil. Returns ErrPollNotFound
+// if the poll does not exist.
+func (db *DB) GetPoll(id, authorID string) (map[string]any, error) {
+	var question, optionsJSON, closesAt string
+	err := db.Conn.QueryRow(
+		`SELECT question, options, closes_at FROM polls WHERE id = ? AND site_id = ?`,
+		id, db.SiteID,
+	).Scan(&question, &optionsJSON, &closesAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrPollNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var labels []string
+	json.Unmarshal([]byte(optionsJSON), &labels)
+
+	// Tally votes per option index.
+	tally := map[int]int{}
+	rows, err := db.Conn.Query(`SELECT option_index, COUNT(*) FROM poll_votes WHERE poll_id = ? GROUP BY option_index`, id)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var idx, n int
+		if err := rows.Scan(&idx, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		tally[idx] = n
+	}
+	rows.Close()
+
+	total := 0
+	options := []map[string]any{}
+	for i, label := range labels {
+		options = append(options, map[string]any{"index": i, "text": label, "votes": tally[i]})
+		total += tally[i]
+	}
+
+	var myVote any
+	if authorID != "" {
+		var idx int
+		if err := db.Conn.QueryRow(`SELECT option_index FROM poll_votes WHERE poll_id = ? AND author_id = ?`, id, authorID).Scan(&idx); err == nil {
+			myVote = idx
+		}
+	}
+
+	return map[string]any{
+		"id":          id,
+		"question":    question,
+		"options":     options,
+		"total_votes": total,
+		"closes_at":   closesAt,
+		"my_vote":     myVote,
+	}, nil
+}
+
+// CastVote records a member's vote. Enforces one vote per (poll, author) and
+// rejects votes on a closed poll. Returns a sentinel error on each failure.
+func (db *DB) CastVote(pollID, authorID string, optionIndex int) error {
+	var closesAt string
+	err := db.Conn.QueryRow(`SELECT closes_at FROM polls WHERE id = ? AND site_id = ?`, pollID, db.SiteID).Scan(&closesAt)
+	if err == sql.ErrNoRows {
+		return ErrPollNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if closesAt != "" {
+		if t, perr := time.Parse("2006-01-02T15:04:05Z", closesAt); perr == nil && time.Now().UTC().After(t) {
+			return ErrPollClosed
+		}
+	}
+
+	var existing string
+	if db.Conn.QueryRow(`SELECT id FROM poll_votes WHERE poll_id = ? AND author_id = ?`, pollID, authorID).Scan(&existing) == nil {
+		return ErrAlreadyVoted
+	}
+
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err = db.Conn.Exec(
+		`INSERT INTO poll_votes (id, poll_id, option_index, author_id, created) VALUES (?, ?, ?, ?, ?)`,
+		GenerateID(), pollID, optionIndex, authorID, now,
+	)
+	return err
+}
+
+// --- Site settings (key/value) ---
+
+// GetSetting returns a stored setting value, or def if unset.
+func (db *DB) GetSetting(key, def string) string {
+	var v string
+	err := db.Conn.QueryRow(`SELECT value FROM site_settings WHERE site_id = ? AND key = ?`, db.SiteID, key).Scan(&v)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+// GetBoolSetting returns a stored setting as a bool ("true"/"1" are true).
+func (db *DB) GetBoolSetting(key string, def bool) bool {
+	v := db.GetSetting(key, "")
+	switch v {
+	case "true", "1":
+		return true
+	case "false", "0":
+		return false
+	default:
+		return def
+	}
+}
+
+// SetSetting upserts a setting value.
+func (db *DB) SetSetting(key, value string) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO site_settings (site_id, key, value, updated) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(site_id, key) DO UPDATE SET value = excluded.value, updated = excluded.updated`,
+		db.SiteID, key, value, now,
+	)
+	return err
+}
+
 // --- User management ---
 
 // User represents a user account.
@@ -542,6 +879,18 @@ func (db *DB) CreateOTP(userID, code string, ttl time.Duration) error {
 		now.Add(ttl).Format("2006-01-02T15:04:05Z"), now.Format("2006-01-02T15:04:05Z"),
 	)
 	return err
+}
+
+// HasFreshOTP reports whether the account has an unused code issued within the
+// given window — used to rate-limit repeated request-code calls.
+func (db *DB) HasFreshOTP(userID string, within time.Duration) bool {
+	cutoff := time.Now().UTC().Add(-within).Format("2006-01-02T15:04:05Z")
+	var id string
+	err := db.Conn.QueryRow(
+		`SELECT id FROM otp_codes WHERE site_id = ? AND user_id = ? AND used = 0 AND created > ? LIMIT 1`,
+		db.SiteID, userID, cutoff,
+	).Scan(&id)
+	return err == nil
 }
 
 // VerifyOTP checks a code against the latest unused, unexpired code for an

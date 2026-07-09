@@ -13,6 +13,7 @@ import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
 import { marked } from "marked";
 import { SPA_INDEX, SPA_ASSETS } from "./spa-bundle.js";
+import { FRIENDO_JS } from "./sdk-bundle.js";
 import { runMigrations } from "./migrations.js";
 
 const app = new Hono();
@@ -271,12 +272,13 @@ app.get("/_/api/platform-login", async (c) => {
   const platformURL = c.env.PLATFORM_URL;
   if (!code || !platformURL) return c.redirect("/_/?error=sso");
 
+  const siteId = getSiteId(c);
   let payload;
   try {
     const res = await fetch(`${platformURL}/api/sso/exchange`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, siteId }),
     });
     if (!res.ok) return c.redirect("/_/?error=sso");
     payload = await res.json();
@@ -284,7 +286,6 @@ app.get("/_/api/platform-login", async (c) => {
     return c.redirect("/_/?error=sso");
   }
 
-  const siteId = getSiteId(c);
   const email = (payload.email || "").trim();
   if (!email || (payload.siteId && payload.siteId !== siteId)) {
     return c.redirect("/_/?error=sso");
@@ -348,10 +349,34 @@ app.post("/_/api/setup", async (c) => {
 
 // --- OTP (passwordless member login) ---
 
-// Until an email provider is wired up (Phase 3e), request-code returns the code
-// in its response for dev/test.
-function emailConfigured() {
-  return false;
+// One live code at a time per account within this window (rate limit).
+const OTP_RESEND_WINDOW_MS = 30 * 1000;
+
+// emailConfigured reports whether an email provider is wired up. When it is, the
+// code is emailed and never echoed; otherwise (local dev, CI) request-code
+// returns it so the flow still works. Set RESEND_API_KEY + FRIENDO_EMAIL_FROM.
+function emailConfigured(env) {
+  return !!(env.RESEND_API_KEY && env.FRIENDO_EMAIL_FROM);
+}
+
+// sendOTPEmail delivers a login code via Resend. Best-effort — a failure is
+// swallowed so it never reveals whether an address exists.
+async function sendOTPEmail(env, email, code) {
+  if (!emailConfigured(env)) return;
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: env.FRIENDO_EMAIL_FROM,
+        to: [email],
+        subject: "Your sign-in code",
+        text: `Your code is ${code}. It expires in 10 minutes.`,
+      }),
+    });
+  } catch (e) {
+    /* logged nowhere on purpose; delivery is best-effort */
+  }
 }
 
 app.post("/_/api/auth/request-code", async (c) => {
@@ -369,6 +394,15 @@ app.post("/_/api/auth/request-code", async (c) => {
     .bind(siteId, email).first();
   if (!user) user = await createMember(c.env, siteId, email, "");
 
+  // Rate limit: reject if an unused code was issued within the window.
+  const cutoff = new Date(Date.now() - OTP_RESEND_WINDOW_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const fresh = await c.env.DB.prepare(
+    "SELECT id FROM otp_codes WHERE site_id = ? AND user_id = ? AND used = 0 AND created > ? LIMIT 1"
+  ).bind(siteId, user.id, cutoff).first();
+  if (fresh) {
+    return c.json({ error: "a code was already sent — please wait before requesting another" }, 429);
+  }
+
   const code = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
   const hash = await bcrypt.hash(code, 10);
   const now = new Date();
@@ -380,10 +414,10 @@ app.post("/_/api/auth/request-code", async (c) => {
     new Date(now.getTime() + 10 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
     nowISO()
   ).run();
-  // TODO (Phase 3e): send the code by email.
+  await sendOTPEmail(c.env, email, code);
 
   const resp = { sent: true };
-  if (!emailConfigured()) resp.code = code; // dev/test only
+  if (!emailConfigured(c.env)) resp.code = code; // dev/test only
   return c.json(resp);
 });
 
@@ -549,6 +583,293 @@ app.delete("/_/api/records/:id", async (c) => {
     .bind(c.req.param("id"), auth.siteId).run();
   if (!res.meta.changes) return c.json({ error: "record not found" }, 404);
   return c.body(null, 204);
+});
+
+// --- Comments (community) ---
+
+// requireMember gates member-facing writes: any authenticated session passes
+// (member role and up). Mirrors requireAdmin's { auth } / { deny } shape but
+// applies no role-rank check.
+async function requireMember(c) {
+  const user = await getSiteSessionUser(c);
+  if (!user) return { deny: c.json({ error: "unauthorized" }, 401) };
+  return { auth: { user, siteId: getSiteId(c) } };
+}
+
+const COMMENT_STATUSES = ["pending", "approved", "rejected"];
+
+const COMMENT_SELECT = `SELECT c.id, c.post_id, c.parent_id, c.author_id, c.body, c.status, c.created,
+       a.name AS author_name, a.avatar AS author_avatar
+FROM comments c LEFT JOIN authors a ON a.id = c.author_id`;
+
+function commentJSON(r) {
+  return {
+    id: r.id,
+    post_id: r.post_id,
+    parent_id: r.parent_id,
+    author_id: r.author_id,
+    author_name: r.author_name || "",
+    author_avatar: r.author_avatar || "",
+    body: r.body,
+    status: r.status,
+    created: r.created,
+  };
+}
+
+// Public read: a post's approved comments, oldest first.
+app.get("/_/api/posts/:id/comments", async (c) => {
+  const siteId = getSiteId(c);
+  const { results } = await c.env.DB.prepare(
+    COMMENT_SELECT + " WHERE c.site_id = ? AND c.post_id = ? AND c.status = 'approved' ORDER BY c.created ASC"
+  ).bind(siteId, c.req.param("id")).all();
+  return c.json({ comments: (results || []).map(commentJSON) });
+});
+
+// Member-gated write: create a comment (starts 'pending' for moderation).
+app.post("/_/api/posts/:id/comments", async (c) => {
+  const { auth, deny } = await requireMember(c);
+  if (deny) return deny;
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  if (!(body.body || "").trim()) return c.json({ error: "body is required" }, 400);
+
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  const authorId = await defaultAuthorId(c.env, auth.siteId, auth.user.id);
+  const status = (await getBoolSetting(c.env, auth.siteId, SETTING_AUTO_APPROVE, false)) ? "approved" : "pending";
+  await c.env.DB.prepare(
+    `INSERT INTO comments (id, site_id, post_id, parent_id, author_id, body, status, created, updated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    id, auth.siteId, c.req.param("id"), body.parent_id || "", authorId, body.body, status, now, now
+  ).run();
+
+  const row = await c.env.DB.prepare(COMMENT_SELECT + " WHERE c.id = ? AND c.site_id = ?")
+    .bind(id, auth.siteId).first();
+  return c.json({ comment: commentJSON(row) }, 201);
+});
+
+// Admin moderation queue: comments by ?status (defaults to pending), newest first.
+app.get("/_/api/comments", async (c) => {
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
+
+  const status = c.req.query("status") || "pending";
+  const { results } = await c.env.DB.prepare(
+    COMMENT_SELECT + " WHERE c.site_id = ? AND c.status = ? ORDER BY c.created DESC"
+  ).bind(auth.siteId, status).all();
+  return c.json({ comments: (results || []).map(commentJSON) });
+});
+
+// Admin: change a comment's moderation status.
+app.put("/_/api/comments/:id", async (c) => {
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  if (!COMMENT_STATUSES.includes(body.status)) return c.json({ error: "invalid status" }, 400);
+
+  const res = await c.env.DB.prepare(
+    "UPDATE comments SET status = ?, updated = ? WHERE id = ? AND site_id = ?"
+  ).bind(body.status, nowISO(), c.req.param("id"), auth.siteId).run();
+  if (!res.meta.changes) return c.json({ error: "comment not found" }, 404);
+
+  const row = await c.env.DB.prepare(COMMENT_SELECT + " WHERE c.id = ? AND c.site_id = ?")
+    .bind(c.req.param("id"), auth.siteId).first();
+  return c.json({ comment: commentJSON(row) });
+});
+
+// Admin: delete a comment.
+app.delete("/_/api/comments/:id", async (c) => {
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
+
+  const res = await c.env.DB.prepare("DELETE FROM comments WHERE id = ? AND site_id = ?")
+    .bind(c.req.param("id"), auth.siteId).run();
+  if (!res.meta.changes) return c.json({ error: "comment not found" }, 404);
+  return c.body(null, 204);
+});
+
+// --- Reactions (community) ---
+
+// Per-emoji counts for a target. Public; when a member is authenticated each
+// entry reports whether they reacted.
+app.get("/_/api/reactions", async (c) => {
+  const siteId = getSiteId(c);
+  const targetType = c.req.query("target_type") || "";
+  const targetId = c.req.query("target_id") || "";
+  if (!targetType || !targetId) {
+    return c.json({ error: "target_type and target_id are required" }, 400);
+  }
+  const user = await getSiteSessionUser(c);
+  const authorId = user ? await defaultAuthorId(c.env, siteId, user.id) : "";
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT emoji, COUNT(*) AS count,
+            SUM(CASE WHEN author_id = ? THEN 1 ELSE 0 END) AS mine
+     FROM reactions WHERE site_id = ? AND target_type = ? AND target_id = ?
+     GROUP BY emoji ORDER BY emoji`
+  ).bind(authorId, siteId, targetType, targetId).all();
+  const reactions = (results || []).map((r) => ({ emoji: r.emoji, count: r.count, reacted: r.mine > 0 }));
+  return c.json({ reactions });
+});
+
+// Toggle the caller's reaction (member-gated).
+app.post("/_/api/reactions", async (c) => {
+  const { auth, deny } = await requireMember(c);
+  if (deny) return deny;
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const { target_type: targetType, target_id: targetId, emoji } = body;
+  if (!targetType || !targetId || !emoji) {
+    return c.json({ error: "target_type, target_id and emoji are required" }, 400);
+  }
+  const authorId = await defaultAuthorId(c.env, auth.siteId, auth.user.id);
+
+  const existing = await c.env.DB.prepare(
+    "SELECT id FROM reactions WHERE site_id = ? AND target_type = ? AND target_id = ? AND author_id = ? AND emoji = ?"
+  ).bind(auth.siteId, targetType, targetId, authorId, emoji).first();
+
+  let reacted;
+  if (existing) {
+    await c.env.DB.prepare("DELETE FROM reactions WHERE id = ?").bind(existing.id).run();
+    reacted = false;
+  } else {
+    await c.env.DB.prepare(
+      "INSERT INTO reactions (id, site_id, target_type, target_id, author_id, emoji, created) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      crypto.randomUUID().replace(/-/g, "").slice(0, 24), auth.siteId, targetType, targetId, authorId, emoji, nowISO()
+    ).run();
+    reacted = true;
+  }
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT emoji, COUNT(*) AS count,
+            SUM(CASE WHEN author_id = ? THEN 1 ELSE 0 END) AS mine
+     FROM reactions WHERE site_id = ? AND target_type = ? AND target_id = ?
+     GROUP BY emoji ORDER BY emoji`
+  ).bind(authorId, auth.siteId, targetType, targetId).all();
+  const reactions = (results || []).map((r) => ({ emoji: r.emoji, count: r.count, reacted: r.mine > 0 }));
+  return c.json({ reacted, reactions });
+});
+
+// --- Polls (community) ---
+
+// pollWithTallies builds the public poll shape (options + vote counts + the
+// caller's vote) or returns null if the poll does not exist.
+async function pollWithTallies(env, siteId, id, authorId) {
+  const poll = await env.DB.prepare(
+    "SELECT id, question, options, closes_at FROM polls WHERE id = ? AND site_id = ?"
+  ).bind(id, siteId).first();
+  if (!poll) return null;
+
+  let labels = [];
+  try { labels = JSON.parse(poll.options); } catch { labels = []; }
+
+  const { results } = await env.DB.prepare(
+    "SELECT option_index, COUNT(*) AS count FROM poll_votes WHERE poll_id = ? GROUP BY option_index"
+  ).bind(id).all();
+  const tally = {};
+  for (const r of results || []) tally[r.option_index] = r.count;
+
+  let total = 0;
+  const options = labels.map((text, i) => {
+    const votes = tally[i] || 0;
+    total += votes;
+    return { index: i, text, votes };
+  });
+
+  let myVote = null;
+  if (authorId) {
+    const v = await env.DB.prepare("SELECT option_index FROM poll_votes WHERE poll_id = ? AND author_id = ?")
+      .bind(id, authorId).first();
+    if (v) myVote = v.option_index;
+  }
+
+  return { id: poll.id, question: poll.question, options, total_votes: total, closes_at: poll.closes_at, my_vote: myVote };
+}
+
+// Create a poll (admin-gated).
+app.post("/_/api/polls", async (c) => {
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const question = (body.question || "").trim();
+  const options = Array.isArray(body.options) ? body.options : [];
+  if (!question || options.length < 2) {
+    return c.json({ error: "question and at least two options are required" }, 400);
+  }
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  await c.env.DB.prepare(
+    "INSERT INTO polls (id, site_id, post_id, question, options, closes_at, created) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).bind(id, auth.siteId, body.post_id || "", question, JSON.stringify(options), body.closes_at || "", nowISO()).run();
+
+  const poll = await pollWithTallies(c.env, auth.siteId, id, "");
+  return c.json({ poll }, 201);
+});
+
+// Read a poll with tallies (public; includes the caller's vote when authed).
+app.get("/_/api/polls/:id", async (c) => {
+  const siteId = getSiteId(c);
+  const user = await getSiteSessionUser(c);
+  const authorId = user ? await defaultAuthorId(c.env, siteId, user.id) : "";
+  const poll = await pollWithTallies(c.env, siteId, c.req.param("id"), authorId);
+  if (!poll) return c.json({ error: "poll not found" }, 404);
+  return c.json({ poll });
+});
+
+// Cast a vote (member-gated). One vote per member; closed polls are rejected.
+app.post("/_/api/polls/:id/vote", async (c) => {
+  const { auth, deny } = await requireMember(c);
+  if (deny) return deny;
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  const id = c.req.param("id");
+  const poll = await c.env.DB.prepare("SELECT closes_at FROM polls WHERE id = ? AND site_id = ?")
+    .bind(id, auth.siteId).first();
+  if (!poll) return c.json({ error: "poll not found" }, 404);
+  if (poll.closes_at && new Date(poll.closes_at) < new Date()) {
+    return c.json({ error: "poll closed" }, 403);
+  }
+  const authorId = await defaultAuthorId(c.env, auth.siteId, auth.user.id);
+  const existing = await c.env.DB.prepare("SELECT id FROM poll_votes WHERE poll_id = ? AND author_id = ?")
+    .bind(id, authorId).first();
+  if (existing) return c.json({ error: "already voted" }, 409);
+
+  await c.env.DB.prepare(
+    "INSERT INTO poll_votes (id, poll_id, option_index, author_id, created) VALUES (?, ?, ?, ?, ?)"
+  ).bind(
+    crypto.randomUUID().replace(/-/g, "").slice(0, 24), id, body.option_index || 0, authorId, nowISO()
+  ).run();
+
+  const result = await pollWithTallies(c.env, auth.siteId, id, authorId);
+  return c.json({ poll: result });
 });
 
 // --- Users + settings ---
@@ -724,6 +1045,29 @@ app.delete("/_/api/users/:id", async (c) => {
   return c.body(null, 204);
 });
 
+// Persisted per-site settings (key/value). Mirrors the Go data layer.
+const SETTING_AUTO_APPROVE = "moderation.auto_approve";
+
+async function getSetting(env, siteId, key, def) {
+  const row = await env.DB.prepare("SELECT value FROM site_settings WHERE site_id = ? AND key = ?")
+    .bind(siteId, key).first();
+  return row ? row.value : def;
+}
+
+async function getBoolSetting(env, siteId, key, def) {
+  const v = await getSetting(env, siteId, key, null);
+  if (v === "true" || v === "1") return true;
+  if (v === "false" || v === "0") return false;
+  return def;
+}
+
+async function setSetting(env, siteId, key, value) {
+  await env.DB.prepare(
+    `INSERT INTO site_settings (site_id, key, value, updated) VALUES (?, ?, ?, ?)
+     ON CONFLICT(site_id, key) DO UPDATE SET value = excluded.value, updated = excluded.updated`
+  ).bind(siteId, key, value, nowISO()).run();
+}
+
 app.get("/_/api/settings", async (c) => {
   const { auth, deny } = await requireAdmin(c);
   if (deny) return deny;
@@ -737,6 +1081,25 @@ app.get("/_/api/settings", async (c) => {
     site: { name: c.env.SITE_NAME || getSiteId(c) },
     collections: cols?.n || 0,
     users: users?.n || 0,
+    moderation: { auto_approve: await getBoolSetting(c.env, auth.siteId, SETTING_AUTO_APPROVE, false) },
+  });
+});
+
+app.put("/_/api/settings", async (c) => {
+  const { auth, deny } = await requireAdmin(c);
+  if (deny) return deny;
+
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  if (body.moderation && typeof body.moderation.auto_approve === "boolean") {
+    await setSetting(c.env, auth.siteId, SETTING_AUTO_APPROVE, body.moderation.auto_approve ? "true" : "false");
+  }
+  return c.json({
+    moderation: { auto_approve: await getBoolSetting(c.env, auth.siteId, SETTING_AUTO_APPROVE, false) },
   });
 });
 
@@ -757,6 +1120,14 @@ app.get("/_", (c) => c.redirect("/_/"));
 app.get("/_/*", (c) => c.html(SPA_INDEX));
 
 // --- Site rendering ---
+
+// The community SDK (Web Components) at /friendo.js — public, byte-identical to
+// the Go runtime's copy.
+app.get("/friendo.js", (c) => {
+  return new Response(FRIENDO_JS, {
+    headers: { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "public, max-age=300" },
+  });
+});
 
 app.get("/assets/*", async (c) => {
   const siteId = getSiteId(c);

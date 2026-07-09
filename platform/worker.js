@@ -317,8 +317,13 @@ app.get("/api/cli/poll", async (c) => {
 // is ever pushed into a site Worker.
 
 // createSsoCode stores {siteId, email, name} against a random code that expires
-// in 2 minutes and can be redeemed exactly once (see consumeSsoCode).
+// in 2 minutes and can be redeemed exactly once (see consumeSsoCode). It also
+// opportunistically purges expired codes so un-redeemed ones don't accumulate.
 async function createSsoCode(env, siteId, email, name) {
+  await env.DB.prepare(
+    `DELETE FROM verification WHERE identifier = 'sso_code' AND expiresAt < datetime('now')`
+  ).run();
+
   const code = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
   const value = JSON.stringify({ siteId, email, name });
   await env.DB.prepare(
@@ -328,34 +333,62 @@ async function createSsoCode(env, siteId, email, name) {
   return code;
 }
 
-// consumeSsoCode validates and single-use-deletes a code, returning its parsed
-// {siteId, email, name} payload, or null if unknown/expired.
-async function consumeSsoCode(env, code) {
-  if (!code) return null;
+// consumeSsoCode validates a code and returns { ok, payload } or { error }.
+// A site mismatch is rejected WITHOUT consuming the code (so a wrong tenant can't
+// burn someone else's code); every other outcome single-use-deletes it. Expiry
+// is compared in SQL to avoid timezone-sensitive Date parsing of the stored
+// "YYYY-MM-DD HH:MM:SS" (UTC) timestamp.
+async function consumeSsoCode(env, code, expectedSiteId) {
+  if (!code) return { error: "invalid" };
   const row = await env.DB.prepare(
-    `SELECT value, expiresAt FROM verification WHERE id = ? AND identifier = 'sso_code'`
+    `SELECT value, (expiresAt < datetime('now')) AS expired
+     FROM verification WHERE id = ? AND identifier = 'sso_code'`
   ).bind(code).first();
-  if (!row) return null;
+  if (!row) return { error: "invalid" };
+
+  let payload = null;
+  try { payload = JSON.parse(row.value); } catch { payload = null; }
+
+  if (payload && expectedSiteId && payload.siteId !== expectedSiteId) {
+    return { error: "site_mismatch" };
+  }
 
   await env.DB.prepare(
     `DELETE FROM verification WHERE id = ? AND identifier = 'sso_code'`
   ).bind(code).run();
 
-  if (new Date(row.expiresAt) < new Date()) return null;
-  try {
-    return JSON.parse(row.value);
-  } catch {
-    return null;
-  }
+  if (row.expired || !payload) return { error: "invalid" };
+  return { ok: true, payload };
 }
 
 // POST /api/sso/exchange — called by a site Worker to redeem an SSO code. Public
 // (a site Worker has no platform credentials), but codes are random, single-use,
-// and expire in 2 minutes.
+// and expire in 2 minutes. The caller states which site it is (siteId); we only
+// return the identity if it matches the code, so one tenant can't redeem another
+// tenant's code to harvest an owner's email. An optional Cloudflare rate limiter
+// (SSO_LIMITER) throttles this endpoint by IP when configured.
 app.post("/api/sso/exchange", async (c) => {
-  const { code } = await c.req.json().catch(() => ({}));
-  const payload = await consumeSsoCode(c.env, code);
-  if (!payload) return c.json({ error: "Invalid or expired code" }, 410);
+  const ip = c.req.header("CF-Connecting-IP") || "unknown";
+  if (c.env.SSO_LIMITER) {
+    const { success } = await c.env.SSO_LIMITER.limit({ key: ip });
+    if (!success) {
+      console.warn(`[sso] rate-limited exchange from ${ip}`);
+      return c.json({ error: "Too many requests" }, 429);
+    }
+  }
+
+  const { code, siteId } = await c.req.json().catch(() => ({}));
+  const result = await consumeSsoCode(c.env, code, siteId);
+  if (result.error === "site_mismatch") {
+    console.warn(`[sso] exchange rejected: site mismatch (caller=${siteId || "?"}, ip=${ip})`);
+    return c.json({ error: "Code does not belong to this site" }, 403);
+  }
+  if (!result.ok) {
+    console.warn(`[sso] exchange rejected: invalid/expired code (site=${siteId || "?"}, ip=${ip})`);
+    return c.json({ error: "Invalid or expired code" }, 410);
+  }
+  const { payload } = result;
+  console.log(`[sso] exchange ok: ${payload.email} -> ${payload.siteId}`);
   return c.json({ siteId: payload.siteId, email: payload.email, name: payload.name });
 });
 
@@ -405,6 +438,50 @@ app.get("/api/me", requirePlatformAuth, async (c) => {
   return c.json(user);
 });
 
+// --- Site access: owner or invited co-owner (platform-level) ---
+// A site has one owner (sites.owner_id) plus zero or more invited co-owners
+// (site_members, keyed by email). Both may open the site from the dashboard and
+// get the Admin-button SSO handoff; destructive platform ops (delete, managing
+// the member list) stay owner-only. This is separate from a site's own internal
+// account system.
+
+// userEmail returns a platform user's lowercased email, or "".
+async function userEmail(env, userId) {
+  const u = await env.DB.prepare(`SELECT email FROM "user" WHERE id = ?`).bind(userId).first();
+  return u ? String(u.email).toLowerCase() : "";
+}
+
+// isSiteMember reports whether email is an invited co-owner of the site.
+async function isSiteMember(env, siteId, email) {
+  if (!email) return false;
+  const row = await env.DB.prepare(
+    "SELECT 1 FROM site_members WHERE site_id = ? AND email = ?"
+  ).bind(siteId, email.toLowerCase()).first();
+  return !!row;
+}
+
+// canAccessSite reports whether a platform user may access a site — as its owner
+// or an invited co-owner. `site` is a row with at least owner_id + subdomain.
+async function canAccessSite(env, site, userId) {
+  if (!site) return false;
+  if (site.owner_id === userId) return true;
+  return isSiteMember(env, site.subdomain, await userEmail(env, userId));
+}
+
+// loadMembers returns a site's invited co-owners, flagging any whose invite is
+// still pending (no friendo.world account with that email yet).
+async function loadMembers(env, siteId) {
+  const { results } = await env.DB.prepare(
+    "SELECT email FROM site_members WHERE site_id = ? ORDER BY created"
+  ).bind(siteId).all();
+  const members = [];
+  for (const r of results || []) {
+    const u = await env.DB.prepare(`SELECT 1 FROM "user" WHERE lower(email) = ?`).bind(r.email).first();
+    members.push({ email: r.email, pending: !u });
+  }
+  return members;
+}
+
 // POST /api/sites — provision a new site
 app.post("/api/sites", requirePlatformAuth, async (c) => {
   const userId = c.get("userId");
@@ -418,16 +495,22 @@ app.post("/api/sites", requirePlatformAuth, async (c) => {
     "SELECT id, owner_id, d1_id, r2_bucket FROM sites WHERE subdomain = ?"
   ).bind(subdomain).first();
 
+  // A different owner's subdomain is taken — unless the caller is an invited
+  // co-owner, who may redeploy/push to it (but never take it over).
   if (existing && existing.owner_id && existing.owner_id !== userId) {
-    return c.json({ error: "Subdomain already taken" }, 409);
+    if (!(await isSiteMember(c.env, subdomain, await userEmail(c.env, userId)))) {
+      return c.json({ error: "Subdomain already taken" }, 409);
+    }
   }
 
   const id = existing ? existing.id : subdomain;
 
   if (existing) {
+    // Preserve the original owner (a co-owner deploy must not transfer ownership).
+    const ownerId = existing.owner_id || userId;
     await c.env.DB.prepare(
       `UPDATE sites SET name = ?, owner_id = ?, updated = datetime('now') WHERE id = ?`
-    ).bind(name, userId, id).run();
+    ).bind(name, ownerId, id).run();
 
     // Re-deploying an already-provisioned site refreshes its user Worker with the
     // current runtime bundle from RUNTIME_BUCKET, so runtime fixes reach existing
@@ -504,7 +587,9 @@ app.post("/api/sites/:id/redeploy", requirePlatformAuth, async (c) => {
   ).bind(siteId).first();
 
   if (!site) return c.json({ error: "Site not found" }, 404);
-  if (site.owner_id !== userId) return c.json({ error: "Not owned by you" }, 403);
+  if (!(await canAccessSite(c.env, site, userId))) {
+    return c.json({ error: "Not authorized for this site" }, 403);
+  }
   if (!site.d1_id || !site.r2_bucket) {
     return c.json({ error: "Site is not fully provisioned" }, 409);
   }
@@ -529,15 +614,18 @@ app.get("/api/sites/:id", requirePlatformAuth, async (c) => {
   const siteId = c.req.param("id");
 
   const site = await c.env.DB.prepare(
-    "SELECT id, name, subdomain, owner_id, created, updated FROM sites WHERE subdomain = ? AND owner_id = ?"
-  ).bind(siteId, userId).first();
-  if (!site) return c.json({ error: "Site not found or not owned by you" }, 403);
+    "SELECT id, name, subdomain, owner_id, created, updated FROM sites WHERE subdomain = ?"
+  ).bind(siteId).first();
+  if (!site || !(await canAccessSite(c.env, site, userId))) {
+    return c.json({ error: "Site not found or not accessible" }, 403);
+  }
 
   return c.json(site);
 });
 
 // POST /api/sites/:id/sso-code — mint a one-time SSO code so the CLI can obtain a
-// superadmin session on the site without a separate site password. Owner-only.
+// superadmin session on the site without a separate site password. Owner or
+// invited co-owner.
 app.post("/api/sites/:id/sso-code", requirePlatformAuth, async (c) => {
   const userId = c.get("userId");
   const siteId = c.req.param("id");
@@ -546,7 +634,9 @@ app.post("/api/sites/:id/sso-code", requirePlatformAuth, async (c) => {
     "SELECT subdomain, owner_id FROM sites WHERE subdomain = ?"
   ).bind(siteId).first();
   if (!site) return c.json({ error: "Site not found" }, 404);
-  if (site.owner_id !== userId) return c.json({ error: "Not owned by you" }, 403);
+  if (!(await canAccessSite(c.env, site, userId))) {
+    return c.json({ error: "Not authorized for this site" }, 403);
+  }
 
   const user = await c.env.DB.prepare(
     `SELECT email, name FROM "user" WHERE id = ?`
@@ -629,19 +719,27 @@ app.get("/dashboard", async (c, next) => {
   const user = await getSessionUser(c);
   if (!user) return c.redirect("/login");
 
+  // Sites you own, plus sites you've been invited to co-own (by email). `owned`
+  // gates owner-only controls (managing members, deleting) in the UI.
+  const email = String(user.email).toLowerCase();
   const { results: sites } = await c.env.DB.prepare(
-    "SELECT id, name, subdomain, created, updated FROM sites WHERE owner_id = ? ORDER BY updated DESC"
-  ).bind(user.id).all();
+    `SELECT s.id, s.name, s.subdomain, s.created, s.updated,
+            (s.owner_id = ?) AS owned
+     FROM sites s
+     WHERE s.owner_id = ?
+        OR s.subdomain IN (SELECT site_id FROM site_members WHERE email = ?)
+     ORDER BY s.updated DESC`
+  ).bind(user.id, user.id, email).all();
 
   const hostname = new URL(c.req.url).hostname;
   const isDev = hostname === "localhost" || hostname.endsWith(".local.friendo.world") || hostname === "local.friendo.world";
   return c.html(dashboardHTML(user, sites || [], isDev));
 });
 
-// Admin — hand the site owner a superadmin login on their site's /_/ admin.
-// Verifies the platform session + ownership, mints a one-time SSO code, then
-// redirects to the site's platform-login endpoint which redeems it (see the
-// edge runtime's /_/api/platform-login).
+// Admin — hand the site owner (or an invited co-owner) a superadmin login on the
+// site's /_/ admin. Verifies the platform session + access, mints a one-time SSO
+// code, then redirects to the site's platform-login endpoint which redeems it
+// (see the edge runtime's /_/api/platform-login).
 app.get("/sites/:id/admin", async (c, next) => {
   if (!isBareHost(c)) return next();
   const user = await getSessionUser(c);
@@ -652,7 +750,9 @@ app.get("/sites/:id/admin", async (c, next) => {
     "SELECT subdomain, owner_id FROM sites WHERE subdomain = ?"
   ).bind(siteId).first();
   if (!site) return c.text("Site not found", 404);
-  if (site.owner_id !== user.id) return c.text("Not owned by you", 403);
+  if (!(await canAccessSite(c.env, site, user.id))) {
+    return c.text("You don't have access to this site", 403);
+  }
 
   const code = await createSsoCode(c.env, site.subdomain, user.email, user.name);
 
@@ -662,6 +762,68 @@ app.get("/sites/:id/admin", async (c, next) => {
     ? `https://${site.subdomain}.local.friendo.world`
     : `https://${site.subdomain}.friendo.world`;
   return c.redirect(`${base}/_/api/platform-login?code=${encodeURIComponent(code)}`);
+});
+
+// --- Collaborators (co-owners) — owner-only management ---
+
+// requireSiteOwner loads the site and returns it only if the signed-in user owns
+// it; otherwise it returns a Response to send back (redirect/403/404).
+async function requireSiteOwner(c) {
+  const user = await getSessionUser(c);
+  if (!user) return { redirect: c.redirect("/login") };
+  const site = await c.env.DB.prepare(
+    "SELECT id, name, subdomain, owner_id FROM sites WHERE subdomain = ?"
+  ).bind(c.req.param("id")).first();
+  if (!site) return { redirect: c.text("Site not found", 404) };
+  if (site.owner_id !== user.id) {
+    return { redirect: c.text("Only the site owner can manage collaborators", 403) };
+  }
+  return { user, site };
+}
+
+app.get("/sites/:id/members", async (c, next) => {
+  if (!isBareHost(c)) return next();
+  const { redirect, user, site } = await requireSiteOwner(c);
+  if (redirect) return redirect;
+
+  site.owner_email = await userEmail(c.env, site.owner_id);
+  const members = await loadMembers(c.env, site.subdomain);
+  const notice = c.req.query("ok") || "";
+  return c.html(membersHTML(user, site, members, notice));
+});
+
+app.post("/sites/:id/members", async (c, next) => {
+  if (!isBareHost(c)) return next();
+  const { redirect, user, site } = await requireSiteOwner(c);
+  if (redirect) return redirect;
+
+  const form = await c.req.parseBody();
+  const email = String(form.email || "").trim().toLowerCase();
+  const back = (msg) => c.redirect(`/sites/${site.subdomain}/members?ok=${encodeURIComponent(msg)}`);
+
+  if (!email || !email.includes("@")) return back("Enter a valid email address.");
+  if (email === (await userEmail(c.env, site.owner_id))) return back("You already own this site.");
+
+  await c.env.DB.prepare(
+    `INSERT INTO site_members (id, site_id, email, invited_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(site_id, email) DO NOTHING`
+  ).bind(crypto.randomUUID().replace(/-/g, "").slice(0, 24), site.subdomain, email, user.id).run();
+  console.log(`[members] ${user.email} invited ${email} to ${site.subdomain}`);
+  return back(`Invited ${email}.`);
+});
+
+app.post("/sites/:id/members/remove", async (c, next) => {
+  if (!isBareHost(c)) return next();
+  const { redirect, user, site } = await requireSiteOwner(c);
+  if (redirect) return redirect;
+
+  const form = await c.req.parseBody();
+  const email = String(form.email || "").trim().toLowerCase();
+  await c.env.DB.prepare(
+    "DELETE FROM site_members WHERE site_id = ? AND email = ?"
+  ).bind(site.subdomain, email).run();
+  console.log(`[members] ${user.email} removed ${email} from ${site.subdomain}`);
+  return c.redirect(`/sites/${site.subdomain}/members?ok=${encodeURIComponent(`Removed ${email}.`)}`);
 });
 
 // Logout
@@ -874,14 +1036,23 @@ function dashboardHTML(user, sites, isDev) {
     const siteURL = isDev
       ? `https://${s.subdomain}.local.friendo.world`
       : `https://${s.subdomain}.friendo.world`;
+    const owned = !!s.owned;
+    const coOwnerTag = owned
+      ? ""
+      : `<span class="muted" style="margin-left:0.5rem; font-size:0.8rem;">· shared with you</span>`;
+    // Managing collaborators is owner-only.
+    const membersLink = owned
+      ? `<a href="/sites/${escapeHtml(s.id)}/members" class="btn btn-outline btn-sm">Members</a>`
+      : "";
     return `
       <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
         <div>
-          <strong>${escapeHtml(s.name || s.subdomain)}</strong>
+          <strong>${escapeHtml(s.name || s.subdomain)}</strong>${coOwnerTag}
           <div class="muted">${escapeHtml(s.subdomain)}.friendo.world</div>
         </div>
         <div style="display:flex; gap:0.5rem;">
           <a href="/sites/${escapeHtml(s.id)}/admin" class="btn btn-primary btn-sm">Admin</a>
+          ${membersLink}
           <a href="${siteURL}" target="_blank" class="btn btn-outline btn-sm">Visit</a>
         </div>
       </div>`;
@@ -914,6 +1085,67 @@ function dashboardHTML(user, sites, isDev) {
   <div class="container">
     <h1 style="margin-bottom:1.5rem;">Your sites</h1>
     ${sites.length > 0 ? siteRows : empty}
+  </div>
+</body>
+</html>`;
+}
+
+// membersHTML renders the collaborator-management page for a single site (owner
+// only). Co-owners get superadmin access to the site; invites are by email and
+// activate once the person signs up for friendo.world.
+function membersHTML(user, site, members, notice) {
+  const ownerRow = `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <strong>${escapeHtml(site.owner_email || "")}</strong>
+        <div class="muted">Owner</div>
+      </div>
+    </div>`;
+
+  const memberRows = members.map((m) => `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <strong>${escapeHtml(m.email)}</strong>
+        <div class="muted">Co-owner${m.pending ? " · invite pending" : ""}</div>
+      </div>
+      <form method="POST" action="/sites/${escapeHtml(site.subdomain)}/members/remove" style="margin:0">
+        <input type="hidden" name="email" value="${escapeHtml(m.email)}">
+        <button type="submit" class="btn btn-outline btn-sm">Remove</button>
+      </form>
+    </div>`).join("\n");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Friendo — ${escapeHtml(site.name || site.subdomain)} · Members</title>
+  <style>${sharedStyles}</style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/" class="nav-brand">Friendo</a>
+    <span style="flex:1"></span>
+    <span class="muted">${escapeHtml(user.email)}</span>
+    <form method="POST" action="/logout" style="margin:0">
+      <button type="submit" class="btn btn-outline btn-sm">Sign out</button>
+    </form>
+  </div>
+  <div class="container">
+    <p style="margin-bottom:0.5rem;"><a href="/dashboard">← Your sites</a></p>
+    <h1 style="margin-bottom:0.25rem;">${escapeHtml(site.name || site.subdomain)}</h1>
+    <p class="muted" style="margin-bottom:1.5rem;">Collaborators can open this site's admin as a superadmin. This is separate from the accounts inside the site itself.</p>
+    ${notice ? `<div class="card" style="background:#ecfdf5; color:#065f46;">${escapeHtml(notice)}</div>` : ""}
+    ${ownerRow}
+    ${memberRows}
+    <div class="card">
+      <form method="POST" action="/sites/${escapeHtml(site.subdomain)}/members" style="margin:0">
+        <label>Invite a collaborator by email
+          <input type="email" name="email" placeholder="teammate@example.com" required>
+        </label>
+        <button type="submit" class="btn btn-primary btn-sm" style="margin-top:0.5rem;">Send invite</button>
+      </form>
+    </div>
   </div>
 </body>
 </html>`;

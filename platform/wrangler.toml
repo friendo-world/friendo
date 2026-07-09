@@ -54,6 +54,15 @@ namespace = "production"
 binding = "RUNTIME_BUCKET"
 bucket_name = "friendo-runtime"
 
+# Optional: throttle the public /api/sso/exchange endpoint by IP. The worker uses
+# this binding only if present (see app.post("/api/sso/exchange")), so enabling it
+# is safe to add later. To turn on, uncomment and deploy:
+# [[env.production.unsafe.bindings]]
+# name = "SSO_LIMITER"
+# type = "ratelimit"
+# namespace_id = "1001"          # any unique number for your account
+# simple = { limit = 20, period = 60 }
+
 [env.production.vars]
 DISPATCH_NAMESPACE = "production"
 PLATFORM_URL = "https://friendo.world"

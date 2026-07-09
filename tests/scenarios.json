@@ -150,11 +150,24 @@
     "expect": { "status": 200, "json": { "user.email": "owner@test.com", "user.role": "superadmin" } }
   },
   {
+    "name": "create a post to receive comments",
+    "method": "POST", "path": "/collections/blog/records",
+    "body": { "title": "Commentable", "slug": "commentable", "body": "hi", "status": "published" },
+    "expect": { "status": 201 },
+    "capture": { "commentPostId": "record.id" }
+  },
+  {
     "name": "request an OTP code for a new member",
     "method": "POST", "path": "/auth/request-code",
     "body": { "email": "member@test.com" },
     "expect": { "status": 200, "json": { "sent": true } },
     "capture": { "otp": "code" }
+  },
+  {
+    "name": "requesting another code immediately is rate-limited",
+    "method": "POST", "path": "/auth/request-code",
+    "body": { "email": "member@test.com" },
+    "expect": { "status": 429 }
   },
   {
     "name": "verifying a wrong code fails",
@@ -177,5 +190,194 @@
     "name": "a member cannot reach admin endpoints",
     "method": "GET", "path": "/users",
     "expect": { "status": 403 }
+  },
+  {
+    "name": "a member posts a comment (starts pending)",
+    "method": "POST", "path": "/posts/${commentPostId}/comments",
+    "body": { "body": "First!" },
+    "expect": {
+      "status": 201,
+      "json": { "comment.body": "First!", "comment.status": "pending", "comment.author_name": "member" }
+    },
+    "capture": { "commentId": "comment.id" }
+  },
+  {
+    "name": "public comment read hides the pending comment",
+    "method": "GET", "path": "/posts/${commentPostId}/comments",
+    "expect": { "status": 200, "length": { "comments": 0 } }
+  },
+  {
+    "name": "a member cannot access the moderation queue",
+    "method": "GET", "path": "/comments",
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "owner logs back in to moderate",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "the moderation queue lists the pending comment",
+    "method": "GET", "path": "/comments?status=pending",
+    "expect": { "status": 200, "length": { "comments": 1 }, "json": { "comments.0.id": "${commentId}" } }
+  },
+  {
+    "name": "approve the comment",
+    "method": "PUT", "path": "/comments/${commentId}",
+    "body": { "status": "approved" },
+    "expect": { "status": 200, "json": { "comment.status": "approved" } }
+  },
+  {
+    "name": "an invalid moderation status is rejected",
+    "method": "PUT", "path": "/comments/${commentId}",
+    "body": { "status": "bogus" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "public comment read now shows the approved comment",
+    "method": "GET", "path": "/posts/${commentPostId}/comments",
+    "expect": {
+      "status": 200,
+      "length": { "comments": 1 },
+      "json": { "comments.0.body": "First!", "comments.0.author_name": "member" }
+    }
+  },
+  {
+    "name": "owner logs out",
+    "method": "POST", "path": "/auth/logout",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "anonymous cannot post a comment",
+    "method": "POST", "path": "/posts/${commentPostId}/comments",
+    "body": { "body": "nope" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "deleting a comment requires admin, not anonymous",
+    "method": "DELETE", "path": "/comments/${commentId}",
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "reaction counts are public and start empty",
+    "method": "GET", "path": "/reactions?target_type=post&target_id=${commentPostId}",
+    "expect": { "status": 200, "length": { "reactions": 0 } }
+  },
+  {
+    "name": "anonymous cannot react",
+    "method": "POST", "path": "/reactions",
+    "body": { "target_type": "post", "target_id": "${commentPostId}", "emoji": "👍" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "owner logs in to interact with community features",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "add a reaction",
+    "method": "POST", "path": "/reactions",
+    "body": { "target_type": "post", "target_id": "${commentPostId}", "emoji": "👍" },
+    "expect": {
+      "status": 200,
+      "json": { "reacted": true, "reactions.0.emoji": "👍", "reactions.0.count": 1, "reactions.0.reacted": true }
+    }
+  },
+  {
+    "name": "reacting again toggles it off",
+    "method": "POST", "path": "/reactions",
+    "body": { "target_type": "post", "target_id": "${commentPostId}", "emoji": "👍" },
+    "expect": { "status": 200, "json": { "reacted": false }, "length": { "reactions": 0 } }
+  },
+  {
+    "name": "re-add the reaction",
+    "method": "POST", "path": "/reactions",
+    "body": { "target_type": "post", "target_id": "${commentPostId}", "emoji": "👍" },
+    "expect": { "status": 200, "json": { "reacted": true, "reactions.0.count": 1 } }
+  },
+  {
+    "name": "creating a poll requires at least two options",
+    "method": "POST", "path": "/polls",
+    "body": { "question": "One?", "options": ["only"] },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "create a poll",
+    "method": "POST", "path": "/polls",
+    "body": { "question": "Cats or dogs?", "options": ["Cats", "Dogs"], "post_id": "${commentPostId}" },
+    "expect": {
+      "status": 201,
+      "length": { "poll.options": 2 },
+      "json": { "poll.question": "Cats or dogs?", "poll.total_votes": 0, "poll.options.1.text": "Dogs" }
+    },
+    "capture": { "pollId": "poll.id" }
+  },
+  {
+    "name": "read the poll before voting",
+    "method": "GET", "path": "/polls/${pollId}",
+    "expect": { "status": 200, "json": { "poll.total_votes": 0, "poll.my_vote": null } }
+  },
+  {
+    "name": "cast a vote",
+    "method": "POST", "path": "/polls/${pollId}/vote",
+    "body": { "option_index": 1 },
+    "expect": {
+      "status": 200,
+      "json": { "poll.total_votes": 1, "poll.my_vote": 1, "poll.options.1.votes": 1, "poll.options.0.votes": 0 }
+    }
+  },
+  {
+    "name": "voting twice is rejected",
+    "method": "POST", "path": "/polls/${pollId}/vote",
+    "body": { "option_index": 0 },
+    "expect": { "status": 409 }
+  },
+  {
+    "name": "create a closed poll",
+    "method": "POST", "path": "/polls",
+    "body": { "question": "Too late?", "options": ["Yes", "No"], "closes_at": "2020-01-01T00:00:00Z" },
+    "expect": { "status": 201 },
+    "capture": { "closedPollId": "poll.id" }
+  },
+  {
+    "name": "voting on a closed poll is rejected",
+    "method": "POST", "path": "/polls/${closedPollId}/vote",
+    "body": { "option_index": 0 },
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "an unknown poll returns 404",
+    "method": "GET", "path": "/polls/does-not-exist",
+    "expect": { "status": 404 }
+  },
+  {
+    "name": "settings report auto-approve off by default",
+    "method": "GET", "path": "/settings",
+    "expect": { "status": 200, "json": { "moderation.auto_approve": false } }
+  },
+  {
+    "name": "enable comment auto-approval",
+    "method": "PUT", "path": "/settings",
+    "body": { "moderation": { "auto_approve": true } },
+    "expect": { "status": 200, "json": { "moderation.auto_approve": true } }
+  },
+  {
+    "name": "a comment posted with auto-approve is immediately approved",
+    "method": "POST", "path": "/posts/${commentPostId}/comments",
+    "body": { "body": "Auto-approved!" },
+    "expect": { "status": 201, "json": { "comment.status": "approved" } }
+  },
+  {
+    "name": "the auto-approved comment is publicly visible without moderation",
+    "method": "GET", "path": "/posts/${commentPostId}/comments",
+    "expect": { "status": 200, "length": { "comments": 2 } }
+  },
+  {
+    "name": "disable comment auto-approval again",
+    "method": "PUT", "path": "/settings",
+    "body": { "moderation": { "auto_approve": false } },
+    "expect": { "status": 200, "json": { "moderation.auto_approve": false } }
   }
 ]

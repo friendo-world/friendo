@@ -20,6 +20,7 @@ import (
 	"github.com/friendo-world/friendo/runtime/go/content"
 	"github.com/friendo-world/friendo/runtime/go/data"
 	_ "github.com/friendo-world/friendo/runtime/go/renderer" // registers filters
+	"github.com/friendo-world/friendo/runtime/go/sdk"
 )
 
 // siteConfig represents the friendo.toml file.
@@ -103,6 +104,9 @@ func Start(port int, openAdmin bool) error {
 
 	// Live reload SSE endpoint.
 	r.Get("/_/reload", handleReloadSSE)
+
+	// The community SDK (Web Components) at /friendo.js — public.
+	r.Get("/friendo.js", sdk.Handler())
 
 	// Serve static files from assets/ at /assets/.
 	assetsDir := filepath.Join(siteDir, "assets")

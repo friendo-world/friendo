@@ -11,9 +11,11 @@ export function Layout({ children }: { children: ComponentChildren }) {
     ? "dashboard"
     : path.startsWith("/_/users")
       ? "users"
-      : path.startsWith("/_/settings")
-        ? "settings"
-        : "";
+      : path.startsWith("/_/moderation")
+        ? "moderation"
+        : path.startsWith("/_/settings")
+          ? "settings"
+          : "";
 
   return (
     <div>

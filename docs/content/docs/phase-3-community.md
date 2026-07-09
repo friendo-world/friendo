@@ -69,20 +69,40 @@ the edge applies them once per isolate on first request. Changes land as new
 
 ## `friendo.js` SDK (slice 3d)
 
-A small client built and served by both runtimes (the admin-bundle pattern),
-driven by progressive-enhancement attributes — `data-friendo-comments`,
-`data-friendo-react`, `data-friendo-poll` — so a site author drops in a tag and
-gets interactive, member-gated UI with no custom JS.
+A dependency-free client built by `npm run sdk` and served byte-identically at
+`/friendo.js` by both runtimes (the admin-bundle pattern). It ships **Web
+Components** — `<friendo-auth>`, `<friendo-comments post-id="…">`,
+`<friendo-reactions target-type="…" target-id="…">`, `<friendo-poll poll-id="…">`
+— so an author drops in a tag and gets interactive, member-gated UI with no custom
+JS. Each element renders into a shadow root and exposes its internals through
+`part` attributes, so authors theme them from their own stylesheet:
+
+```css
+friendo-comments::part(submit) { background: rebeccapurple; color: #fff; }
+friendo-reactions::part(button)[aria-pressed="true"] { background: #e8f0ff; }
+```
+
+```html
+<script src="/friendo.js" defer></script>
+<friendo-auth></friendo-auth>
+<friendo-comments post-id="…"></friendo-comments>
+```
 
 ## Slices
 
-- **3a — Identity foundation** *(in progress)*: shared migration mechanism;
-  accounts/profiles split (0002); default profile per account; `author_id` →
-  `authors.id`; OTP request/verify. Parity tests.
-- **3b — Comments + moderation.**
-- **3c — Reactions + polls.**
-- **3d — `friendo.js` SDK.**
-- **3e — Hardening:** rate limiting, real email provider, moderation toggle, an
-  author/persona switcher.
+- **3a — Identity foundation** ✅: shared migration mechanism; accounts/profiles
+  split (0002); default profile per account; `author_id` → `authors.id`; OTP
+  request/verify. Parity tests.
+- **3b — Comments + moderation** ✅: `comments.status` (0004), member-gated posting
+  (default pending), public reads see approved only, admin queue + SPA view.
+- **3c — Reactions + polls** ✅: reaction toggle + poll create/read/vote; unique
+  indexes (0005); one vote per member; closed-poll guard.
+- **3d — `friendo.js` SDK** ✅: Web Components styleable via `::part`, served at
+  `/friendo.js` by both runtimes.
+- **3e — Hardening** ✅ (core): comment auto-approve toggle (`site_settings`, 0006,
+  `GET/PUT /settings`); durable `request-code` rate limit; email-provider seam
+  (Resend; OTP echo off once configured). *Deferred:* persona switcher UI and
+  per-member comment-rate limiting.
 
-Each slice extends `tests/scenarios.json`, keeping Go/edge parity enforced.
+Each slice extends `tests/scenarios.json`, keeping Go/edge parity enforced (now
+63 steps).

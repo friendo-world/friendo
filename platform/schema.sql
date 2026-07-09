@@ -15,6 +15,21 @@ CREATE TABLE IF NOT EXISTS sites (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sites_subdomain ON sites(subdomain);
 
+-- Site collaborators (platform-level co-owners).
+-- Invited by email so someone can be added before they have a friendo.world
+-- account; access activates automatically once they sign up with that email.
+-- This is purely platform access (dashboard + the Admin-button SSO handoff); it
+-- is separate from a site's own internal users/roles.
+CREATE TABLE IF NOT EXISTS site_members (
+    id          TEXT PRIMARY KEY,
+    site_id     TEXT NOT NULL,              -- sites.id (= subdomain)
+    email       TEXT NOT NULL,              -- invited email, lowercased
+    invited_by  TEXT NOT NULL DEFAULT '',   -- user.id of the owner who invited
+    created     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_site_members ON site_members(site_id, email);
+CREATE INDEX IF NOT EXISTS idx_site_members_email ON site_members(email);
+
 -- Better Auth tables (platform accounts)
 
 CREATE TABLE IF NOT EXISTS "user" (

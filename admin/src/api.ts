@@ -24,6 +24,7 @@ export type Settings = {
   site: { name: string };
   collections: number;
   users: number;
+  moderation: { auto_approve: boolean };
 };
 
 export class ApiError extends Error {
@@ -76,6 +77,20 @@ export type RecordInput = {
   status: string;
 };
 
+export type CommentStatus = "pending" | "approved" | "rejected";
+
+export type Comment = {
+  id: string;
+  post_id: string;
+  parent_id: string;
+  author_id: string;
+  author_name: string;
+  author_avatar: string;
+  body: string;
+  status: CommentStatus;
+  created: string;
+};
+
 export const api = {
   me: () => req<{ user: User }>("/me"),
   login: (email: string, password: string) =>
@@ -123,6 +138,22 @@ export const api = {
     req<void>(`/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   settings: () => req<Settings>("/settings"),
+  updateSettings: (patch: { moderation?: { auto_approve: boolean } }) =>
+    req<{ moderation: { auto_approve: boolean } }>("/settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+
+  // Comment moderation
+  comments: (status: CommentStatus = "pending") =>
+    req<{ comments: Comment[] }>(`/comments?status=${encodeURIComponent(status)}`),
+  setCommentStatus: (id: string, status: CommentStatus) =>
+    req<{ comment: Comment }>(`/comments/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
+  deleteComment: (id: string) =>
+    req<void>(`/comments/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
 
 // availableRoles returns the roles an actor with the given role may assign.

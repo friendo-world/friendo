@@ -36,6 +36,16 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Post("/auth/request-code", handleRequestCode(db))
 		r.Post("/auth/verify-code", handleVerifyCode(db))
 
+		// Community: public reads, member-gated writes. These self-gate rather
+		// than joining the admin group — reads are open, and a write needs only
+		// an authenticated member (any role), not admin.
+		r.Get("/posts/{id}/comments", handleListComments(db))
+		r.Post("/posts/{id}/comments", handlePostComment(db, authFunc))
+		r.Get("/reactions", handleListReactions(db, authFunc))
+		r.Post("/reactions", handleToggleReaction(db, authFunc))
+		r.Get("/polls/{id}", handleGetPoll(db, authFunc))
+		r.Post("/polls/{id}/vote", handleVotePoll(db, authFunc))
+
 		// Authenticated endpoints (admin+).
 		r.Group(func(r chi.Router) {
 			r.Use(func(next http.Handler) http.Handler {
@@ -61,6 +71,14 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 			r.Put("/records/{id}", handleUpdateRecord(db))
 			r.Delete("/records/{id}", handleDeleteRecord(db))
 
+			// Comment moderation
+			r.Get("/comments", handleModerationList(db))
+			r.Put("/comments/{id}", handleUpdateComment(db))
+			r.Delete("/comments/{id}", handleDeleteComment(db))
+
+			// Polls (creation is admin; reading + voting are public/member)
+			r.Post("/polls", handleCreatePoll(db))
+
 			// Users
 			r.Get("/users", handleListUsers(db))
 			r.Post("/users", handleCreateUser(db, authFunc))
@@ -69,6 +87,7 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 
 			// Settings
 			r.Get("/settings", handleSettings(db, siteName))
+			r.Put("/settings", handleUpdateSettings(db))
 
 			// Push endpoints
 			r.Post("/push/templates", handlePushTemplates(siteDir))
@@ -217,6 +236,276 @@ func handleDeleteRecord(db *data.DB) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// --- Comments (community) ---
+
+// validCommentStatus is the set of moderation states a comment may hold.
+func validCommentStatus(s string) bool {
+	switch s {
+	case "pending", "approved", "rejected":
+		return true
+	}
+	return false
+}
+
+// handleListComments returns a post's approved comments. Public — anonymous
+// visitors see the same approved set. The moderation queue (admin) surfaces
+// pending ones separately.
+func handleListComments(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		comments, err := db.ListCommentsByPost(chi.URLParam(r, "id"), false)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"comments": comments})
+	}
+}
+
+// handlePostComment creates a comment on a post. Member-gated: any authenticated
+// user may post; the comment starts 'pending' for moderation.
+func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var in struct {
+			Body     string `json:"body"`
+			ParentID string `json:"parent_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(in.Body) == "" {
+			jsonError(w, "body is required", http.StatusBadRequest)
+			return
+		}
+		status := "pending"
+		if db.GetBoolSetting(settingAutoApprove, false) {
+			status = "approved"
+		}
+		authorID := db.DefaultAuthorID(user.ID)
+		id, err := db.CreateComment(chi.URLParam(r, "id"), in.ParentID, authorID, in.Body, status)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		comment, _ := db.GetComment(id)
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"comment": comment})
+	}
+}
+
+// handleModerationList returns comments filtered by ?status (admin). Defaults to
+// the pending queue when no status is given.
+func handleModerationList(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status := r.URL.Query().Get("status")
+		if status == "" {
+			status = "pending"
+		}
+		comments, err := db.ListCommentsByStatus(status)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"comments": comments})
+	}
+}
+
+// handleUpdateComment changes a comment's moderation status (admin).
+func handleUpdateComment(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if !validCommentStatus(in.Status) {
+			jsonError(w, "invalid status", http.StatusBadRequest)
+			return
+		}
+		err := db.UpdateCommentStatus(chi.URLParam(r, "id"), in.Status)
+		if err == sql.ErrNoRows {
+			jsonError(w, "comment not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("update error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		comment, _ := db.GetComment(chi.URLParam(r, "id"))
+		jsonResponse(w, map[string]any{"comment": comment})
+	}
+}
+
+// handleDeleteComment removes a comment (admin).
+func handleDeleteComment(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := db.DeleteComment(chi.URLParam(r, "id"))
+		if err == sql.ErrNoRows {
+			jsonError(w, "comment not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// --- Reactions (community) ---
+
+// handleListReactions returns per-emoji counts for a target (public). If the
+// caller is an authenticated member, each entry reports whether they reacted.
+func handleListReactions(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		targetType := r.URL.Query().Get("target_type")
+		targetID := r.URL.Query().Get("target_id")
+		if targetType == "" || targetID == "" {
+			jsonError(w, "target_type and target_id are required", http.StatusBadRequest)
+			return
+		}
+		authorID := ""
+		if u := authFunc(r); u != nil {
+			authorID = db.DefaultAuthorID(u.ID)
+		}
+		reactions, err := db.ReactionCounts(targetType, targetID, authorID)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"reactions": reactions})
+	}
+}
+
+// handleToggleReaction adds or removes the caller's reaction (member-gated).
+func handleToggleReaction(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var in struct {
+			TargetType string `json:"target_type"`
+			TargetID   string `json:"target_id"`
+			Emoji      string `json:"emoji"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if in.TargetType == "" || in.TargetID == "" || in.Emoji == "" {
+			jsonError(w, "target_type, target_id and emoji are required", http.StatusBadRequest)
+			return
+		}
+		authorID := db.DefaultAuthorID(user.ID)
+		reacted, err := db.ToggleReaction(in.TargetType, in.TargetID, authorID, in.Emoji)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("reaction error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		reactions, _ := db.ReactionCounts(in.TargetType, in.TargetID, authorID)
+		jsonResponse(w, map[string]any{"reacted": reacted, "reactions": reactions})
+	}
+}
+
+// --- Polls (community) ---
+
+// handleCreatePoll creates a poll (admin-gated).
+func handleCreatePoll(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			PostID   string   `json:"post_id"`
+			Question string   `json:"question"`
+			Options  []string `json:"options"`
+			ClosesAt string   `json:"closes_at"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(in.Question) == "" || len(in.Options) < 2 {
+			jsonError(w, "question and at least two options are required", http.StatusBadRequest)
+			return
+		}
+		id, err := db.CreatePoll(in.PostID, in.Question, in.Options, in.ClosesAt)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		poll, _ := db.GetPoll(id, "")
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"poll": poll})
+	}
+}
+
+// handleGetPoll returns a poll with tallies (public); includes the caller's vote
+// when authenticated.
+func handleGetPoll(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authorID := ""
+		if u := authFunc(r); u != nil {
+			authorID = db.DefaultAuthorID(u.ID)
+		}
+		poll, err := db.GetPoll(chi.URLParam(r, "id"), authorID)
+		if err == data.ErrPollNotFound {
+			jsonError(w, "poll not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"poll": poll})
+	}
+}
+
+// handleVotePoll records a member's vote (member-gated). One vote per member;
+// closed polls are rejected.
+func handleVotePoll(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var in struct {
+			OptionIndex int `json:"option_index"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		authorID := db.DefaultAuthorID(user.ID)
+		err := db.CastVote(chi.URLParam(r, "id"), authorID, in.OptionIndex)
+		switch err {
+		case nil:
+			// fall through
+		case data.ErrPollNotFound:
+			jsonError(w, "poll not found", http.StatusNotFound)
+			return
+		case data.ErrPollClosed:
+			jsonError(w, "poll closed", http.StatusForbidden)
+			return
+		case data.ErrAlreadyVoted:
+			jsonError(w, "already voted", http.StatusConflict)
+			return
+		default:
+			jsonError(w, fmt.Sprintf("vote error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		poll, _ := db.GetPoll(chi.URLParam(r, "id"), authorID)
+		jsonResponse(w, map[string]any{"poll": poll})
 	}
 }
 
@@ -680,9 +969,43 @@ func handleMigrate(db *data.DB) http.HandlerFunc {
 
 // --- OTP (passwordless member login) ---
 
-// emailConfigured reports whether an email provider is wired up. Until one is
-// (Phase 3e), request-code returns the code in its response for dev/test.
-func emailConfigured() bool { return false }
+// otpResendWindow bounds how often an account may request a fresh login code.
+const otpResendWindow = 30 * time.Second
+
+// emailConfigured reports whether an email provider is wired up. When it is, the
+// code is delivered by email and never echoed in the API response; without it
+// (local dev, CI) request-code returns the code so the flow still works.
+// Configure by setting RESEND_API_KEY and FRIENDO_EMAIL_FROM in the environment.
+func emailConfigured() bool {
+	return os.Getenv("RESEND_API_KEY") != "" && os.Getenv("FRIENDO_EMAIL_FROM") != ""
+}
+
+// sendOTPEmail delivers a login code via Resend. Best-effort: a delivery error is
+// logged, not surfaced, so a provider hiccup never leaks whether an email exists.
+func sendOTPEmail(email, code string) {
+	if !emailConfigured() {
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"from":    os.Getenv("FRIENDO_EMAIL_FROM"),
+		"to":      []string{email},
+		"subject": "Your sign-in code",
+		"text":    fmt.Sprintf("Your code is %s. It expires in 10 minutes.", code),
+	})
+	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", strings.NewReader(string(payload)))
+	if err != nil {
+		log.Printf("otp email: build request: %v", err)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("RESEND_API_KEY"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("otp email: send: %v", err)
+		return
+	}
+	resp.Body.Close()
+}
 
 func generateOTP() string {
 	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
@@ -715,12 +1038,18 @@ func handleRequestCode(db *data.DB) http.HandlerFunc {
 			}
 		}
 
+		// Rate limit: one live code at a time per account within the window.
+		if db.HasFreshOTP(user.ID, otpResendWindow) {
+			jsonError(w, "a code was already sent — please wait before requesting another", http.StatusTooManyRequests)
+			return
+		}
+
 		code := generateOTP()
 		if err := db.CreateOTP(user.ID, code, 10*time.Minute); err != nil {
 			jsonError(w, "could not issue code", http.StatusInternalServerError)
 			return
 		}
-		// TODO (Phase 3e): send the code by email.
+		sendOTPEmail(email, code)
 
 		resp := map[string]any{"sent": true}
 		if !emailConfigured() {
@@ -909,6 +1238,9 @@ func handleDeleteUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 
 // --- Settings ---
 
+// settingAutoApprove stores whether new comments skip the moderation queue.
+const settingAutoApprove = "moderation.auto_approve"
+
 func handleSettings(db *data.DB, siteName string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		users, _ := db.ListUsers()
@@ -917,6 +1249,36 @@ func handleSettings(db *data.DB, siteName string) http.HandlerFunc {
 			"site":        map[string]any{"name": siteName},
 			"collections": len(counts),
 			"users":       len(users),
+			"moderation":  map[string]any{"auto_approve": db.GetBoolSetting(settingAutoApprove, false)},
+		})
+	}
+}
+
+// handleUpdateSettings persists admin-configurable settings (currently the
+// comment auto-approve toggle).
+func handleUpdateSettings(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Moderation *struct {
+				AutoApprove *bool `json:"auto_approve"`
+			} `json:"moderation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if in.Moderation != nil && in.Moderation.AutoApprove != nil {
+			val := "false"
+			if *in.Moderation.AutoApprove {
+				val = "true"
+			}
+			if err := db.SetSetting(settingAutoApprove, val); err != nil {
+				jsonError(w, fmt.Sprintf("save error: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+		jsonResponse(w, map[string]any{
+			"moderation": map[string]any{"auto_approve": db.GetBoolSetting(settingAutoApprove, false)},
 		})
 	}
 }
