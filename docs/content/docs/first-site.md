@@ -48,7 +48,7 @@ and the browser refreshes.
 ## Create the admin account
 
 Open `http://localhost:3000/_/` and create the first account (email + password).
-This is your **superadmin** — see [Auth & users](/docs/auth). From the admin UI
+This is your site's **owner** — see [Auth & users](/docs/auth). From the admin UI
 you can write posts, manage collections, and add users.
 
 ## Edit a page

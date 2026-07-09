@@ -111,6 +111,17 @@ export type RecordInput = {
   status: string;
 };
 
+export type PendingRecord = {
+  id: string;
+  collection: string;
+  slug: string;
+  title: string;
+  author_id: string;
+  author_name: string;
+  status: string;
+  created: string;
+};
+
 export type CommentStatus = "pending" | "approved" | "rejected";
 
 export type Comment = {
@@ -150,6 +161,15 @@ export const api = {
     }),
   deleteRecord: (id: string) =>
     req<void>(`/records/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // Post-review queue (editor+)
+  recordsByStatus: (status: string) =>
+    req<{ records: PendingRecord[] }>(`/records?status=${encodeURIComponent(status)}`),
+  setRecordStatus: (id: string, status: string) =>
+    req<{ record: Record }>(`/records/${encodeURIComponent(id)}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
 
   setupStatus: () => req<SetupStatus>("/setup"),
   setup: (email: string, name: string, password: string) =>

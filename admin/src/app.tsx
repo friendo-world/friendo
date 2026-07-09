@@ -13,6 +13,7 @@ import { Users } from "./views/users";
 import { UserForm } from "./views/user-form";
 import { SettingsView } from "./views/settings";
 import { Moderation } from "./views/moderation";
+import { Review } from "./views/review";
 import { NotFound } from "./views/not-found";
 
 const NO_SETUP: SetupStatus = { needsSetup: false, hasLegacyAdmin: false };
@@ -72,6 +73,7 @@ export function App() {
             <Route path="/_/users" component={Users} />
             <Route path="/_/users/new" component={UserForm} />
             <Route path="/_/users/:id/edit" component={UserForm} />
+            <Route path="/_/review" component={Review} />
             <Route path="/_/moderation" component={Moderation} />
             <Route path="/_/settings" component={SettingsView} />
             <Route default component={NotFound} />

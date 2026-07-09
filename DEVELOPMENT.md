@@ -189,7 +189,7 @@ the runtimes only serve the bundle and the REST API.
 
 ## Auth
 
-**Local admin:** Create a superadmin account (email + password) on first run at `/_/setup`.
+**Local admin:** Create the site owner account (email + password) on first run at `/_/setup`.
 
 **Edge site admin:** Same auth model — site-level users/sessions in the site's own D1. Push local users to edge with `friendo push --users`.
 

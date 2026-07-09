@@ -250,6 +250,51 @@ func (db *DB) QueryCollectionOwnedBy(collection, userID string) ([]map[string]an
 	return scanCollectionRows(rows)
 }
 
+// ListRecordsByStatus returns posts across all collections with the given status
+// (the post-review queue), newest first, with each author's display name joined.
+func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT p.id, p.collection, p.slug, p.title, p.author_id, p.status, p.created, a.name
+		 FROM posts p LEFT JOIN authors a ON a.id = p.author_id
+		 WHERE p.site_id = ? AND p.status = ? ORDER BY p.created DESC`,
+		db.SiteID, status,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, collection, slug, title, authorID, st, created string
+		var authorName sql.NullString
+		if err := rows.Scan(&id, &collection, &slug, &title, &authorID, &st, &created, &authorName); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": id, "collection": collection, "slug": slug, "title": title,
+			"author_id": authorID, "author_name": authorName.String, "status": st, "created": created,
+		})
+	}
+	return out, rows.Err()
+}
+
+// SetRecordStatus changes only a post's status (used to publish/unpublish from
+// the review queue without touching its content).
+func (db *DB) SetRecordStatus(id, status string) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	res, err := db.Conn.Exec(
+		`UPDATE posts SET status = ?, updated = ? WHERE id = ? AND site_id = ?`,
+		status, now, id, db.SiteID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // QueryCollectionByField returns a single post from the given collection
 // where fieldName == value (used for dynamic routing, e.g. slug lookup).
 func (db *DB) QueryCollectionByField(collection, fieldName, value string) (map[string]any, error) {
@@ -1309,7 +1354,7 @@ func (db *DB) DeleteExpiredSessions() {
 
 // --- Migration ---
 
-// MigrateAdminToUsers checks if the old admin table has a password and no superadmin
+// MigrateAdminToUsers checks if the old admin table has a password and no owner
 // exists yet. Returns true if migration is needed (user must provide email).
 func (db *DB) MigrateAdminToUsers(email string) error {
 	var hash string
@@ -1335,7 +1380,7 @@ func (db *DB) MigrateAdminToUsers(email string) error {
 }
 
 // HasLegacyAdmin returns true if there's a password in the old admin table
-// but no superadmin user yet.
+// but no owner user yet.
 func (db *DB) HasLegacyAdmin() bool {
 	var hash string
 	err := db.Conn.QueryRow(`SELECT password_hash FROM admin WHERE id = 'admin'`).Scan(&hash)

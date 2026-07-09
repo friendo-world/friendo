@@ -12,7 +12,7 @@ identity model this builds on.
 ## Identity model: accounts vs. profiles
 
 - **`users` = accounts** — the auth identity: email, optional password, OTP, a
-  permission `role` (superadmin > admin > editor > member), unique per `(site, email)`.
+  permission `role` (owner > admin > editor > contributor > member), unique per `(site, email)`.
 - **`authors` = profiles** — display personas attached to an account via
   `authors.user_id`. **One account → many profiles.** All content (`posts`,
   `comments`, `reactions`, `poll_votes`) references a profile through `author_id`

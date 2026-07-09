@@ -9,13 +9,15 @@ export function Layout({ children }: { children: ComponentChildren }) {
 
   const active = path === "/_/"
     ? "dashboard"
-    : path.startsWith("/_/users")
-      ? "users"
-      : path.startsWith("/_/moderation")
-        ? "moderation"
-        : path.startsWith("/_/settings")
-          ? "settings"
-          : "";
+    : path.startsWith("/_/review")
+      ? "review"
+      : path.startsWith("/_/users")
+        ? "users"
+        : path.startsWith("/_/moderation")
+          ? "moderation"
+          : path.startsWith("/_/settings")
+            ? "settings"
+            : "";
 
   return (
     <div>

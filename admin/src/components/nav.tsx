@@ -1,6 +1,6 @@
 import { can, type User } from "../api";
 
-type Tab = "dashboard" | "users" | "moderation" | "settings";
+type Tab = "dashboard" | "review" | "users" | "moderation" | "settings";
 
 export function Nav({
   user,
@@ -27,6 +27,7 @@ export function Nav({
     <nav class="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
       <span class="font-bold text-gray-900">Friendo</span>
       {link("/_/", "Dashboard", "dashboard")}
+      {can(user.role, "content.edit.any") && link("/_/review", "Review", "review")}
       {can(user.role, "user.manage") && link("/_/users", "Users", "users")}
       {can(user.role, "comment.moderate.own") && link("/_/moderation", "Comments", "moderation")}
       {can(user.role, "site.configure") && link("/_/settings", "Settings", "settings")}

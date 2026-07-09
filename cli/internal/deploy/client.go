@@ -121,7 +121,7 @@ func (c *PlatformClient) Redeploy(subdomain string) error {
 }
 
 // SSOCode mints a one-time SSO code (POST /api/sites/:id/sso-code) that a
-// SiteClient can redeem for a superadmin session — so deploying to friendo.world
+// SiteClient can redeem for a owner session — so deploying to friendo.world
 // needs no separate site password.
 func (c *PlatformClient) SSOCode(subdomain string) (string, error) {
 	req, err := http.NewRequest("POST", c.baseURL+"/api/sites/"+subdomain+"/sso-code", nil)
@@ -233,7 +233,7 @@ func (c *SiteClient) Login(email, password string) error {
 	return fmt.Errorf("login succeeded but no session cookie was returned")
 }
 
-// PlatformLogin redeems a one-time SSO code from the platform for a superadmin
+// PlatformLogin redeems a one-time SSO code from the platform for a owner
 // session, storing the resulting friendo_session cookie on the client. The
 // endpoint responds with a 302 that carries the Set-Cookie, so we must not
 // follow the redirect (which would drop it and land on the SPA shell).
@@ -279,7 +279,7 @@ func (c *SiteClient) NeedsSetup() (bool, error) {
 	return result.NeedsSetup, nil
 }
 
-// Setup creates the site's first admin (superadmin) and stores the resulting
+// Setup creates the site's first admin (owner) and stores the resulting
 // session cookie on the client. Only works while the site has no users.
 func (c *SiteClient) Setup(email, name, password string) error {
 	body, err := json.Marshal(map[string]string{"email": email, "name": name, "password": password})

@@ -524,6 +524,17 @@
     "expect": { "status": 403 }
   },
   {
+    "name": "a contributor cannot access the review queue",
+    "method": "GET", "path": "/records?status=pending",
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "a contributor cannot flip a post's status",
+    "method": "PUT", "path": "/records/${commentPostId}/status",
+    "body": { "status": "draft" },
+    "expect": { "status": 403 }
+  },
+  {
     "name": "a contributor creates a post (published immediately, approval off)",
     "method": "POST", "path": "/collections/blog/records",
     "body": { "title": "Con post", "slug": "con-post", "body": "hi", "status": "draft" },
@@ -602,10 +613,26 @@
     "expect": { "status": 200 }
   },
   {
-    "name": "an editor publishes the pending post",
-    "method": "PUT", "path": "/records/${pendingPostId}",
-    "body": { "title": "Needs review", "slug": "needs-review", "body": "hi", "status": "published" },
+    "name": "the review queue lists the pending post",
+    "method": "GET", "path": "/records?status=pending",
+    "expect": { "status": 200, "length": { "records": 1 }, "json": { "records.0.id": "${pendingPostId}", "records.0.author_name": "Con" } }
+  },
+  {
+    "name": "an invalid record status is rejected",
+    "method": "PUT", "path": "/records/${pendingPostId}/status",
+    "body": { "status": "bogus" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "an editor publishes the pending post from the review queue",
+    "method": "PUT", "path": "/records/${pendingPostId}/status",
+    "body": { "status": "published" },
     "expect": { "status": 200, "json": { "record.status": "published" } }
+  },
+  {
+    "name": "the review queue is now empty",
+    "method": "GET", "path": "/records?status=pending",
+    "expect": { "status": 200, "length": { "records": 0 } }
   },
   {
     "name": "a visitor signs in to comment on the contributor's post",

@@ -64,12 +64,12 @@ const sessionCookieName = "friendo_session"
 // Returns nil if not authenticated. Exported for use by the API.
 func GetSessionUser(r *http.Request, db *data.DB) *data.User {
 	if openAdminMode {
-		// In open admin mode, return a fake superadmin.
+		// In open admin mode, return a fake owner (all capabilities).
 		return &data.User{
 			ID:    "open-admin",
 			Name:  "Admin (open mode)",
 			Email: "admin@localhost",
-			Role:  "superadmin",
+			Role:  "owner",
 		}
 	}
 

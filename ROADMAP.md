@@ -31,8 +31,9 @@ template engine for Workers (Nunjucks uses `eval`, blocked in Workers).
 Hardened the foundation and made Friendo production-ready.
 
 - **Auth** — `users` + `sessions` + `otp_codes` tables; email + password setup;
-  full user management with a role hierarchy (superadmin > admin > editor >
-  member); DB-stored sessions; legacy-admin migration path. Same model on the edge.
+  full user management with a role hierarchy (owner > admin > editor > contributor
+  > member; see the auth redesign below); DB-stored sessions; legacy-admin
+  migration path. Same model on the edge.
 - **Codebase refactor** — `binary/` → `cli/` + `runtime/go/`; `world/` →
   `platform/` + `runtime/edge/`; single Go module at the repo root. Self-hosting
   became a first-class path running the exact code friendo.world runs.

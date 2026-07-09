@@ -156,9 +156,11 @@ types = ["posts", "comments", "reactions"]
 
 Every Friendo site — local or deployed — has the same auth model:
 
-- **First run:** Create a superadmin account (email + password)
-- **Users:** Superadmin can add users via the admin UI with roles (admin, editor, member)
-- **Sessions:** Bcrypt passwords, token-based sessions stored in the database
+- **First run:** Create the site **owner** (email + password)
+- **Roles:** Capability-based — owner > admin > editor > contributor > member. Contributors edit only their own posts; editors edit any. Owners/admins add users via the admin UI.
+- **Presets:** Pick a site type (Personal / Community / Blog) in Settings to set who can post and whether posts need approval.
+- **Members:** Visitors sign in passwordlessly with an email code to comment, react, and vote.
+- **Sessions:** Bcrypt passwords, token-based sessions stored in the database.
 - **Sync:** `friendo push --users` syncs accounts to the deployed site. Bcrypt hashes are portable — same password works everywhere.
 
 The friendo.world platform has its own separate auth for managing your platform account and deployed sites. Site auth and platform auth are independent.

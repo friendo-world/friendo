@@ -52,7 +52,11 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db)))
 		r.Get("/collections/{collection}/records", capGate(authFunc, data.CapContentCreate, handleListRecords(db, authFunc)))
 		r.Post("/collections/{collection}/records", capGate(authFunc, data.CapContentCreate, handleCreateRecord(db, authFunc)))
+		// Post-review queue — editor+ (content.edit.any) lists posts by status;
+		// content.publish flips a post's status without touching its content.
+		r.Get("/records", capGate(authFunc, data.CapContentEditAny, handleListRecordsByStatus(db)))
 		r.Get("/records/{id}", capGate(authFunc, data.CapContentCreate, handleGetRecord(db, authFunc)))
+		r.Put("/records/{id}/status", capGate(authFunc, data.CapContentPublish, handleSetRecordStatus(db)))
 		r.Put("/records/{id}", capGate(authFunc, data.CapContentCreate, handleUpdateRecord(db, authFunc)))
 		r.Delete("/records/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteRecord(db, authFunc)))
 
@@ -177,6 +181,62 @@ func handleGetRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		jsonResponse(w, map[string]any{"record": record})
+	}
+}
+
+// validRecordStatus is the set of publication states a post may hold.
+func validRecordStatus(s string) bool {
+	switch s {
+	case "draft", "pending", "published":
+		return true
+	}
+	return false
+}
+
+// handleListRecordsByStatus returns posts across collections with ?status
+// (default pending) — the review queue for editors.
+func handleListRecordsByStatus(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status := r.URL.Query().Get("status")
+		if status == "" {
+			status = "pending"
+		}
+		records, err := db.ListRecordsByStatus(status)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"records": records})
+	}
+}
+
+// handleSetRecordStatus flips a post's publication status (publish/unpublish
+// from the review queue) without touching its content.
+func handleSetRecordStatus(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if !validRecordStatus(in.Status) {
+			jsonError(w, "invalid status", http.StatusBadRequest)
+			return
+		}
+		id := chi.URLParam(r, "id")
+		err := db.SetRecordStatus(id, in.Status)
+		if err == sql.ErrNoRows {
+			jsonError(w, "record not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("update error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		record, _ := db.GetRecordByID(id)
 		jsonResponse(w, map[string]any{"record": record})
 	}
 }

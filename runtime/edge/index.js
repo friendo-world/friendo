@@ -266,7 +266,7 @@ app.post("/_/api/auth/logout", async (c) => {
 // clicking "Admin" in the platform dashboard (or `friendo deploy` on the CLI).
 // That hands us a one-time code, which we redeem against the platform. The
 // platform is the identity authority; on success we ensure a passwordless
-// superadmin exists for the owner's email and start a session for them.
+// owner exists for the owner's email and start a session for them.
 app.get("/_/api/platform-login", async (c) => {
   const code = c.req.query("code");
   const platformURL = c.env.PLATFORM_URL;
@@ -549,6 +549,42 @@ app.post("/_/api/collections/:collection/records", async (c) => {
      FROM posts WHERE id = ? AND site_id = ?`
   ).bind(id, auth.siteId).first();
   return c.json({ record }, 201);
+});
+
+// Post-review queue: posts across collections by ?status (default pending).
+// Editor+ (content.edit.any).
+app.get("/_/api/records", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.contentEditAny);
+  if (deny) return deny;
+  const status = c.req.query("status") || "pending";
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.id, p.collection, p.slug, p.title, p.author_id, p.status, p.created, a.name AS author_name
+     FROM posts p LEFT JOIN authors a ON a.id = p.author_id
+     WHERE p.site_id = ? AND p.status = ? ORDER BY p.created DESC`
+  ).bind(auth.siteId, status).all();
+  return c.json({ records: (results || []).map((r) => ({ ...r, author_name: r.author_name || "" })) });
+});
+
+// Flip a post's status (publish/unpublish from the review queue) — content.publish.
+app.put("/_/api/records/:id/status", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.contentPublish);
+  if (deny) return deny;
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+  if (!["draft", "pending", "published"].includes(body.status)) return c.json({ error: "invalid status" }, 400);
+  const id = c.req.param("id");
+  const res = await c.env.DB.prepare("UPDATE posts SET status = ?, updated = ? WHERE id = ? AND site_id = ?")
+    .bind(body.status, nowISO(), id, auth.siteId).run();
+  if (!res.meta.changes) return c.json({ error: "record not found" }, 404);
+  const record = await c.env.DB.prepare(
+    `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
+     FROM posts WHERE id = ? AND site_id = ?`
+  ).bind(id, auth.siteId).first();
+  return c.json({ record });
 });
 
 app.get("/_/api/records/:id", async (c) => {
