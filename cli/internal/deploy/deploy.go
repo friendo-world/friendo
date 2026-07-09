@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -599,6 +600,37 @@ func RunDestroy(opts DestroyOptions) error {
 		return handlePlatformErr(err, "run the command again to re-authenticate")
 	}
 	fmt.Println(" done")
+	return nil
+}
+
+// RunWhoami prints which friendo.world account the CLI is signed in as. Unlike
+// the provisioning commands, it never triggers the device-auth browser flow —
+// it only reports the state of the saved session token.
+func RunWhoami(apiURL string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	base := cfg.BaseURL
+	if apiURL != "" {
+		base = apiURL
+	}
+	if cfg.Token == "" {
+		fmt.Println("Not signed in. Run `friendo deploy` to sign in.")
+		return nil
+	}
+
+	acct, err := NewPlatformClient(base, cfg.Token).Whoami()
+	if err != nil {
+		if errors.Is(err, ErrNotAuthenticated) {
+			fmt.Println("Your saved session has expired. Run `friendo deploy` to sign in again.")
+			return nil
+		}
+		return err
+	}
+
+	fmt.Printf("Signed in as %s <%s>\n", acct.Name, acct.Email)
+	fmt.Printf("Platform: %s\n", base)
 	return nil
 }
 

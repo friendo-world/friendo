@@ -339,6 +339,15 @@ function validateSubdomain(subdomain) {
   return null;
 }
 
+// GET /api/me — the signed-in platform account (used by `friendo whoami`)
+app.get("/api/me", requirePlatformAuth, async (c) => {
+  const user = await c.env.DB.prepare(
+    `SELECT id, name, email FROM "user" WHERE id = ?`
+  ).bind(c.get("userId")).first();
+  if (!user) return c.json({ error: "User not found" }, 404);
+  return c.json(user);
+});
+
 // POST /api/sites — provision a new site
 app.post("/api/sites", requirePlatformAuth, async (c) => {
   const userId = c.get("userId");
@@ -490,10 +499,20 @@ function isBareHost(c) {
 }
 
 function getSessionToken(c) {
-  const cookie = c.req.raw.headers.get("cookie") || "";
-  const match = cookie.match(/better-auth\.session_token=([^;]+)/);
-  if (!match) return null;
-  const value = decodeURIComponent(match[1]);
+  const header = c.req.raw.headers.get("cookie") || "";
+  // Parse the Cookie header into name -> value pairs.
+  const cookies = {};
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    cookies[part.slice(0, eq).trim()] = part.slice(eq + 1).trim();
+  }
+  // In production (HTTPS) Better Auth issues the cookie with a "__Secure-" prefix;
+  // prefer it so a stale unprefixed cookie left over from an earlier login can't
+  // shadow the real session and lock the user out.
+  const raw = cookies["__Secure-better-auth.session_token"] || cookies["better-auth.session_token"];
+  if (!raw) return null;
+  const value = decodeURIComponent(raw);
   const dotIdx = value.indexOf(".");
   return dotIdx >= 0 ? value.slice(0, dotIdx) : value;
 }
@@ -543,13 +562,22 @@ app.get("/dashboard", async (c, next) => {
 
 // Logout
 app.post("/logout", async (c) => {
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: "/",
-      "Set-Cookie": "better-auth.session_token=; Path=/; Max-Age=0",
-    },
-  });
+  // Invalidate the server-side session, not just the browser cookie.
+  const token = getSessionToken(c);
+  if (token) {
+    try {
+      await c.env.DB.prepare(`DELETE FROM "session" WHERE token = ?`).bind(token).run();
+    } catch (err) {
+      console.error("[logout] failed to delete session:", err.message);
+    }
+  }
+
+  // On HTTPS (production) Better Auth issues the cookie with a "__Secure-" prefix;
+  // in local dev it's unprefixed. Clear both so sign out works in every environment.
+  const headers = new Headers({ Location: "/" });
+  headers.append("Set-Cookie", "better-auth.session_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+  headers.append("Set-Cookie", "__Secure-better-auth.session_token=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax");
+  return new Response(null, { status: 302, headers });
 });
 
 // ============================================================================

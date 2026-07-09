@@ -3,11 +3,23 @@ package deploy
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
+
+// ErrNotAuthenticated means the cached session token is missing, expired, or
+// rejected by the platform — the user needs to sign in again.
+var ErrNotAuthenticated = errors.New("not authenticated")
+
+// Account describes the signed-in friendo.world user.
+type Account struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
 
 // PlatformClient talks to the friendo.world platform API for provisioning.
 type PlatformClient struct {
@@ -25,6 +37,35 @@ func NewPlatformClient(baseURL, token string) *PlatformClient {
 			Timeout: 60 * time.Second,
 		},
 	}
+}
+
+// Whoami returns the account that owns the cached session token, or
+// ErrNotAuthenticated if the token is expired or invalid.
+func (c *PlatformClient) Whoami() (*Account, error) {
+	req, err := http.NewRequest("GET", c.baseURL+"/api/me", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("whoami request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return nil, ErrNotAuthenticated
+	}
+	if resp.StatusCode >= 300 {
+		return nil, readError(resp)
+	}
+
+	var acct Account
+	if err := json.NewDecoder(resp.Body).Decode(&acct); err != nil {
+		return nil, fmt.Errorf("reading account: %w", err)
+	}
+	return &acct, nil
 }
 
 // CreateSite registers or updates a site on the platform.

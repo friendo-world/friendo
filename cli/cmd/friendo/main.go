@@ -226,7 +226,21 @@ Targets:
 	pullCmd.Flags().BoolVar(&pullUsers, "users", false, "Pull user accounts from the deployed site")
 	pullCmd.Flags().StringVar(&pullTarget, "target", "", "Override deploy target URL")
 
-	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd)
+	// --- whoami ---
+	var whoamiTarget string
+	var whoamiCmd = &cobra.Command{
+		Use:   "whoami",
+		Short: "Show which friendo.world account you're signed in as",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := deploy.RunWhoami(whoamiTarget); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+	whoamiCmd.Flags().StringVar(&whoamiTarget, "target", "", "Override platform API URL")
+
+	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd, whoamiCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
