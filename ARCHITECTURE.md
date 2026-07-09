@@ -178,8 +178,19 @@ database self-initializes from the baseline. Add a migration by dropping the sam
 
 | Scope | What | Where |
 |---|---|---|
-| **Site** | Per-site **accounts** (`users`) with roles (superadmin > admin > editor > member), bcrypt passwords, DB-stored sessions. Identical model in both runtimes. | site D1 / SQLite |
+| **Site** | Per-site **accounts** (`users`) with roles (owner > admin > editor > contributor > member), bcrypt passwords, DB-stored sessions. Identical model in both runtimes. | site D1 / SQLite |
 | **Platform** | friendo.world account auth (Better Auth) for managing your account and provisioning sites — independent of site auth. | platform D1 |
+
+**Capabilities, not just ranks.** Authorization is capability-based: roles are
+named bundles of capabilities (`content.create`, `content.edit.own` vs
+`content.edit.any`, `comment.moderate.own` vs `comment.moderate.any`,
+`user.manage`, `site.configure`, `site.own`). The **ownership axis** (own vs. any)
+lets a Contributor edit only what they authored while an Editor edits anything —
+something a pure rank ladder can't express. Per-site policy (`access.default_role`,
+`access.signups_enabled`, `content.require_approval`) is stored in `site_settings`
+and surfaced as one-click presets (Personal / Community / Blog) in the admin UI.
+The public render path shows only `published` posts. Full design in
+[design/auth-permissions.md](design/auth-permissions.md).
 
 **Accounts vs. profiles.** A `users` row is an *account* (the auth identity).
 Display **profiles** live in `authors`, linked by `authors.user_id` — one account

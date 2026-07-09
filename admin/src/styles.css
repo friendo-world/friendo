@@ -9,8 +9,9 @@
   --color-friendo-danger: #dc2626;
   --color-friendo-danger-hover: #b91c1c;
 
-  --color-role-superadmin: #7c3aed;
+  --color-role-owner: #7c3aed;
   --color-role-admin: #2563eb;
   --color-role-editor: #059669;
+  --color-role-contributor: #0d9488;
   --color-role-member: #6b7280;
 }

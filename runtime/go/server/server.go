@@ -391,6 +391,11 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 				renderNotFound(w, req, db, pagesDir, tplSet, siteCfg)
 				return
 			}
+			// Unpublished posts (draft/pending) aren't visible to the public.
+			if s, _ := record["status"].(string); s != "published" {
+				renderNotFound(w, req, db, pagesDir, tplSet, siteCfg)
+				return
+			}
 			ctx["record"] = record
 		}
 	}
@@ -456,7 +461,8 @@ func buildCollectionsContext(db *data.DB) map[string]any {
 	}
 
 	for _, name := range names {
-		records, err := db.QueryCollection(name)
+		// Public render path: only published posts are visible (drafts/pending stay hidden).
+		records, err := db.QueryPublishedCollection(name)
 		if err != nil {
 			log.Printf("Warning: collection %q not available: %v", name, err)
 			result[name] = []map[string]any{}

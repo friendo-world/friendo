@@ -144,6 +144,14 @@ D1's per-account cap from 10 to 50,000.)
 
 ## Recently shipped
 
+- **Auth & permissions redesign (toward 0.2)** — capability-based roles (owner >
+  admin > editor > contributor > member) with an **ownership axis** (`edit.own` vs
+  `edit.any`), so contributors edit only their own posts and authors moderate
+  comments on their own posts. Renamed `superadmin` → `owner` with co-owners and a
+  **last-owner guard** (migration `0008`); per-site access presets (Personal /
+  Community / Blog) backed by `access.*` + `content.require_approval` settings; a
+  post-approval workflow; and a published-only public render path. Both runtimes at
+  parity (109 test steps). Design: [design/auth-permissions.md](design/auth-permissions.md).
 - **File-based `content/` authoring** — Hugo-style markdown → DB, with a `data`
   JSON column for arbitrary front matter, `friendo build`, serve/push integration,
   and a `sort_by` filter. See [ARCHITECTURE.md](ARCHITECTURE.md).

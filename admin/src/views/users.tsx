@@ -65,7 +65,7 @@ export function Users() {
                         class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
                         Edit
                       </a>
-                      {u.id !== me.id && u.role !== "superadmin" && (
+                      {u.id !== me.id && u.role !== "owner" && (
                         <button onClick={() => remove(u.id)}
                           class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">
                           Delete

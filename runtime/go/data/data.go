@@ -200,6 +200,56 @@ func (db *DB) QueryCollection(collection string) ([]map[string]any, error) {
 	return results, rows.Err()
 }
 
+// scanCollectionRows maps post rows (in QueryCollection's column order) to the
+// template/record shape.
+func scanCollectionRows(rows *sql.Rows) ([]map[string]any, error) {
+	defer rows.Close()
+	var results []map[string]any
+	for rows.Next() {
+		var id, slug, title, body, authorID, status, publishedAt, created, updated, data string
+		if err := rows.Scan(&id, &slug, &title, &body, &authorID, &status, &publishedAt, &created, &updated, &data); err != nil {
+			return nil, err
+		}
+		results = append(results, map[string]any{
+			"id": id, "slug": slug, "title": title, "body": body,
+			"author_id": authorID, "status": status, "published_at": publishedAt,
+			"created": created, "updated": updated, "data": decodeData(data),
+		})
+	}
+	return results, rows.Err()
+}
+
+const collectionCols = `id, slug, title, body, author_id, status, published_at, created, updated, data`
+
+// QueryPublishedCollection returns only published posts of a collection — the
+// public render path uses this so drafts and pending posts never leak.
+func (db *DB) QueryPublishedCollection(collection string) ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT `+collectionCols+` FROM posts
+		 WHERE site_id = ? AND collection = ? AND status = 'published' ORDER BY created DESC`,
+		db.SiteID, collection,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying collection %q: %w", collection, err)
+	}
+	return scanCollectionRows(rows)
+}
+
+// QueryCollectionOwnedBy returns a collection's posts authored by the given
+// account (any of its profiles) — the admin content list for a Contributor.
+func (db *DB) QueryCollectionOwnedBy(collection, userID string) ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT p.id, p.slug, p.title, p.body, p.author_id, p.status, p.published_at, p.created, p.updated, p.data
+		 FROM posts p JOIN authors a ON a.id = p.author_id
+		 WHERE p.site_id = ? AND p.collection = ? AND a.user_id = ? ORDER BY p.created DESC`,
+		db.SiteID, collection, userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying owned collection %q: %w", collection, err)
+	}
+	return scanCollectionRows(rows)
+}
+
 // QueryCollectionByField returns a single post from the given collection
 // where fieldName == value (used for dynamic routing, e.g. slug lookup).
 func (db *DB) QueryCollectionByField(collection, fieldName, value string) (map[string]any, error) {
@@ -458,11 +508,78 @@ func (db *DB) ListCommentsByPost(postID string, includeUnapproved bool) ([]map[s
 	return out, rows.Err()
 }
 
+// ListCommentsForViewer returns a post's comments as seen by a given viewer.
+// Everyone sees approved comments; a moderator (canModerate) also sees pending/
+// rejected; an authenticated author also sees their own unapproved comments. Each
+// row carries a `mine` flag (the viewer wrote it) for inline self-delete.
+func (db *DB) ListCommentsForViewer(postID, viewerUserID string, canModerate bool) ([]map[string]any, error) {
+	q := `SELECT c.id, c.post_id, c.parent_id, c.author_id, c.body, c.status, c.created,
+	             a.name, a.avatar, CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
+	      FROM comments c LEFT JOIN authors a ON a.id = c.author_id
+	      WHERE c.site_id = ? AND c.post_id = ?`
+	args := []any{viewerUserID, viewerUserID, db.SiteID, postID}
+	if !canModerate {
+		q += ` AND (c.status = 'approved' OR (? != '' AND a.user_id = ?))`
+		args = append(args, viewerUserID, viewerUserID)
+	}
+	q += ` ORDER BY c.created ASC`
+
+	rows, err := db.Conn.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, pid, parentID, authorID, body, status, created string
+		var authorName, authorAvatar sql.NullString
+		var mine int
+		if err := rows.Scan(&id, &pid, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar, &mine); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": id, "post_id": pid, "parent_id": parentID, "author_id": authorID,
+			"author_name": authorName.String, "author_avatar": authorAvatar.String,
+			"body": body, "status": status, "created": created, "mine": mine == 1,
+		})
+	}
+	return out, rows.Err()
+}
+
 // ListCommentsByStatus returns all comments across the site with the given
 // status (the moderation queue), newest first.
 func (db *DB) ListCommentsByStatus(status string) ([]map[string]any, error) {
 	q := commentSelect + ` WHERE c.site_id = ?`
 	args := []any{db.SiteID}
+	if status != "" {
+		q += ` AND c.status = ?`
+		args = append(args, status)
+	}
+	q += ` ORDER BY c.created DESC`
+	rows, err := db.Conn.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		c, err := scanComment(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListCommentsByStatusForOwner returns comments with the given status that sit
+// on posts the account authored — the moderation queue for comment.moderate.own.
+func (db *DB) ListCommentsByStatusForOwner(status, userID string) ([]map[string]any, error) {
+	q := commentSelect + `
+		JOIN posts p ON p.id = c.post_id
+		JOIN authors pa ON pa.id = p.author_id
+		WHERE c.site_id = ? AND pa.user_id = ?`
+	args := []any{db.SiteID, userID}
 	if status != "" {
 		q += ` AND c.status = ?`
 		args = append(args, status)
@@ -868,14 +985,22 @@ type User struct {
 	Updated      string
 }
 
-// IsSetupDone returns true if a superadmin user exists for this site.
+// IsSetupDone returns true if an owner user exists for this site.
 func (db *DB) IsSetupDone() bool {
 	var id string
 	err := db.Conn.QueryRow(
-		`SELECT id FROM users WHERE site_id = ? AND role = 'superadmin' LIMIT 1`,
+		`SELECT id FROM users WHERE site_id = ? AND role = 'owner' LIMIT 1`,
 		db.SiteID,
 	).Scan(&id)
 	return err == nil && id != ""
+}
+
+// CountOwners returns how many owner accounts the site has — used by the
+// last-owner guard, which keeps a site from ever losing its final owner.
+func (db *DB) CountOwners() int {
+	var n int
+	db.Conn.QueryRow(`SELECT COUNT(*) FROM users WHERE site_id = ? AND role = 'owner'`, db.SiteID).Scan(&n)
+	return n
 }
 
 // CreateUser creates a new user with the given details.
@@ -952,8 +1077,12 @@ func (db *DB) GetUserByEmail(email string) (*User, error) {
 	return u, nil
 }
 
-// CreateMember creates a passwordless OTP account (role member) + default profile.
-func (db *DB) CreateMember(email, name string) (*User, error) {
+// CreateMember creates a passwordless OTP account with the given role (the
+// site's access.default_role for self-serve signups) plus a default profile.
+func (db *DB) CreateMember(email, name, role string) (*User, error) {
+	if role == "" {
+		role = "member"
+	}
 	id := GenerateID()
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	if name == "" {
@@ -961,8 +1090,8 @@ func (db *DB) CreateMember(email, name string) (*User, error) {
 	}
 	_, err := db.Conn.Exec(
 		`INSERT INTO users (id, site_id, email, name, password_hash, role, auth_methods, created, updated)
-		 VALUES (?, ?, ?, ?, '', 'member', '["otp"]', ?, ?)`,
-		id, db.SiteID, email, name, now, now,
+		 VALUES (?, ?, ?, ?, '', ?, '["otp"]', ?, ?)`,
+		id, db.SiteID, email, name, role, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating member: %w", err)
@@ -970,7 +1099,7 @@ func (db *DB) CreateMember(email, name string) (*User, error) {
 	if _, err := db.createDefaultAuthor(id, name, email); err != nil {
 		return nil, fmt.Errorf("creating default author: %w", err)
 	}
-	return &User{ID: id, SiteID: db.SiteID, Email: email, Name: name, Role: "member", Created: now, Updated: now}, nil
+	return &User{ID: id, SiteID: db.SiteID, Email: email, Name: name, Role: role, Created: now, Updated: now}, nil
 }
 
 // CreateOTP stores a hashed one-time code for an account.
@@ -1106,18 +1235,16 @@ func (db *DB) UpdateUserPassword(id, password string) error {
 	return err
 }
 
-// DeleteUser removes a user by ID. Cannot delete superadmin.
+// DeleteUser removes a user by ID. Authorization (rank guard, last-owner guard)
+// is enforced by the caller.
 func (db *DB) DeleteUser(id string) error {
-	result, err := db.Conn.Exec(
-		`DELETE FROM users WHERE id = ? AND site_id = ? AND role != 'superadmin'`,
-		id, db.SiteID,
-	)
+	result, err := db.Conn.Exec(`DELETE FROM users WHERE id = ? AND site_id = ?`, id, db.SiteID)
 	if err != nil {
 		return err
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("cannot delete superadmin or user not found")
+		return fmt.Errorf("user not found")
 	}
 	// Clean up sessions for deleted user.
 	_, _ = db.Conn.Exec(`DELETE FROM sessions WHERE user_id = ? AND site_id = ?`, id, db.SiteID)
@@ -1191,9 +1318,9 @@ func (db *DB) MigrateAdminToUsers(email string) error {
 		return fmt.Errorf("no legacy admin to migrate")
 	}
 
-	// Check if superadmin already exists.
+	// Check if an owner already exists.
 	if db.IsSetupDone() {
-		return fmt.Errorf("superadmin already exists")
+		return fmt.Errorf("owner already exists")
 	}
 
 	id := GenerateID()
@@ -1201,7 +1328,7 @@ func (db *DB) MigrateAdminToUsers(email string) error {
 
 	_, err = db.Conn.Exec(
 		`INSERT INTO users (id, site_id, email, name, password_hash, role, created, updated)
-		 VALUES (?, ?, ?, ?, ?, 'superadmin', ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, 'owner', ?, ?)`,
 		id, db.SiteID, email, "Admin", hash, now, now,
 	)
 	return err
@@ -1229,18 +1356,141 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
-// RoleRank returns the permission level of a role (higher = more access).
+// --- Roles & capabilities ---
+//
+// Permissions are modeled as capabilities (the atoms). A role is a named bundle
+// of capabilities; the built-in bundles form a superset ladder, but enforcement
+// is capability-based so presets/custom roles can deviate later. See
+// design/auth-permissions.md.
+
+type Capability string
+
+const (
+	CapContentCreate      Capability = "content.create"
+	CapContentEditOwn     Capability = "content.edit.own"
+	CapContentEditAny     Capability = "content.edit.any"
+	CapContentPublish     Capability = "content.publish"
+	CapCommentModerateOwn Capability = "comment.moderate.own"
+	CapCommentModerateAny Capability = "comment.moderate.any"
+	CapUserManage         Capability = "user.manage"
+	CapSiteConfigure      Capability = "site.configure"
+	CapSiteOwn            Capability = "site.own"
+)
+
+// roleCapabilities maps each built-in role to the capabilities it holds. Built as
+// supersets: each role adds to the one below it.
+var roleCapabilities = func() map[string]map[Capability]bool {
+	member := map[Capability]bool{}
+	contributor := merge(member, CapContentCreate, CapContentEditOwn, CapCommentModerateOwn)
+	editor := merge(contributor, CapContentEditAny, CapContentPublish, CapCommentModerateAny)
+	admin := merge(editor, CapUserManage, CapSiteConfigure)
+	owner := merge(admin, CapSiteOwn)
+	return map[string]map[Capability]bool{
+		"member":      member,
+		"contributor": contributor,
+		"editor":      editor,
+		"admin":       admin,
+		"owner":       owner,
+	}
+}()
+
+func merge(base map[Capability]bool, add ...Capability) map[Capability]bool {
+	out := map[Capability]bool{}
+	for c := range base {
+		out[c] = true
+	}
+	for _, c := range add {
+		out[c] = true
+	}
+	return out
+}
+
+// RoleCan reports whether a role holds a capability.
+func RoleCan(role string, cap Capability) bool {
+	return roleCapabilities[role][cap]
+}
+
+// Can reports whether the user's role holds a capability.
+func (u *User) Can(cap Capability) bool { return RoleCan(u.Role, cap) }
+
+// ValidRole reports whether a role name is one of the built-ins.
+func ValidRole(role string) bool {
+	_, ok := roleCapabilities[role]
+	return ok
+}
+
+// RoleRank returns the trust level of a role (higher = more access). Used by the
+// rank guard on user management; capabilities gate everything else.
 func RoleRank(role string) int {
 	switch role {
-	case "superadmin":
-		return 4
+	case "owner":
+		return 5
 	case "admin":
-		return 3
+		return 4
 	case "editor":
+		return 3
+	case "contributor":
 		return 2
 	case "member":
 		return 1
 	default:
 		return 0
 	}
+}
+
+// --- Ownership ---
+
+// UserOwnsAuthor reports whether the given author profile belongs to the account.
+// (One account → many profiles; content references a profile via author_id.)
+func (db *DB) UserOwnsAuthor(userID, authorID string) bool {
+	if authorID == "" {
+		return false
+	}
+	var one int
+	err := db.Conn.QueryRow(
+		`SELECT 1 FROM authors WHERE site_id = ? AND user_id = ? AND id = ? LIMIT 1`,
+		db.SiteID, userID, authorID,
+	).Scan(&one)
+	return err == nil
+}
+
+// UserOwnsPost reports whether the account authored the post (via any of its
+// profiles).
+func (db *DB) UserOwnsPost(userID, postID string) bool {
+	var one int
+	err := db.Conn.QueryRow(
+		`SELECT 1 FROM posts p JOIN authors a ON a.id = p.author_id
+		 WHERE p.site_id = ? AND p.id = ? AND a.user_id = ? LIMIT 1`,
+		db.SiteID, postID, userID,
+	).Scan(&one)
+	return err == nil
+}
+
+// UserOwnsCommentPost reports whether the comment sits on a post the account
+// authored — the predicate behind comment.moderate.own.
+func (db *DB) UserOwnsCommentPost(userID, commentID string) bool {
+	var one int
+	err := db.Conn.QueryRow(
+		`SELECT 1 FROM comments c
+		 JOIN posts p ON p.id = c.post_id
+		 JOIN authors a ON a.id = p.author_id
+		 WHERE c.site_id = ? AND c.id = ? AND a.user_id = ? LIMIT 1`,
+		db.SiteID, commentID, userID,
+	).Scan(&one)
+	return err == nil
+}
+
+// UserOwnsComment reports whether the account wrote the comment (via any of its
+// profiles) — the predicate behind a member deleting their own comment.
+func (db *DB) UserOwnsComment(userID, commentID string) bool {
+	if userID == "" {
+		return false
+	}
+	var one int
+	err := db.Conn.QueryRow(
+		`SELECT 1 FROM comments c JOIN authors a ON a.id = c.author_id
+		 WHERE c.site_id = ? AND c.id = ? AND a.user_id = ? LIMIT 1`,
+		db.SiteID, commentID, userID,
+	).Scan(&one)
+	return err == nil
 }

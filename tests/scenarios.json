@@ -10,15 +10,15 @@
     "expect": { "status": 200, "json": { "needsSetup": true, "hasLegacyAdmin": false } }
   },
   {
-    "name": "setup creates the first admin (superadmin)",
+    "name": "setup creates the first owner",
     "method": "POST", "path": "/setup",
     "body": { "email": "owner@test.com", "name": "Owner", "password": "password12345" },
-    "expect": { "status": 201, "json": { "user.email": "owner@test.com", "user.role": "superadmin" } }
+    "expect": { "status": 201, "json": { "user.email": "owner@test.com", "user.role": "owner" } }
   },
   {
     "name": "me returns the logged-in owner",
     "method": "GET", "path": "/me",
-    "expect": { "status": 200, "json": { "user.email": "owner@test.com", "user.role": "superadmin" } },
+    "expect": { "status": 200, "json": { "user.email": "owner@test.com", "user.role": "owner" } },
     "capture": { "ownerId": "user.id" }
   },
   {
@@ -90,7 +90,7 @@
     "capture": { "editorId": "user.id" }
   },
   {
-    "name": "assigning superadmin is forbidden",
+    "name": "assigning an unknown role is forbidden",
     "method": "POST", "path": "/users",
     "body": { "email": "x@test.com", "name": "X", "password": "password12345", "role": "superadmin" },
     "expect": { "status": 403 }
@@ -147,7 +147,7 @@
     "name": "login with the correct password succeeds",
     "method": "POST", "path": "/auth/login",
     "body": { "email": "owner@test.com", "password": "password12345" },
-    "expect": { "status": 200, "json": { "user.email": "owner@test.com", "user.role": "superadmin" } }
+    "expect": { "status": 200, "json": { "user.email": "owner@test.com", "user.role": "owner" } }
   },
   {
     "name": "create a post to receive comments",
@@ -202,13 +202,52 @@
     "capture": { "commentId": "comment.id" }
   },
   {
-    "name": "public comment read hides the pending comment",
+    "name": "the comment author sees their own pending comment (but can't moderate)",
     "method": "GET", "path": "/posts/${commentPostId}/comments",
-    "expect": { "status": 200, "length": { "comments": 0 } }
+    "expect": {
+      "status": 200,
+      "json": { "can_moderate": false, "comments.0.id": "${commentId}", "comments.0.mine": true, "comments.0.status": "pending" },
+      "length": { "comments": 1 }
+    }
   },
   {
     "name": "a member cannot access the moderation queue",
     "method": "GET", "path": "/comments",
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "a member posts a second comment",
+    "method": "POST", "path": "/posts/${commentPostId}/comments",
+    "body": { "body": "Oops, double post" },
+    "expect": { "status": 201 },
+    "capture": { "oopsId": "comment.id" }
+  },
+  {
+    "name": "a member deletes their own comment",
+    "method": "DELETE", "path": "/comments/${oopsId}",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "a different visitor signs in",
+    "method": "POST", "path": "/auth/request-code",
+    "body": { "email": "other@test.com" },
+    "expect": { "status": 200 },
+    "capture": { "otpOther": "code" }
+  },
+  {
+    "name": "the other visitor verifies",
+    "method": "POST", "path": "/auth/verify-code",
+    "body": { "email": "other@test.com", "code": "${otpOther}" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "a non-author does not see the pending comment",
+    "method": "GET", "path": "/posts/${commentPostId}/comments",
+    "expect": { "status": 200, "length": { "comments": 0 }, "json": { "can_moderate": false } }
+  },
+  {
+    "name": "a member cannot delete someone else's comment",
+    "method": "DELETE", "path": "/comments/${commentId}",
     "expect": { "status": 403 }
   },
   {
@@ -429,5 +468,245 @@
     "name": "an unknown poll slug returns 404",
     "method": "GET", "path": "/polls/by-slug/nope",
     "expect": { "status": 404 }
+  },
+
+  {
+    "name": "owner creates an editor",
+    "method": "POST", "path": "/users",
+    "body": { "email": "editor2@test.com", "name": "Ed2", "password": "password12345", "role": "editor" },
+    "expect": { "status": 201, "json": { "user.role": "editor" } }
+  },
+  {
+    "name": "owner creates a contributor",
+    "method": "POST", "path": "/users",
+    "body": { "email": "contrib@test.com", "name": "Con", "password": "password12345", "role": "contributor" },
+    "expect": { "status": 201, "json": { "user.role": "contributor" } }
+  },
+  {
+    "name": "owner creates a second contributor",
+    "method": "POST", "path": "/users",
+    "body": { "email": "contrib2@test.com", "name": "Con2", "password": "password12345", "role": "contributor" },
+    "expect": { "status": 201, "json": { "user.role": "contributor" } }
+  },
+  {
+    "name": "owner creates an admin",
+    "method": "POST", "path": "/users",
+    "body": { "email": "admin@test.com", "name": "Adm", "password": "password12345", "role": "admin" },
+    "expect": { "status": 201, "json": { "user.role": "admin" } }
+  },
+  {
+    "name": "an admin logs in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "admin@test.com", "password": "password12345" },
+    "expect": { "status": 200, "json": { "user.role": "admin" } }
+  },
+  {
+    "name": "an admin cannot grant owner",
+    "method": "POST", "path": "/users",
+    "body": { "email": "nope@test.com", "name": "Nope", "password": "password12345", "role": "owner" },
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "an admin can grant editor",
+    "method": "POST", "path": "/users",
+    "body": { "email": "ed3@test.com", "name": "Ed3", "password": "password12345", "role": "editor" },
+    "expect": { "status": 201, "json": { "user.role": "editor" } }
+  },
+  {
+    "name": "a contributor logs in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "contrib@test.com", "password": "password12345" },
+    "expect": { "status": 200, "json": { "user.role": "contributor" } }
+  },
+  {
+    "name": "a contributor cannot manage users",
+    "method": "GET", "path": "/users",
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "a contributor creates a post (published immediately, approval off)",
+    "method": "POST", "path": "/collections/blog/records",
+    "body": { "title": "Con post", "slug": "con-post", "body": "hi", "status": "draft" },
+    "expect": { "status": 201, "json": { "record.status": "published" } },
+    "capture": { "conPostId": "record.id" }
+  },
+  {
+    "name": "a contributor can edit their own post",
+    "method": "PUT", "path": "/records/${conPostId}",
+    "body": { "title": "Con post edited", "slug": "con-post", "body": "hi again", "status": "draft" },
+    "expect": { "status": 200, "json": { "record.title": "Con post edited" } }
+  },
+  {
+    "name": "a contributor's record list shows only their own",
+    "method": "GET", "path": "/collections/blog/records",
+    "expect": { "status": 200, "length": { "records": 1 } }
+  },
+  {
+    "name": "the second contributor logs in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "contrib2@test.com", "password": "password12345" },
+    "expect": { "status": 200, "json": { "user.role": "contributor" } }
+  },
+  {
+    "name": "a contributor cannot read another's post in the editor",
+    "method": "GET", "path": "/records/${conPostId}",
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "a contributor cannot edit another's post",
+    "method": "PUT", "path": "/records/${conPostId}",
+    "body": { "title": "hijack", "slug": "con-post", "body": "x", "status": "draft" },
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "an editor logs in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "editor2@test.com", "password": "password12345" },
+    "expect": { "status": 200, "json": { "user.role": "editor" } }
+  },
+  {
+    "name": "an editor can edit anyone's post",
+    "method": "PUT", "path": "/records/${conPostId}",
+    "body": { "title": "Edited by editor", "slug": "con-post", "body": "x", "status": "published" },
+    "expect": { "status": 200, "json": { "record.title": "Edited by editor", "record.status": "published" } }
+  },
+  {
+    "name": "owner logs in to require post approval",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "owner turns on post approval",
+    "method": "PUT", "path": "/settings",
+    "body": { "access": { "require_approval": true } },
+    "expect": { "status": 200, "json": { "access.require_approval": true } }
+  },
+  {
+    "name": "the contributor logs back in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "contrib@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "with approval on, a contributor's post starts pending",
+    "method": "POST", "path": "/collections/blog/records",
+    "body": { "title": "Needs review", "slug": "needs-review", "body": "hi", "status": "published" },
+    "expect": { "status": 201, "json": { "record.status": "pending" } },
+    "capture": { "pendingPostId": "record.id" }
+  },
+  {
+    "name": "an editor logs in to publish it",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "editor2@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "an editor publishes the pending post",
+    "method": "PUT", "path": "/records/${pendingPostId}",
+    "body": { "title": "Needs review", "slug": "needs-review", "body": "hi", "status": "published" },
+    "expect": { "status": 200, "json": { "record.status": "published" } }
+  },
+  {
+    "name": "a visitor signs in to comment on the contributor's post",
+    "method": "POST", "path": "/auth/request-code",
+    "body": { "email": "commenter@test.com" },
+    "expect": { "status": 200 },
+    "capture": { "otp2": "code" }
+  },
+  {
+    "name": "the visitor verifies",
+    "method": "POST", "path": "/auth/verify-code",
+    "body": { "email": "commenter@test.com", "code": "${otp2}" },
+    "expect": { "status": 200, "json": { "user.role": "member" } }
+  },
+  {
+    "name": "the visitor comments on the contributor's post",
+    "method": "POST", "path": "/posts/${conPostId}/comments",
+    "body": { "body": "Nice one" },
+    "expect": { "status": 201, "json": { "comment.status": "pending" } },
+    "capture": { "conCommentId": "comment.id" }
+  },
+  {
+    "name": "the post author (contributor) logs in to moderate",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "contrib@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "the contributor sees the comment on their own post in the queue",
+    "method": "GET", "path": "/comments?status=pending",
+    "expect": { "status": 200, "length": { "comments": 1 }, "json": { "comments.0.id": "${conCommentId}" } }
+  },
+  {
+    "name": "the author can moderate inline on their own post (can_moderate + pending visible)",
+    "method": "GET", "path": "/posts/${conPostId}/comments",
+    "expect": { "status": 200, "json": { "can_moderate": true, "comments.0.id": "${conCommentId}", "comments.0.status": "pending" } }
+  },
+  {
+    "name": "the contributor approves a comment on their own post",
+    "method": "PUT", "path": "/comments/${conCommentId}",
+    "body": { "status": "approved" },
+    "expect": { "status": 200, "json": { "comment.status": "approved" } }
+  },
+  {
+    "name": "another contributor cannot moderate that comment",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "contrib2@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "a non-author contributor is refused moderation",
+    "method": "PUT", "path": "/comments/${conCommentId}",
+    "body": { "status": "rejected" },
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "the second contributor's own moderation queue is empty",
+    "method": "GET", "path": "/comments?status=approved",
+    "expect": { "status": 200, "length": { "comments": 0 } }
+  },
+  {
+    "name": "owner logs in for ownership-integrity checks",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "owner turns approval back off",
+    "method": "PUT", "path": "/settings",
+    "body": { "access": { "require_approval": false } },
+    "expect": { "status": 200, "json": { "access.require_approval": false } }
+  },
+  {
+    "name": "the sole owner cannot demote themselves",
+    "method": "PUT", "path": "/users/${ownerId}",
+    "body": { "role": "admin" },
+    "expect": { "status": 409 }
+  },
+  {
+    "name": "owner promotes the admin to co-owner",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "admin@test.com", "password": "password12345" },
+    "expect": { "status": 200 },
+    "capture": { "adminId": "user.id" }
+  },
+  {
+    "name": "owner logs back in and grants co-ownership",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "grant owner to the admin",
+    "method": "PUT", "path": "/users/${adminId}",
+    "body": { "role": "owner" },
+    "expect": { "status": 200, "json": { "user.role": "owner" } }
+  },
+  {
+    "name": "with a co-owner, the owner may now step down",
+    "method": "PUT", "path": "/users/${ownerId}",
+    "body": { "role": "admin" },
+    "expect": { "status": 200, "json": { "user.role": "admin" } }
   }
 ]

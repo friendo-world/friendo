@@ -2,9 +2,10 @@ import type { Role } from "../api";
 
 // Literal classes so Tailwind picks them up when scanning source.
 const COLORS: Record<Role, string> = {
-  superadmin: "bg-purple-600",
+  owner: "bg-purple-600",
   admin: "bg-blue-600",
   editor: "bg-emerald-600",
+  contributor: "bg-teal-600",
   member: "bg-gray-500",
 };
 

@@ -305,7 +305,7 @@ app.get("/api/cli/poll", async (c) => {
 });
 
 // ============================================================================
-// Platform SSO — hand a verified site owner a superadmin login on their site
+// Platform SSO — hand a verified site owner a owner login on their site
 // ============================================================================
 //
 // The platform and the per-site Workers are two separate auth systems (Better
@@ -313,7 +313,7 @@ app.get("/api/cli/poll", async (c) => {
 // site's /_/ admin already logged in, the platform mints a short-lived one-time
 // code (reusing the `verification` table, like the CLI device flow above). The
 // code carries the owner's identity; the site Worker redeems it by calling
-// /api/sso/exchange, then creates its own superadmin session. No shared secret
+// /api/sso/exchange, then creates its own owner session. No shared secret
 // is ever pushed into a site Worker.
 
 // createSsoCode stores {siteId, email, name} against a random code that expires
@@ -624,7 +624,7 @@ app.get("/api/sites/:id", requirePlatformAuth, async (c) => {
 });
 
 // POST /api/sites/:id/sso-code — mint a one-time SSO code so the CLI can obtain a
-// superadmin session on the site without a separate site password. Owner or
+// owner session on the site without a separate site password. Owner or
 // invited co-owner.
 app.post("/api/sites/:id/sso-code", requirePlatformAuth, async (c) => {
   const userId = c.get("userId");
@@ -736,7 +736,7 @@ app.get("/dashboard", async (c, next) => {
   return c.html(dashboardHTML(user, sites || [], isDev));
 });
 
-// Admin — hand the site owner (or an invited co-owner) a superadmin login on the
+// Admin — hand the site owner (or an invited co-owner) a owner login on the
 // site's /_/ admin. Verifies the platform session + access, mints a one-time SSO
 // code, then redirects to the site's platform-login endpoint which redeems it
 // (see the edge runtime's /_/api/platform-login).
@@ -1091,7 +1091,7 @@ function dashboardHTML(user, sites, isDev) {
 }
 
 // membersHTML renders the collaborator-management page for a single site (owner
-// only). Co-owners get superadmin access to the site; invites are by email and
+// only). Co-owners get owner access to the site; invites are by email and
 // activate once the person signs up for friendo.world.
 function membersHTML(user, site, members, notice) {
   const ownerRow = `
@@ -1134,7 +1134,7 @@ function membersHTML(user, site, members, notice) {
   <div class="container">
     <p style="margin-bottom:0.5rem;"><a href="/dashboard">← Your sites</a></p>
     <h1 style="margin-bottom:0.25rem;">${escapeHtml(site.name || site.subdomain)}</h1>
-    <p class="muted" style="margin-bottom:1.5rem;">Collaborators can open this site's admin as a superadmin. This is separate from the accounts inside the site itself.</p>
+    <p class="muted" style="margin-bottom:1.5rem;">Collaborators can open this site's admin as an owner. This is separate from the accounts inside the site itself.</p>
     ${notice ? `<div class="card" style="background:#ecfdf5; color:#065f46;">${escapeHtml(notice)}</div>` : ""}
     ${ownerRow}
     ${memberRows}

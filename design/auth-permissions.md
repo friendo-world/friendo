@@ -179,11 +179,20 @@ platform collaborators below owner is deferred.
 - `authors.role` is **retired** — documented as reserved/unused (dropping a column
   in SQLite/D1 is disruptive), no longer treated as meaningful.
 
+## Shipped alongside this
+
+- **Members delete their own comments** — `DELETE /comments/:id` self-gates: the
+  comment's author may remove it, as may anyone who can moderate it.
+- **Inline author-side moderation** — `GET /posts/:id/comments` is viewer-aware:
+  anonymous visitors see approved comments; a signed-in member also sees their own
+  pending one; the post's author (or a full moderator) sees everything and gets
+  `can_moderate: true`, so `friendo.js` renders approve/reject/delete controls
+  right under the post.
+
 ## Deferred (post-0.2)
 
 - User-editable capability matrix / custom roles.
 - Per-collection permission scoping.
-- Members deleting their own comments; inline author-side comment moderation via
-  `friendo.js` (0.2 surfaces own-moderation through the scoped admin queue).
+- `friendo init --preset` (the admin Settings preset picker covers this today).
 - Session management UI; multiple auth methods per account; platform collaborators
   scoped below owner.

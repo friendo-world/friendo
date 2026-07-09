@@ -39,7 +39,7 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// Community: public reads, member-gated writes. These self-gate rather
 		// than joining the admin group — reads are open, and a write needs only
 		// an authenticated member (any role), not admin.
-		r.Get("/posts/{id}/comments", handleListComments(db))
+		r.Get("/posts/{id}/comments", handleListComments(db, authFunc))
 		r.Post("/posts/{id}/comments", handlePostComment(db, authFunc))
 		r.Get("/reactions", handleListReactions(db, authFunc))
 		r.Post("/reactions", handleToggleReaction(db, authFunc))
@@ -47,60 +47,60 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/polls/{id}", handleGetPoll(db, authFunc))
 		r.Post("/polls/{id}/vote", handleVotePoll(db, authFunc))
 
-		// Authenticated endpoints (admin+).
-		r.Group(func(r chi.Router) {
-			r.Use(func(next http.Handler) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-					user := authFunc(req)
-					if user == nil {
-						jsonError(w, "unauthorized", http.StatusUnauthorized)
-						return
-					}
-					if data.RoleRank(user.Role) < data.RoleRank("admin") {
-						jsonError(w, "forbidden", http.StatusForbidden)
-						return
-					}
-					next.ServeHTTP(w, req)
-				})
-			})
+		// Content — contributor+ (holds content.create). The handlers scope to the
+		// actor's own posts unless they also hold content.edit.any.
+		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db)))
+		r.Get("/collections/{collection}/records", capGate(authFunc, data.CapContentCreate, handleListRecords(db, authFunc)))
+		r.Post("/collections/{collection}/records", capGate(authFunc, data.CapContentCreate, handleCreateRecord(db, authFunc)))
+		r.Get("/records/{id}", capGate(authFunc, data.CapContentCreate, handleGetRecord(db, authFunc)))
+		r.Put("/records/{id}", capGate(authFunc, data.CapContentCreate, handleUpdateRecord(db, authFunc)))
+		r.Delete("/records/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteRecord(db, authFunc)))
 
-			// Content: collections + records
-			r.Get("/collections", handleListCollections(db))
-			r.Get("/collections/{collection}/records", handleListRecords(db))
-			r.Post("/collections/{collection}/records", handleCreateRecord(db, authFunc))
-			r.Get("/records/{id}", handleGetRecord(db))
-			r.Put("/records/{id}", handleUpdateRecord(db))
-			r.Delete("/records/{id}", handleDeleteRecord(db))
+		// Comment moderation — contributor+ (moderate.own); scoped to own posts
+		// unless the actor holds moderate.any.
+		r.Get("/comments", capGate(authFunc, data.CapCommentModerateOwn, handleModerationList(db, authFunc)))
+		r.Put("/comments/{id}", capGate(authFunc, data.CapCommentModerateOwn, handleUpdateComment(db, authFunc)))
+		// Delete self-gates: a member may delete their own comment; moderators
+		// may delete comments they're allowed to moderate.
+		r.Delete("/comments/{id}", handleDeleteComment(db, authFunc))
 
-			// Comment moderation
-			r.Get("/comments", handleModerationList(db))
-			r.Put("/comments/{id}", handleUpdateComment(db))
-			r.Delete("/comments/{id}", handleDeleteComment(db))
+		// Poll creation — editor+ (content.edit.any).
+		r.Post("/polls", capGate(authFunc, data.CapContentEditAny, handleCreatePoll(db)))
 
-			// Polls (creation is admin; reading + voting are public/member)
-			r.Post("/polls", handleCreatePoll(db))
+		// Users — admin+ (user.manage). Granting admin/owner additionally needs
+		// site.own (enforced by canAssignRole).
+		r.Get("/users", capGate(authFunc, data.CapUserManage, handleListUsers(db)))
+		r.Post("/users", capGate(authFunc, data.CapUserManage, handleCreateUser(db, authFunc)))
+		r.Put("/users/{id}", capGate(authFunc, data.CapUserManage, handleUpdateUser(db, authFunc)))
+		r.Delete("/users/{id}", capGate(authFunc, data.CapUserManage, handleDeleteUser(db, authFunc)))
 
-			// Users
-			r.Get("/users", handleListUsers(db))
-			r.Post("/users", handleCreateUser(db, authFunc))
-			r.Put("/users/{id}", handleUpdateUser(db, authFunc))
-			r.Delete("/users/{id}", handleDeleteUser(db, authFunc))
-
-			// Settings
-			r.Get("/settings", handleSettings(db, siteName))
-			r.Put("/settings", handleUpdateSettings(db))
-
-			// Push endpoints
-			r.Post("/push/templates", handlePushTemplates(siteDir))
-			r.Post("/push/assets", handlePushAssets(siteDir))
-			r.Post("/push/data", handlePushData(db))
-			r.Post("/push/users", handlePushUsers(db))
-
-			// Pull endpoints
-			r.Get("/pull/data", handlePullData(db))
-			r.Get("/pull/users", handlePullUsers(db))
-		})
+		// Settings + sync — admin+ (site.configure).
+		r.Get("/settings", capGate(authFunc, data.CapSiteConfigure, handleSettings(db, siteName)))
+		r.Put("/settings", capGate(authFunc, data.CapSiteConfigure, handleUpdateSettings(db, siteName)))
+		r.Post("/push/templates", capGate(authFunc, data.CapSiteConfigure, handlePushTemplates(siteDir)))
+		r.Post("/push/assets", capGate(authFunc, data.CapSiteConfigure, handlePushAssets(siteDir)))
+		r.Post("/push/data", capGate(authFunc, data.CapSiteConfigure, handlePushData(db)))
+		r.Post("/push/users", capGate(authFunc, data.CapSiteConfigure, handlePushUsers(db)))
+		r.Get("/pull/data", capGate(authFunc, data.CapSiteConfigure, handlePullData(db)))
+		r.Get("/pull/users", capGate(authFunc, data.CapSiteConfigure, handlePullUsers(db)))
 	})
+}
+
+// capGate wraps a handler, requiring an authenticated user whose role holds the
+// given capability. 401 when unauthenticated, 403 when the capability is missing.
+func capGate(authFunc func(*http.Request) *data.User, cap data.Capability, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !user.Can(cap) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		h(w, r)
+	}
 }
 
 // --- Content (collections + records) ---
@@ -136,10 +136,19 @@ func handleListCollections(db *data.DB) http.HandlerFunc {
 	}
 }
 
-func handleListRecords(db *data.DB) http.HandlerFunc {
+// handleListRecords lists a collection's records. Editors+ (content.edit.any)
+// see every record; contributors see only their own.
+func handleListRecords(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		collection := chi.URLParam(r, "collection")
-		records, err := db.QueryCollection(collection)
+		user := authFunc(r)
+		var records []map[string]any
+		var err error
+		if user.Can(data.CapContentEditAny) {
+			records, err = db.QueryCollection(collection)
+		} else {
+			records, err = db.QueryCollectionOwnedBy(collection, user.ID)
+		}
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
@@ -151,9 +160,10 @@ func handleListRecords(db *data.DB) http.HandlerFunc {
 	}
 }
 
-func handleGetRecord(db *data.DB) http.HandlerFunc {
+func handleGetRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		record, err := db.GetRecordByID(chi.URLParam(r, "id"))
+		id := chi.URLParam(r, "id")
+		record, err := db.GetRecordByID(id)
 		if err == sql.ErrNoRows {
 			jsonError(w, "record not found", http.StatusNotFound)
 			return
@@ -162,8 +172,26 @@ func handleGetRecord(db *data.DB) http.HandlerFunc {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
 		}
+		user := authFunc(r)
+		if !user.Can(data.CapContentEditAny) && !db.UserOwnsPost(user.ID, id) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		jsonResponse(w, map[string]any{"record": record})
 	}
+}
+
+// recordStatusFor decides a new/edited post's status. Authors who can publish
+// keep the status they requested; others get 'pending' when the site requires
+// approval, otherwise 'published'.
+func recordStatusFor(db *data.DB, user *data.User, requested string) string {
+	if user.Can(data.CapContentPublish) {
+		return requested
+	}
+	if db.GetBoolSetting("content.require_approval", false) {
+		return "pending"
+	}
+	return "published"
 }
 
 type recordInput struct {
@@ -189,11 +217,10 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			return
 		}
 		collection := chi.URLParam(r, "collection")
-		authorID := ""
-		if u := authFunc(r); u != nil {
-			authorID = db.DefaultAuthorID(u.ID)
-		}
-		id, err := db.CreateRecord(collection, in.Slug, in.Title, in.Body, in.status(), authorID)
+		user := authFunc(r)
+		authorID := db.DefaultAuthorID(user.ID)
+		status := recordStatusFor(db, user, in.status())
+		id, err := db.CreateRecord(collection, in.Slug, in.Title, in.Body, status, authorID)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
@@ -207,20 +234,35 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 	}
 }
 
-func handleUpdateRecord(db *data.DB) http.HandlerFunc {
+func handleUpdateRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var in recordInput
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			jsonError(w, "invalid JSON", http.StatusBadRequest)
-			return
-		}
 		id := chi.URLParam(r, "id")
-		err := db.UpdateRecord(id, in.Slug, in.Title, in.Body, in.status())
+		current, err := db.GetRecordByID(id)
 		if err == sql.ErrNoRows {
 			jsonError(w, "record not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		user := authFunc(r)
+		if !user.Can(data.CapContentEditAny) && !db.UserOwnsPost(user.ID, id) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		var in recordInput
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		// Authors who can't publish cannot change a post's publication state.
+		status := in.status()
+		if !user.Can(data.CapContentPublish) {
+			status, _ = current["status"].(string)
+		}
+		if err := db.UpdateRecord(id, in.Slug, in.Title, in.Body, status); err != nil {
 			jsonError(w, fmt.Sprintf("update error: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -232,9 +274,15 @@ func handleUpdateRecord(db *data.DB) http.HandlerFunc {
 	}
 }
 
-func handleDeleteRecord(db *data.DB) http.HandlerFunc {
+func handleDeleteRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		err := db.DeleteRecord(chi.URLParam(r, "id"))
+		id := chi.URLParam(r, "id")
+		user := authFunc(r)
+		if !user.Can(data.CapContentEditAny) && !db.UserOwnsPost(user.ID, id) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		err := db.DeleteRecord(id)
 		if err == sql.ErrNoRows {
 			jsonError(w, "record not found", http.StatusNotFound)
 			return
@@ -258,17 +306,25 @@ func validCommentStatus(s string) bool {
 	return false
 }
 
-// handleListComments returns a post's approved comments. Public — anonymous
-// visitors see the same approved set. The moderation queue (admin) surfaces
-// pending ones separately.
-func handleListComments(db *data.DB) http.HandlerFunc {
+// handleListComments returns a post's comments for the current viewer. Anonymous
+// visitors see approved comments only. A signed-in member also sees their own
+// pending comment; the post's author or a full moderator sees everything and gets
+// `can_moderate: true` so the SDK can show inline moderation controls.
+func handleListComments(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		comments, err := db.ListCommentsByPost(chi.URLParam(r, "id"), false)
+		postID := chi.URLParam(r, "id")
+		viewerID := ""
+		canModerate := false
+		if u := authFunc(r); u != nil {
+			viewerID = u.ID
+			canModerate = u.Can(data.CapCommentModerateAny) || db.UserOwnsPost(u.ID, postID)
+		}
+		comments, err := db.ListCommentsForViewer(postID, viewerID, canModerate)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
 		}
-		jsonResponse(w, map[string]any{"comments": comments})
+		jsonResponse(w, map[string]any{"comments": comments, "can_moderate": canModerate})
 	}
 }
 
@@ -309,15 +365,23 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 	}
 }
 
-// handleModerationList returns comments filtered by ?status (admin). Defaults to
-// the pending queue when no status is given.
-func handleModerationList(db *data.DB) http.HandlerFunc {
+// handleModerationList returns comments filtered by ?status (defaults to the
+// pending queue). Editors+ (comment.moderate.any) see the whole site; a
+// Contributor sees only comments on posts they authored.
+func handleModerationList(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		status := r.URL.Query().Get("status")
 		if status == "" {
 			status = "pending"
 		}
-		comments, err := db.ListCommentsByStatus(status)
+		user := authFunc(r)
+		var comments []map[string]any
+		var err error
+		if user.Can(data.CapCommentModerateAny) {
+			comments, err = db.ListCommentsByStatus(status)
+		} else {
+			comments, err = db.ListCommentsByStatusForOwner(status, user.ID)
+		}
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
@@ -326,9 +390,20 @@ func handleModerationList(db *data.DB) http.HandlerFunc {
 	}
 }
 
-// handleUpdateComment changes a comment's moderation status (admin).
-func handleUpdateComment(db *data.DB) http.HandlerFunc {
+// canModerateComment reports whether the actor may moderate this comment — any
+// comment with moderate.any, else only comments on their own posts.
+func canModerateComment(db *data.DB, user *data.User, commentID string) bool {
+	return user.Can(data.CapCommentModerateAny) || db.UserOwnsCommentPost(user.ID, commentID)
+}
+
+// handleUpdateComment changes a comment's moderation status.
+func handleUpdateComment(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		if !canModerateComment(db, authFunc(r), id) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		var in struct {
 			Status string `json:"status"`
 		}
@@ -340,7 +415,7 @@ func handleUpdateComment(db *data.DB) http.HandlerFunc {
 			jsonError(w, "invalid status", http.StatusBadRequest)
 			return
 		}
-		err := db.UpdateCommentStatus(chi.URLParam(r, "id"), in.Status)
+		err := db.UpdateCommentStatus(id, in.Status)
 		if err == sql.ErrNoRows {
 			jsonError(w, "comment not found", http.StatusNotFound)
 			return
@@ -349,15 +424,26 @@ func handleUpdateComment(db *data.DB) http.HandlerFunc {
 			jsonError(w, fmt.Sprintf("update error: %v", err), http.StatusInternalServerError)
 			return
 		}
-		comment, _ := db.GetComment(chi.URLParam(r, "id"))
+		comment, _ := db.GetComment(id)
 		jsonResponse(w, map[string]any{"comment": comment})
 	}
 }
 
-// handleDeleteComment removes a comment (admin).
-func handleDeleteComment(db *data.DB) http.HandlerFunc {
+// handleDeleteComment removes a comment. Allowed for the comment's author (a
+// member deleting their own), or anyone who can moderate it.
+func handleDeleteComment(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		err := db.DeleteComment(chi.URLParam(r, "id"))
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		id := chi.URLParam(r, "id")
+		if !db.UserOwnsComment(user.ID, id) && !canModerateComment(db, user, id) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		err := db.DeleteComment(id)
 		if err == sql.ErrNoRows {
 			jsonError(w, "comment not found", http.StatusNotFound)
 			return
@@ -962,7 +1048,7 @@ func handleSetupCreate(db *data.DB) http.HandlerFunc {
 			name = strings.Split(email, "@")[0]
 		}
 
-		user, err := db.CreateUser(email, name, in.Password, "superadmin")
+		user, err := db.CreateUser(email, name, in.Password, "owner")
 		if err != nil {
 			jsonError(w, "could not create account: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1065,7 +1151,16 @@ func handleRequestCode(db *data.DB) http.HandlerFunc {
 
 		user, err := db.GetUserByEmail(email)
 		if err != nil {
-			user, err = db.CreateMember(email, "")
+			// New self-serve account. Honor the site's signup policy.
+			if !db.GetBoolSetting("access.signups_enabled", true) {
+				jsonError(w, "sign-ups are disabled for this site", http.StatusForbidden)
+				return
+			}
+			role := db.GetSetting("access.default_role", "member")
+			if role != "member" && role != "contributor" {
+				role = "member"
+			}
+			user, err = db.CreateMember(email, "", role)
 			if err != nil {
 				jsonError(w, "could not create account: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1121,18 +1216,16 @@ func handleVerifyCode(db *data.DB) http.HandlerFunc {
 
 // --- Users ---
 
-// canAssignRole reports whether an actor may assign targetRole. superadmin is
-// never assignable via the API; only a superadmin may assign admin.
+// canAssignRole reports whether an actor may assign targetRole. Granting admin or
+// owner requires site.own (owners only); the lower roles require user.manage.
 func canAssignRole(actorRole, targetRole string) bool {
-	switch targetRole {
-	case "admin", "editor", "member":
-	default:
+	if !data.ValidRole(targetRole) {
 		return false
 	}
-	if targetRole == "admin" && actorRole != "superadmin" {
-		return false
+	if targetRole == "owner" || targetRole == "admin" {
+		return data.RoleCan(actorRole, data.CapSiteOwn)
 	}
-	return true
+	return data.RoleCan(actorRole, data.CapUserManage)
 }
 
 func handleListUsers(db *data.DB) http.HandlerFunc {
@@ -1203,8 +1296,9 @@ func handleUpdateUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 			jsonError(w, "user not found", http.StatusNotFound)
 			return
 		}
-		// Can't modify someone of equal/higher rank unless superadmin.
-		if actor.Role != "superadmin" && data.RoleRank(target.Role) >= data.RoleRank(actor.Role) {
+		// Can't modify someone at or above your own rank — unless you're an owner
+		// (owners may manage other owners, enabling co-owner changes + step-down).
+		if actor.Role != "owner" && data.RoleRank(target.Role) >= data.RoleRank(actor.Role) {
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -1226,6 +1320,11 @@ func handleUpdateUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 		if in.Role != "" && in.Role != target.Role {
 			if !canAssignRole(actor.Role, in.Role) {
 				jsonError(w, "you cannot assign that role", http.StatusForbidden)
+				return
+			}
+			// Last-owner guard: never demote the site's only owner.
+			if target.Role == "owner" && db.CountOwners() <= 1 {
+				jsonError(w, "cannot demote the last owner", http.StatusConflict)
 				return
 			}
 			role = in.Role
@@ -1258,8 +1357,13 @@ func handleDeleteUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 			jsonError(w, "user not found", http.StatusNotFound)
 			return
 		}
-		if actor.Role != "superadmin" && data.RoleRank(target.Role) >= data.RoleRank(actor.Role) {
+		if actor.Role != "owner" && data.RoleRank(target.Role) >= data.RoleRank(actor.Role) {
 			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		// Last-owner guard: never delete the site's only owner.
+		if target.Role == "owner" && db.CountOwners() <= 1 {
+			jsonError(w, "cannot delete the last owner", http.StatusConflict)
 			return
 		}
 		if err := db.DeleteUser(id); err != nil {
@@ -1272,48 +1376,81 @@ func handleDeleteUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 
 // --- Settings ---
 
-// settingAutoApprove stores whether new comments skip the moderation queue.
-const settingAutoApprove = "moderation.auto_approve"
+// Setting keys.
+const (
+	settingAutoApprove     = "moderation.auto_approve"
+	settingDefaultRole     = "access.default_role"
+	settingSignupsEnabled  = "access.signups_enabled"
+	settingRequireApproval = "content.require_approval"
+)
 
-func handleSettings(db *data.DB, siteName string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		users, _ := db.ListUsers()
-		counts, _ := db.CollectionCounts()
-		jsonResponse(w, map[string]any{
-			"site":        map[string]any{"name": siteName},
-			"collections": len(counts),
-			"users":       len(users),
-			"moderation":  map[string]any{"auto_approve": db.GetBoolSetting(settingAutoApprove, false)},
-		})
+// settingsPayload builds the settings object returned by GET/PUT /settings.
+func settingsPayload(db *data.DB, siteName string) map[string]any {
+	users, _ := db.ListUsers()
+	counts, _ := db.CollectionCounts()
+	return map[string]any{
+		"site":        map[string]any{"name": siteName},
+		"collections": len(counts),
+		"users":       len(users),
+		"moderation":  map[string]any{"auto_approve": db.GetBoolSetting(settingAutoApprove, false)},
+		"access": map[string]any{
+			"default_role":     db.GetSetting(settingDefaultRole, "member"),
+			"signups_enabled":  db.GetBoolSetting(settingSignupsEnabled, true),
+			"require_approval": db.GetBoolSetting(settingRequireApproval, false),
+		},
 	}
 }
 
-// handleUpdateSettings persists admin-configurable settings (currently the
-// comment auto-approve toggle).
-func handleUpdateSettings(db *data.DB) http.HandlerFunc {
+func handleSettings(db *data.DB, siteName string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, settingsPayload(db, siteName))
+	}
+}
+
+// handleUpdateSettings persists admin-configurable settings: the comment
+// auto-approve toggle and the access policy (default role, signups, approval).
+func handleUpdateSettings(db *data.DB, siteName string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Moderation *struct {
 				AutoApprove *bool `json:"auto_approve"`
 			} `json:"moderation"`
+			Access *struct {
+				DefaultRole     *string `json:"default_role"`
+				SignupsEnabled  *bool   `json:"signups_enabled"`
+				RequireApproval *bool   `json:"require_approval"`
+			} `json:"access"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if in.Moderation != nil && in.Moderation.AutoApprove != nil {
-			val := "false"
-			if *in.Moderation.AutoApprove {
-				val = "true"
+		boolStr := func(b bool) string {
+			if b {
+				return "true"
 			}
-			if err := db.SetSetting(settingAutoApprove, val); err != nil {
-				jsonError(w, fmt.Sprintf("save error: %v", err), http.StatusInternalServerError)
-				return
+			return "false"
+		}
+		if in.Moderation != nil && in.Moderation.AutoApprove != nil {
+			db.SetSetting(settingAutoApprove, boolStr(*in.Moderation.AutoApprove))
+		}
+		if in.Access != nil {
+			if in.Access.DefaultRole != nil {
+				role := *in.Access.DefaultRole
+				if role != "member" && role != "contributor" {
+					jsonError(w, "default_role must be member or contributor", http.StatusBadRequest)
+					return
+				}
+				db.SetSetting(settingDefaultRole, role)
+			}
+			if in.Access.SignupsEnabled != nil {
+				db.SetSetting(settingSignupsEnabled, boolStr(*in.Access.SignupsEnabled))
+			}
+			if in.Access.RequireApproval != nil {
+				db.SetSetting(settingRequireApproval, boolStr(*in.Access.RequireApproval))
 			}
 		}
-		jsonResponse(w, map[string]any{
-			"moderation": map[string]any{"auto_approve": db.GetBoolSetting(settingAutoApprove, false)},
-		})
+		jsonResponse(w, settingsPayload(db, siteName))
 	}
 }
 

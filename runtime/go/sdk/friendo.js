@@ -180,7 +180,14 @@
       return (
         "ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.75em}" +
         "li{padding:.6em .75em;border:1px solid #eee;border-radius:8px}" +
-        ".meta{font-size:.85em;opacity:.7;margin-bottom:.25em}" +
+        'li[data-status="pending"]{border-style:dashed;opacity:.85}' +
+        'li[data-status="rejected"]{border-color:#e0b4b4;opacity:.7}' +
+        ".meta{font-size:.85em;opacity:.7;margin-bottom:.25em;display:flex;gap:.5em;align-items:center}" +
+        ".badge{font-size:.7em;text-transform:uppercase;letter-spacing:.03em;border:1px solid currentColor;" +
+        "border-radius:999px;padding:0 .4em;opacity:.8}" +
+        ".actions{margin-top:.4em;display:flex;gap:.4em}" +
+        ".actions button{font:inherit;font-size:.8em;cursor:pointer;border:1px solid #ddd;border-radius:6px;" +
+        "background:#fafafa;padding:.15em .5em}" +
         "textarea{font:inherit;width:100%;box-sizing:border-box;padding:.5em;border:1px solid #ccc;border-radius:6px}" +
         "form{margin-top:.75em;display:flex;flex-direction:column;gap:.5em;align-items:flex-start}" +
         ".empty{opacity:.6}"
@@ -189,24 +196,38 @@
     async render() {
       var postId = this.getAttribute("post-id") || "";
       var user = await currentUser();
-      var list, comments;
+      var list, comments, canModerate;
       try {
         list = await api("/posts/" + encodeURIComponent(postId) + "/comments");
         comments = (list && list.comments) || [];
+        canModerate = !!(list && list.can_moderate);
       } catch (e) {
         this.paint('<div part="error">' + esc(e.message) + "</div>");
         return;
       }
 
+      function actions(c) {
+        var btns = [];
+        if (canModerate && c.status !== "approved") {
+          btns.push('<button part="approve" data-act="approved" data-id="' + esc(c.id) + '">Approve</button>');
+          btns.push('<button part="reject" data-act="rejected" data-id="' + esc(c.id) + '">Reject</button>');
+        }
+        if (canModerate || c.mine) {
+          btns.push('<button part="delete" data-act="delete" data-id="' + esc(c.id) + '">Delete</button>');
+        }
+        return btns.length ? '<div class="actions" part="actions">' + btns.join("") + "</div>" : "";
+      }
+
       var items = comments.length
         ? comments
             .map(function (c) {
+              var badge = c.status !== "approved"
+                ? '<span part="badge" class="badge">' + esc(c.status) + "</span>"
+                : "";
               return (
-                '<li part="comment"><div part="author" class="meta">' +
-                esc(c.author_name || "Anonymous") +
-                '</div><div part="body">' +
-                esc(c.body) +
-                "</div></li>"
+                '<li part="comment" data-status="' + esc(c.status) + '"><div part="author" class="meta">' +
+                esc(c.author_name || "Anonymous") + badge +
+                '</div><div part="body">' + esc(c.body) + "</div>" + actions(c) + "</li>"
               );
             })
             .join("")
@@ -220,6 +241,25 @@
 
       this.paint('<ul part="list">' + items + "</ul>" + composer);
 
+      var self = this;
+      // Inline moderation / self-delete.
+      this.shadowRoot.querySelectorAll(".actions button").forEach(function (btn) {
+        btn.onclick = async function () {
+          var id = btn.dataset.id;
+          try {
+            if (btn.dataset.act === "delete") {
+              if (!confirm("Delete this comment?")) return;
+              await api("/comments/" + encodeURIComponent(id), { method: "DELETE" });
+            } else {
+              await api("/comments/" + encodeURIComponent(id), jsonBody("PUT", { status: btn.dataset.act }));
+            }
+            self.render();
+          } catch (err) {
+            /* leave as-is */
+          }
+        };
+      });
+
       var form = this.shadowRoot.querySelector("form");
       if (form) {
         var status = this.shadowRoot.querySelector('[part="status"]');
@@ -232,6 +272,7 @@
             await api("/posts/" + encodeURIComponent(postId) + "/comments", jsonBody("POST", { body: body }));
             status.textContent = "Submitted for review.";
             this.shadowRoot.querySelector('[part="input"]').value = "";
+            self.render();
           } catch (err) {
             status.textContent = err.message;
           }

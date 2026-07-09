@@ -100,7 +100,7 @@ async function requireSiteAdmin(c) {
 
 app.post("/_/api/push/templates", async (c) => {
   const auth = await requireSiteAdmin(c);
-  if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return c.json({ error: "unauthorized" }, 401);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
 
   const { files } = await c.req.json();
   if (!Array.isArray(files)) return c.json({ error: "files must be an array" }, 400);
@@ -117,7 +117,7 @@ app.post("/_/api/push/templates", async (c) => {
 
 app.post("/_/api/push/assets", async (c) => {
   const auth = await requireSiteAdmin(c);
-  if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return c.json({ error: "unauthorized" }, 401);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
 
   const { files } = await c.req.json();
   if (!Array.isArray(files)) return c.json({ error: "files must be an array" }, 400);
@@ -134,7 +134,7 @@ app.post("/_/api/push/assets", async (c) => {
 
 app.post("/_/api/push/data", async (c) => {
   const auth = await requireSiteAdmin(c);
-  if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return c.json({ error: "unauthorized" }, 401);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
 
   const { records } = await c.req.json();
   if (!Array.isArray(records)) return c.json({ error: "records must be an array" }, 400);
@@ -162,7 +162,7 @@ app.post("/_/api/push/data", async (c) => {
 
 app.post("/_/api/push/users", async (c) => {
   const auth = await requireSiteAdmin(c);
-  if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return c.json({ error: "unauthorized" }, 401);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
 
   const { users } = await c.req.json();
   if (!Array.isArray(users)) return c.json({ error: "users must be an array" }, 400);
@@ -188,7 +188,7 @@ app.post("/_/api/push/users", async (c) => {
 
 app.get("/_/api/pull/data", async (c) => {
   const auth = await requireSiteAdmin(c);
-  if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return c.json({ error: "unauthorized" }, 401);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
 
   const { results } = await c.env.DB.prepare(
     `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated, data
@@ -200,7 +200,7 @@ app.get("/_/api/pull/data", async (c) => {
 
 app.get("/_/api/pull/users", async (c) => {
   const auth = await requireSiteAdmin(c);
-  if (!auth || !["superadmin", "admin"].includes(auth.user.role)) return c.json({ error: "unauthorized" }, 401);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
 
   const { results } = await c.env.DB.prepare(
     `SELECT id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated
@@ -295,7 +295,7 @@ app.get("/_/api/platform-login", async (c) => {
     "SELECT id FROM users WHERE site_id = ? AND email = ?"
   ).bind(siteId, email).first();
   if (!user) {
-    user = await createPlatformSuperadmin(c.env, siteId, email, payload.name || "");
+    user = await createPlatformOwner(c.env, siteId, email, payload.name || "");
   }
 
   const token = await createSiteSession(
@@ -338,7 +338,7 @@ app.post("/_/api/setup", async (c) => {
   }
   const name = (body.name || "").trim() || email.split("@")[0];
 
-  const user = await createUser(c.env, siteId, email, name, body.password, "superadmin");
+  const user = await createUser(c.env, siteId, email, name, body.password, "owner");
   const token = await createSiteSession(
     c.env, user.id,
     c.req.header("CF-Connecting-IP") || "", c.req.header("User-Agent") || ""
@@ -392,7 +392,15 @@ app.post("/_/api/auth/request-code", async (c) => {
 
   let user = await c.env.DB.prepare("SELECT id FROM users WHERE site_id = ? AND email = ?")
     .bind(siteId, email).first();
-  if (!user) user = await createMember(c.env, siteId, email, "");
+  if (!user) {
+    // New self-serve account — honor the site's signup policy.
+    if (!(await getBoolSetting(c.env, siteId, SETTING_SIGNUPS, true))) {
+      return c.json({ error: "sign-ups are disabled for this site" }, 403);
+    }
+    let role = await getSetting(c.env, siteId, SETTING_DEFAULT_ROLE, "member");
+    if (role !== "member" && role !== "contributor") role = "member";
+    user = await createMember(c.env, siteId, email, "", role);
+  }
 
   // Rate limit: reject if an unused code was issued within the window.
   const cutoff = new Date(Date.now() - OTP_RESEND_WINDOW_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -457,24 +465,12 @@ app.post("/_/api/auth/verify-code", async (c) => {
 // Must match defaultCollections in the Go runtime.
 const DEFAULT_COLLECTIONS = ["blog", "pages", "posts"];
 
-// requireAdmin distinguishes unauthenticated (401) from authenticated-but-
-// insufficient-role (403), matching the Go runtime. Returns { auth } on success
-// or { deny } with the error response to return.
-async function requireAdmin(c) {
-  const user = await getSiteSessionUser(c);
-  if (!user) return { deny: c.json({ error: "unauthorized" }, 401) };
-  if (!["superadmin", "admin"].includes(user.role)) {
-    return { deny: c.json({ error: "forbidden" }, 403) };
-  }
-  return { auth: { user, siteId: getSiteId(c) } };
-}
-
 function nowISO() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 app.get("/_/api/collections", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.contentCreate);
   if (deny) return deny;
 
   const { results } = await c.env.DB.prepare(
@@ -497,18 +493,35 @@ app.get("/_/api/collections", async (c) => {
 });
 
 app.get("/_/api/collections/:collection/records", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.contentCreate);
   if (deny) return deny;
 
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, slug, title, body, author_id, status, published_at, created, updated
-     FROM posts WHERE site_id = ? AND collection = ? ORDER BY created DESC`
-  ).bind(auth.siteId, c.req.param("collection")).all();
+  // Editors+ see every record; contributors only their own.
+  let query, binds;
+  if (roleCan(auth.user.role, CAP.contentEditAny)) {
+    query = `SELECT id, slug, title, body, author_id, status, published_at, created, updated
+             FROM posts WHERE site_id = ? AND collection = ? ORDER BY created DESC`;
+    binds = [auth.siteId, c.req.param("collection")];
+  } else {
+    query = `SELECT p.id, p.slug, p.title, p.body, p.author_id, p.status, p.published_at, p.created, p.updated
+             FROM posts p JOIN authors a ON a.id = p.author_id
+             WHERE p.site_id = ? AND p.collection = ? AND a.user_id = ? ORDER BY p.created DESC`;
+    binds = [auth.siteId, c.req.param("collection"), auth.user.id];
+  }
+  const { results } = await c.env.DB.prepare(query).bind(...binds).all();
   return c.json({ records: results || [] });
 });
 
+// recordStatusFor decides a post's status: publishers keep the requested status;
+// others get 'pending' when approval is required, else 'published'.
+async function recordStatusFor(env, siteId, role, requested) {
+  if (roleCan(role, CAP.contentPublish)) return requested || "draft";
+  if (await getBoolSetting(env, siteId, "content.require_approval", false)) return "pending";
+  return "published";
+}
+
 app.post("/_/api/collections/:collection/records", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.contentCreate);
   if (deny) return deny;
 
   let body;
@@ -520,13 +533,14 @@ app.post("/_/api/collections/:collection/records", async (c) => {
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   const now = nowISO();
   const authorId = await defaultAuthorId(c.env, auth.siteId, auth.user.id);
+  const status = await recordStatusFor(c.env, auth.siteId, auth.user.role, body.status);
   const dataJSON = body.data !== undefined ? JSON.stringify(body.data) : "{}";
   await c.env.DB.prepare(
     `INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, data, created, updated)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     id, auth.siteId, c.req.param("collection"),
-    body.slug || "", body.title || "", body.body || "", body.status || "draft",
+    body.slug || "", body.title || "", body.body || "", status,
     authorId, dataJSON, now, now
   ).run();
 
@@ -538,20 +552,32 @@ app.post("/_/api/collections/:collection/records", async (c) => {
 });
 
 app.get("/_/api/records/:id", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.contentCreate);
   if (deny) return deny;
 
+  const id = c.req.param("id");
   const record = await c.env.DB.prepare(
     `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
      FROM posts WHERE id = ? AND site_id = ?`
-  ).bind(c.req.param("id"), auth.siteId).first();
+  ).bind(id, auth.siteId).first();
   if (!record) return c.json({ error: "record not found" }, 404);
+  if (!roleCan(auth.user.role, CAP.contentEditAny) && !(await userOwnsPost(c.env, auth.siteId, auth.user.id, id))) {
+    return c.json({ error: "forbidden" }, 403);
+  }
   return c.json({ record });
 });
 
 app.put("/_/api/records/:id", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.contentCreate);
   if (deny) return deny;
+
+  const id = c.req.param("id");
+  const current = await c.env.DB.prepare("SELECT status FROM posts WHERE id = ? AND site_id = ?")
+    .bind(id, auth.siteId).first();
+  if (!current) return c.json({ error: "record not found" }, 404);
+  if (!roleCan(auth.user.role, CAP.contentEditAny) && !(await userOwnsPost(c.env, auth.siteId, auth.user.id, id))) {
+    return c.json({ error: "forbidden" }, 403);
+  }
 
   let body;
   try {
@@ -559,15 +585,14 @@ app.put("/_/api/records/:id", async (c) => {
   } catch {
     return c.json({ error: "invalid JSON" }, 400);
   }
-  const id = c.req.param("id");
-  const res = await c.env.DB.prepare(
+  // Authors who can't publish cannot change a post's publication state.
+  const status = roleCan(auth.user.role, CAP.contentPublish) ? (body.status || "draft") : current.status;
+  await c.env.DB.prepare(
     `UPDATE posts SET slug = ?, title = ?, body = ?, status = ?, updated = ?
      WHERE id = ? AND site_id = ?`
   ).bind(
-    body.slug || "", body.title || "", body.body || "", body.status || "draft",
-    nowISO(), id, auth.siteId
+    body.slug || "", body.title || "", body.body || "", status, nowISO(), id, auth.siteId
   ).run();
-  if (!res.meta.changes) return c.json({ error: "record not found" }, 404);
 
   if (body.data !== undefined) {
     await c.env.DB.prepare("UPDATE posts SET data = ? WHERE id = ? AND site_id = ?")
@@ -582,11 +607,15 @@ app.put("/_/api/records/:id", async (c) => {
 });
 
 app.delete("/_/api/records/:id", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.contentCreate);
   if (deny) return deny;
 
+  const id = c.req.param("id");
+  if (!roleCan(auth.user.role, CAP.contentEditAny) && !(await userOwnsPost(c.env, auth.siteId, auth.user.id, id))) {
+    return c.json({ error: "forbidden" }, 403);
+  }
   const res = await c.env.DB.prepare("DELETE FROM posts WHERE id = ? AND site_id = ?")
-    .bind(c.req.param("id"), auth.siteId).run();
+    .bind(id, auth.siteId).run();
   if (!res.meta.changes) return c.json({ error: "record not found" }, 404);
   return c.body(null, 204);
 });
@@ -623,12 +652,32 @@ function commentJSON(r) {
 }
 
 // Public read: a post's approved comments, oldest first.
+// Public read, viewer-aware: anonymous visitors see approved comments; a signed-in
+// member also sees their own pending comment; the post's author or a full
+// moderator sees everything and gets can_moderate for inline moderation.
 app.get("/_/api/posts/:id/comments", async (c) => {
   const siteId = getSiteId(c);
+  const postId = c.req.param("id");
+  const user = await getSiteSessionUser(c);
+  const viewerId = user ? user.id : "";
+  const canModerate = !!user &&
+    (roleCan(user.role, CAP.commentModerateAny) || (await userOwnsPost(c.env, siteId, user.id, postId)));
+
+  let where = "c.site_id = ? AND c.post_id = ?";
+  const binds = [viewerId, viewerId, siteId, postId];
+  if (!canModerate) {
+    where += " AND (c.status = 'approved' OR (? != '' AND a.user_id = ?))";
+    binds.push(viewerId, viewerId);
+  }
   const { results } = await c.env.DB.prepare(
-    COMMENT_SELECT + " WHERE c.site_id = ? AND c.post_id = ? AND c.status = 'approved' ORDER BY c.created ASC"
-  ).bind(siteId, c.req.param("id")).all();
-  return c.json({ comments: (results || []).map(commentJSON) });
+    `SELECT c.id, c.post_id, c.parent_id, c.author_id, c.body, c.status, c.created,
+            a.name AS author_name, a.avatar AS author_avatar,
+            CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
+     FROM comments c LEFT JOIN authors a ON a.id = c.author_id
+     WHERE ${where} ORDER BY c.created ASC`
+  ).bind(...binds).all();
+  const comments = (results || []).map((r) => ({ ...commentJSON(r), mine: r.mine === 1 }));
+  return c.json({ comments, can_moderate: canModerate });
 });
 
 // Member-gated write: create a comment (starts 'pending' for moderation).
@@ -660,22 +709,40 @@ app.post("/_/api/posts/:id/comments", async (c) => {
   return c.json({ comment: commentJSON(row) }, 201);
 });
 
-// Admin moderation queue: comments by ?status (defaults to pending), newest first.
+// Moderation queue: comments by ?status (defaults to pending), newest first.
+// Editors+ (moderate.any) see the whole site; contributors only comments on
+// posts they authored.
 app.get("/_/api/comments", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.commentModerateOwn);
   if (deny) return deny;
 
   const status = c.req.query("status") || "pending";
-  const { results } = await c.env.DB.prepare(
-    COMMENT_SELECT + " WHERE c.site_id = ? AND c.status = ? ORDER BY c.created DESC"
-  ).bind(auth.siteId, status).all();
+  let results;
+  if (roleCan(auth.user.role, CAP.commentModerateAny)) {
+    ({ results } = await c.env.DB.prepare(
+      COMMENT_SELECT + " WHERE c.site_id = ? AND c.status = ? ORDER BY c.created DESC"
+    ).bind(auth.siteId, status).all());
+  } else {
+    ({ results } = await c.env.DB.prepare(
+      COMMENT_SELECT +
+        " JOIN posts p ON p.id = c.post_id JOIN authors pa ON pa.id = p.author_id" +
+        " WHERE c.site_id = ? AND c.status = ? AND pa.user_id = ? ORDER BY c.created DESC"
+    ).bind(auth.siteId, status, auth.user.id).all());
+  }
   return c.json({ comments: (results || []).map(commentJSON) });
 });
 
-// Admin: change a comment's moderation status.
+// canModerateComment: any comment with moderate.any, else only own-post comments.
+async function canModerateComment(c, auth, commentId) {
+  return roleCan(auth.user.role, CAP.commentModerateAny) ||
+    (await userOwnsCommentPost(c.env, auth.siteId, auth.user.id, commentId));
+}
+
+// Change a comment's moderation status.
 app.put("/_/api/comments/:id", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.commentModerateOwn);
   if (deny) return deny;
+  if (!(await canModerateComment(c, auth, c.req.param("id")))) return c.json({ error: "forbidden" }, 403);
 
   let body;
   try {
@@ -695,13 +762,19 @@ app.put("/_/api/comments/:id", async (c) => {
   return c.json({ comment: commentJSON(row) });
 });
 
-// Admin: delete a comment.
+// Delete a comment — allowed for the comment's author (a member deleting their
+// own) or anyone who can moderate it. Self-gates rather than requiring a cap.
 app.delete("/_/api/comments/:id", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
-  if (deny) return deny;
+  const user = await getSiteSessionUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const siteId = getSiteId(c);
+  const id = c.req.param("id");
+  const auth = { user, siteId };
+  const allowed = (await userOwnsComment(c.env, siteId, user.id, id)) || (await canModerateComment(c, auth, id));
+  if (!allowed) return c.json({ error: "forbidden" }, 403);
 
   const res = await c.env.DB.prepare("DELETE FROM comments WHERE id = ? AND site_id = ?")
-    .bind(c.req.param("id"), auth.siteId).run();
+    .bind(id, siteId).run();
   if (!res.meta.changes) return c.json({ error: "comment not found" }, 404);
   return c.body(null, 204);
 });
@@ -856,9 +929,9 @@ async function resolvePollBySlug(env, siteId, slug) {
   return poll.id;
 }
 
-// Create a poll (admin-gated).
+// Create a poll (editor+ — content.edit.any).
 app.post("/_/api/polls", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.contentEditAny);
   if (deny) return deny;
 
   let body;
@@ -936,19 +1009,84 @@ app.post("/_/api/polls/:id/vote", async (c) => {
   return c.json({ poll: result });
 });
 
-// --- Users + settings ---
+// --- Roles & capabilities (mirrors runtime/go/data) ---
 
-const ROLE_RANK = { superadmin: 4, admin: 3, editor: 2, member: 1 };
+const CAP = {
+  contentCreate: "content.create",
+  contentEditOwn: "content.edit.own",
+  contentEditAny: "content.edit.any",
+  contentPublish: "content.publish",
+  commentModerateOwn: "comment.moderate.own",
+  commentModerateAny: "comment.moderate.any",
+  userManage: "user.manage",
+  siteConfigure: "site.configure",
+  siteOwn: "site.own",
+};
+
+// Role → capability set, built as supersets (each role adds to the one below).
+const ROLE_CAPS = (() => {
+  const member = new Set();
+  const contributor = new Set([...member, CAP.contentCreate, CAP.contentEditOwn, CAP.commentModerateOwn]);
+  const editor = new Set([...contributor, CAP.contentEditAny, CAP.contentPublish, CAP.commentModerateAny]);
+  const admin = new Set([...editor, CAP.userManage, CAP.siteConfigure]);
+  const owner = new Set([...admin, CAP.siteOwn]);
+  return { member, contributor, editor, admin, owner };
+})();
+
+function roleCan(role, cap) {
+  return !!ROLE_CAPS[role] && ROLE_CAPS[role].has(cap);
+}
+function validRole(role) {
+  return Object.prototype.hasOwnProperty.call(ROLE_CAPS, role);
+}
+
+const ROLE_RANK = { owner: 5, admin: 4, editor: 3, contributor: 2, member: 1 };
 function rank(role) {
   return ROLE_RANK[role] || 0;
 }
 
-// canAssignRole: superadmin is never assignable via the API; only a superadmin
-// may assign admin. Matches the Go runtime.
+// canAssignRole: granting admin/owner needs site.own (owners only); the lower
+// roles need user.manage. Matches the Go runtime.
 function canAssignRole(actorRole, targetRole) {
-  if (!["admin", "editor", "member"].includes(targetRole)) return false;
-  if (targetRole === "admin" && actorRole !== "superadmin") return false;
-  return true;
+  if (!validRole(targetRole)) return false;
+  if (targetRole === "owner" || targetRole === "admin") return roleCan(actorRole, CAP.siteOwn);
+  return roleCan(actorRole, CAP.userManage);
+}
+
+// requireCapability gates a route on an authenticated user holding a capability.
+async function requireCapability(c, cap) {
+  const user = await getSiteSessionUser(c);
+  if (!user) return { deny: c.json({ error: "unauthorized" }, 401) };
+  if (!roleCan(user.role, cap)) return { deny: c.json({ error: "forbidden" }, 403) };
+  return { auth: { user, siteId: getSiteId(c) } };
+}
+
+// --- Ownership predicates ---
+
+async function userOwnsPost(env, siteId, userId, postId) {
+  const row = await env.DB.prepare(
+    `SELECT 1 FROM posts p JOIN authors a ON a.id = p.author_id
+     WHERE p.site_id = ? AND p.id = ? AND a.user_id = ? LIMIT 1`
+  ).bind(siteId, postId, userId).first();
+  return !!row;
+}
+
+async function userOwnsCommentPost(env, siteId, userId, commentId) {
+  const row = await env.DB.prepare(
+    `SELECT 1 FROM comments c JOIN posts p ON p.id = c.post_id JOIN authors a ON a.id = p.author_id
+     WHERE c.site_id = ? AND c.id = ? AND a.user_id = ? LIMIT 1`
+  ).bind(siteId, commentId, userId).first();
+  return !!row;
+}
+
+// userOwnsComment — the account wrote the comment (a member deleting their own).
+async function userOwnsComment(env, siteId, userId, commentId) {
+  if (!userId) return false;
+  const row = await env.DB.prepare(
+    `SELECT 1 FROM comments c JOIN authors a ON a.id = c.author_id
+     WHERE c.site_id = ? AND c.id = ? AND a.user_id = ? LIMIT 1`
+  ).bind(siteId, commentId, userId).first();
+  return !!row;
 }
 
 async function createUser(env, siteId, email, name, password, role) {
@@ -982,36 +1120,38 @@ async function defaultAuthorId(env, siteId, userId) {
   return row?.id || "";
 }
 
-// createMember creates a passwordless OTP account (role member) + default profile.
-async function createMember(env, siteId, email, name) {
+// createMember creates a passwordless OTP account with the given role (the
+// site's access.default_role for self-serve signups) + default profile.
+async function createMember(env, siteId, email, name, role) {
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   const now = nowISO();
   const display = name || email.split("@")[0];
+  const r = role || "member";
   await env.DB.prepare(
     `INSERT INTO users (id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated)
-     VALUES (?, ?, ?, '', ?, '', '', 'member', '["otp"]', ?, ?)`
-  ).bind(id, siteId, email, display, now, now).run();
+     VALUES (?, ?, ?, '', ?, '', '', ?, '["otp"]', ?, ?)`
+  ).bind(id, siteId, email, display, r, now, now).run();
   await createDefaultAuthor(env, siteId, id, display, email);
-  return { id, email, name: display, role: "member", created: now };
+  return { id, email, name: display, role: r, created: now };
 }
 
-// createPlatformSuperadmin creates a passwordless superadmin tied to a
-// friendo.world platform account. Login happens only via the platform SSO
-// handoff (see /_/api/platform-login), so there is no password to set.
-async function createPlatformSuperadmin(env, siteId, email, name) {
+// createPlatformOwner creates a passwordless owner tied to a friendo.world
+// platform account. Login happens only via the platform SSO handoff (see
+// /_/api/platform-login), so there is no password to set.
+async function createPlatformOwner(env, siteId, email, name) {
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   const now = nowISO();
   const display = name || email.split("@")[0];
   await env.DB.prepare(
     `INSERT INTO users (id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated)
-     VALUES (?, ?, ?, '', ?, '', '', 'superadmin', '["platform"]', ?, ?)`
+     VALUES (?, ?, ?, '', ?, '', '', 'owner', '["platform"]', ?, ?)`
   ).bind(id, siteId, email, display, now, now).run();
   await createDefaultAuthor(env, siteId, id, display, email);
-  return { id, email, name: display, role: "superadmin", created: now };
+  return { id, email, name: display, role: "owner", created: now };
 }
 
 app.get("/_/api/users", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.userManage);
   if (deny) return deny;
 
   const { results } = await c.env.DB.prepare(
@@ -1021,7 +1161,7 @@ app.get("/_/api/users", async (c) => {
 });
 
 app.post("/_/api/users", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.userManage);
   if (deny) return deny;
 
   let body;
@@ -1050,14 +1190,14 @@ app.post("/_/api/users", async (c) => {
 });
 
 app.put("/_/api/users/:id", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.userManage);
   if (deny) return deny;
 
   const id = c.req.param("id");
   const target = await c.env.DB.prepare("SELECT id, name, role FROM users WHERE id = ? AND site_id = ?")
     .bind(id, auth.siteId).first();
   if (!target) return c.json({ error: "user not found" }, 404);
-  if (auth.user.role !== "superadmin" && rank(target.role) >= rank(auth.user.role)) {
+  if (auth.user.role !== "owner" && rank(target.role) >= rank(auth.user.role)) {
     return c.json({ error: "forbidden" }, 403);
   }
 
@@ -1072,6 +1212,12 @@ app.put("/_/api/users/:id", async (c) => {
   if (body.role && body.role !== target.role) {
     if (!canAssignRole(auth.user.role, body.role)) {
       return c.json({ error: "you cannot assign that role" }, 403);
+    }
+    // Last-owner guard: never demote the site's only owner.
+    if (target.role === "owner") {
+      const owners = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE site_id = ? AND role = 'owner'")
+        .bind(auth.siteId).first();
+      if ((owners?.n || 0) <= 1) return c.json({ error: "cannot demote the last owner" }, 409);
     }
     role = body.role;
   }
@@ -1090,7 +1236,7 @@ app.put("/_/api/users/:id", async (c) => {
 });
 
 app.delete("/_/api/users/:id", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.userManage);
   if (deny) return deny;
 
   const id = c.req.param("id");
@@ -1099,8 +1245,14 @@ app.delete("/_/api/users/:id", async (c) => {
   const target = await c.env.DB.prepare("SELECT id, role FROM users WHERE id = ? AND site_id = ?")
     .bind(id, auth.siteId).first();
   if (!target) return c.json({ error: "user not found" }, 404);
-  if (auth.user.role !== "superadmin" && rank(target.role) >= rank(auth.user.role)) {
+  if (auth.user.role !== "owner" && rank(target.role) >= rank(auth.user.role)) {
     return c.json({ error: "forbidden" }, 403);
+  }
+  // Last-owner guard: never delete the site's only owner.
+  if (target.role === "owner") {
+    const owners = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE site_id = ? AND role = 'owner'")
+      .bind(auth.siteId).first();
+    if ((owners?.n || 0) <= 1) return c.json({ error: "cannot delete the last owner" }, 409);
   }
 
   await c.env.DB.prepare("DELETE FROM users WHERE id = ? AND site_id = ?").bind(id, auth.siteId).run();
@@ -1111,6 +1263,9 @@ app.delete("/_/api/users/:id", async (c) => {
 
 // Persisted per-site settings (key/value). Mirrors the Go data layer.
 const SETTING_AUTO_APPROVE = "moderation.auto_approve";
+const SETTING_DEFAULT_ROLE = "access.default_role";
+const SETTING_SIGNUPS = "access.signups_enabled";
+const SETTING_REQUIRE_APPROVAL = "content.require_approval";
 
 async function getSetting(env, siteId, key, def) {
   const row = await env.DB.prepare("SELECT value FROM site_settings WHERE site_id = ? AND key = ?")
@@ -1132,25 +1287,33 @@ async function setSetting(env, siteId, key, value) {
   ).bind(siteId, key, value, nowISO()).run();
 }
 
-app.get("/_/api/settings", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
-  if (deny) return deny;
-
-  const cols = await c.env.DB.prepare(
+async function settingsPayload(env, siteId, siteName) {
+  const cols = await env.DB.prepare(
     "SELECT COUNT(DISTINCT collection) AS n FROM posts WHERE site_id = ?"
-  ).bind(auth.siteId).first();
-  const users = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE site_id = ?")
-    .bind(auth.siteId).first();
-  return c.json({
-    site: { name: c.env.SITE_NAME || getSiteId(c) },
+  ).bind(siteId).first();
+  const users = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE site_id = ?")
+    .bind(siteId).first();
+  return {
+    site: { name: siteName },
     collections: cols?.n || 0,
     users: users?.n || 0,
-    moderation: { auto_approve: await getBoolSetting(c.env, auth.siteId, SETTING_AUTO_APPROVE, false) },
-  });
+    moderation: { auto_approve: await getBoolSetting(env, siteId, SETTING_AUTO_APPROVE, false) },
+    access: {
+      default_role: await getSetting(env, siteId, SETTING_DEFAULT_ROLE, "member"),
+      signups_enabled: await getBoolSetting(env, siteId, SETTING_SIGNUPS, true),
+      require_approval: await getBoolSetting(env, siteId, SETTING_REQUIRE_APPROVAL, false),
+    },
+  };
+}
+
+app.get("/_/api/settings", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.siteConfigure);
+  if (deny) return deny;
+  return c.json(await settingsPayload(c.env, auth.siteId, c.env.SITE_NAME || getSiteId(c)));
 });
 
 app.put("/_/api/settings", async (c) => {
-  const { auth, deny } = await requireAdmin(c);
+  const { auth, deny } = await requireCapability(c, CAP.siteConfigure);
   if (deny) return deny;
 
   let body;
@@ -1162,9 +1325,21 @@ app.put("/_/api/settings", async (c) => {
   if (body.moderation && typeof body.moderation.auto_approve === "boolean") {
     await setSetting(c.env, auth.siteId, SETTING_AUTO_APPROVE, body.moderation.auto_approve ? "true" : "false");
   }
-  return c.json({
-    moderation: { auto_approve: await getBoolSetting(c.env, auth.siteId, SETTING_AUTO_APPROVE, false) },
-  });
+  if (body.access) {
+    if (body.access.default_role !== undefined) {
+      if (body.access.default_role !== "member" && body.access.default_role !== "contributor") {
+        return c.json({ error: "default_role must be member or contributor" }, 400);
+      }
+      await setSetting(c.env, auth.siteId, SETTING_DEFAULT_ROLE, body.access.default_role);
+    }
+    if (typeof body.access.signups_enabled === "boolean") {
+      await setSetting(c.env, auth.siteId, SETTING_SIGNUPS, body.access.signups_enabled ? "true" : "false");
+    }
+    if (typeof body.access.require_approval === "boolean") {
+      await setSetting(c.env, auth.siteId, SETTING_REQUIRE_APPROVAL, body.access.require_approval ? "true" : "false");
+    }
+  }
+  return c.json(await settingsPayload(c.env, auth.siteId, c.env.SITE_NAME || getSiteId(c)));
 });
 
 // --- Admin SPA bundle ---
@@ -1363,9 +1538,10 @@ async function buildCollections(env, siteId) {
   ).bind(siteId).all();
 
   for (const { collection } of names) {
+    // Public render path: only published posts are visible.
     const { results } = await env.DB.prepare(
       `SELECT id, slug, title, body, author_id, status, published_at, created, updated, data
-       FROM posts WHERE site_id = ? AND collection = ? ORDER BY created DESC`
+       FROM posts WHERE site_id = ? AND collection = ? AND status = 'published' ORDER BY created DESC`
     ).bind(siteId, collection).all();
     collections[collection] = (results || []).map(decodeRecordData);
   }
@@ -1375,9 +1551,10 @@ async function buildCollections(env, siteId) {
 async function queryRecordByField(env, siteId, collection, field, value) {
   const allowed = ["id", "slug", "title"];
   if (!allowed.includes(field)) return null;
+  // Only published posts resolve on the public site (drafts/pending 404).
   const row = await env.DB.prepare(
     `SELECT id, slug, title, body, author_id, status, published_at, created, updated, data
-     FROM posts WHERE site_id = ? AND collection = ? AND ${field} = ? LIMIT 1`
+     FROM posts WHERE site_id = ? AND collection = ? AND ${field} = ? AND status = 'published' LIMIT 1`
   ).bind(siteId, collection, value).first();
   return row ? decodeRecordData(row) : null;
 }

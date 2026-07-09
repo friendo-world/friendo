@@ -56,6 +56,12 @@ approved and rejected sets from the same screen.
 Prefer to skip review? Turn on **Auto-approve comments** in admin **Settings** and
 new comments publish immediately.
 
+**Moderate right on the page.** `<friendo-comments>` is author-aware: when the
+signed-in viewer is the post's author (or a full moderator), it shows the pending
+comments with inline **Approve / Reject / Delete** controls — no trip to the admin
+UI. A signed-in member also sees their own pending comment (marked pending) and can
+**delete** any comment they wrote.
+
 Reactions and poll votes are never moderated — they're one-per-member and simply
 toggle.
 
@@ -76,7 +82,7 @@ Available parts:
 | Component | Parts |
 |---|---|
 | `friendo-auth` | `form`, `email`, `code`, `button`, `status`, `signed-in`, `name`, `logout` |
-| `friendo-comments` | `list`, `comment`, `author`, `body`, `form`, `input`, `submit`, `status`, `empty`, `signed-out` |
+| `friendo-comments` | `list`, `comment`, `author`, `badge`, `body`, `actions`, `approve`, `reject`, `delete`, `form`, `input`, `submit`, `status`, `empty`, `signed-out` |
 | `friendo-reactions` | `row`, `button`, `emoji`, `count` |
 | `friendo-poll` | `question`, `option`, `bar`, `result`, `total` |
 
