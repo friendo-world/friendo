@@ -102,6 +102,8 @@ async function deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket) {
       { type: "r2_bucket", name: "ASSETS", bucket_name: r2Bucket },
       { type: "plain_text", name: "SITE_ID", text: subdomain },
       { type: "plain_text", name: "SITE_NAME", text: displayName || subdomain },
+      // Where the site Worker calls back to redeem platform SSO codes.
+      { type: "plain_text", name: "PLATFORM_URL", text: env.PLATFORM_URL || "https://friendo.world" },
     ],
     compatibility_date: "2024-01-01",
     compatibility_flags: ["nodejs_compat"],
@@ -303,6 +305,61 @@ app.get("/api/cli/poll", async (c) => {
 });
 
 // ============================================================================
+// Platform SSO — hand a verified site owner a superadmin login on their site
+// ============================================================================
+//
+// The platform and the per-site Workers are two separate auth systems (Better
+// Auth here vs. the site's own users/sessions). To let an owner drop into their
+// site's /_/ admin already logged in, the platform mints a short-lived one-time
+// code (reusing the `verification` table, like the CLI device flow above). The
+// code carries the owner's identity; the site Worker redeems it by calling
+// /api/sso/exchange, then creates its own superadmin session. No shared secret
+// is ever pushed into a site Worker.
+
+// createSsoCode stores {siteId, email, name} against a random code that expires
+// in 2 minutes and can be redeemed exactly once (see consumeSsoCode).
+async function createSsoCode(env, siteId, email, name) {
+  const code = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const value = JSON.stringify({ siteId, email, name });
+  await env.DB.prepare(
+    `INSERT INTO verification (id, identifier, value, expiresAt, createdAt, updatedAt)
+     VALUES (?, 'sso_code', ?, datetime('now', '+2 minutes'), datetime('now'), datetime('now'))`
+  ).bind(code, value).run();
+  return code;
+}
+
+// consumeSsoCode validates and single-use-deletes a code, returning its parsed
+// {siteId, email, name} payload, or null if unknown/expired.
+async function consumeSsoCode(env, code) {
+  if (!code) return null;
+  const row = await env.DB.prepare(
+    `SELECT value, expiresAt FROM verification WHERE id = ? AND identifier = 'sso_code'`
+  ).bind(code).first();
+  if (!row) return null;
+
+  await env.DB.prepare(
+    `DELETE FROM verification WHERE id = ? AND identifier = 'sso_code'`
+  ).bind(code).run();
+
+  if (new Date(row.expiresAt) < new Date()) return null;
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return null;
+  }
+}
+
+// POST /api/sso/exchange — called by a site Worker to redeem an SSO code. Public
+// (a site Worker has no platform credentials), but codes are random, single-use,
+// and expire in 2 minutes.
+app.post("/api/sso/exchange", async (c) => {
+  const { code } = await c.req.json().catch(() => ({}));
+  const payload = await consumeSsoCode(c.env, code);
+  if (!payload) return c.json({ error: "Invalid or expired code" }, 410);
+  return c.json({ siteId: payload.siteId, email: payload.email, name: payload.name });
+});
+
+// ============================================================================
 // Provisioning API (requires platform auth)
 // ============================================================================
 
@@ -479,6 +536,27 @@ app.get("/api/sites/:id", requirePlatformAuth, async (c) => {
   return c.json(site);
 });
 
+// POST /api/sites/:id/sso-code — mint a one-time SSO code so the CLI can obtain a
+// superadmin session on the site without a separate site password. Owner-only.
+app.post("/api/sites/:id/sso-code", requirePlatformAuth, async (c) => {
+  const userId = c.get("userId");
+  const siteId = c.req.param("id");
+
+  const site = await c.env.DB.prepare(
+    "SELECT subdomain, owner_id FROM sites WHERE subdomain = ?"
+  ).bind(siteId).first();
+  if (!site) return c.json({ error: "Site not found" }, 404);
+  if (site.owner_id !== userId) return c.json({ error: "Not owned by you" }, 403);
+
+  const user = await c.env.DB.prepare(
+    `SELECT email, name FROM "user" WHERE id = ?`
+  ).bind(userId).first();
+  if (!user) return c.json({ error: "User not found" }, 404);
+
+  const code = await createSsoCode(c.env, site.subdomain, user.email, user.name);
+  return c.json({ code });
+});
+
 // ============================================================================
 // Platform Web UI (bare domain only)
 // ============================================================================
@@ -558,6 +636,32 @@ app.get("/dashboard", async (c, next) => {
   const hostname = new URL(c.req.url).hostname;
   const isDev = hostname === "localhost" || hostname.endsWith(".local.friendo.world") || hostname === "local.friendo.world";
   return c.html(dashboardHTML(user, sites || [], isDev));
+});
+
+// Admin — hand the site owner a superadmin login on their site's /_/ admin.
+// Verifies the platform session + ownership, mints a one-time SSO code, then
+// redirects to the site's platform-login endpoint which redeems it (see the
+// edge runtime's /_/api/platform-login).
+app.get("/sites/:id/admin", async (c, next) => {
+  if (!isBareHost(c)) return next();
+  const user = await getSessionUser(c);
+  if (!user) return c.redirect("/login");
+
+  const siteId = c.req.param("id");
+  const site = await c.env.DB.prepare(
+    "SELECT subdomain, owner_id FROM sites WHERE subdomain = ?"
+  ).bind(siteId).first();
+  if (!site) return c.text("Site not found", 404);
+  if (site.owner_id !== user.id) return c.text("Not owned by you", 403);
+
+  const code = await createSsoCode(c.env, site.subdomain, user.email, user.name);
+
+  const hostname = new URL(c.req.url).hostname;
+  const isDev = hostname === "localhost" || hostname.endsWith(".local.friendo.world") || hostname === "local.friendo.world";
+  const base = isDev
+    ? `https://${site.subdomain}.local.friendo.world`
+    : `https://${site.subdomain}.friendo.world`;
+  return c.redirect(`${base}/_/api/platform-login?code=${encodeURIComponent(code)}`);
 });
 
 // Logout
@@ -776,7 +880,10 @@ function dashboardHTML(user, sites, isDev) {
           <strong>${escapeHtml(s.name || s.subdomain)}</strong>
           <div class="muted">${escapeHtml(s.subdomain)}.friendo.world</div>
         </div>
-        <a href="${siteURL}" target="_blank" class="btn btn-outline btn-sm">Visit</a>
+        <div style="display:flex; gap:0.5rem;">
+          <a href="/sites/${escapeHtml(s.id)}/admin" class="btn btn-primary btn-sm">Admin</a>
+          <a href="${siteURL}" target="_blank" class="btn btn-outline btn-sm">Visit</a>
+        </div>
       </div>`;
   }).join("\n");
 

@@ -7,6 +7,12 @@ export function Login({ onLogin }: { onLogin: (u: User) => void }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // The platform SSO handoff (the dashboard "Admin" button) redirects here with
+  // ?error=sso when the one-time code was rejected or expired.
+  const ssoFailed =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("error") === "sso";
+
   async function submit(e: Event) {
     e.preventDefault();
     setBusy(true);
@@ -25,6 +31,12 @@ export function Login({ onLogin }: { onLogin: (u: User) => void }) {
     <div class="mx-auto mt-16 max-w-md px-4">
       <div class="rounded-lg bg-white p-6 shadow-sm">
         <h1 class="mb-6 text-xl font-bold">Friendo Admin</h1>
+        {ssoFailed && !error && (
+          <div class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            Couldn't sign you in from the dashboard — that link may have expired. Press
+            “Admin” again from your friendo.world dashboard, or log in below.
+          </div>
+        )}
         {error && (
           <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>
         )}

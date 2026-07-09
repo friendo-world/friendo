@@ -260,6 +260,51 @@ app.post("/_/api/auth/logout", async (c) => {
   return c.body(null, 204);
 });
 
+// --- Platform SSO login ---
+// When this site is hosted on friendo.world, its owner reaches /_/ admin by
+// clicking "Admin" in the platform dashboard (or `friendo deploy` on the CLI).
+// That hands us a one-time code, which we redeem against the platform. The
+// platform is the identity authority; on success we ensure a passwordless
+// superadmin exists for the owner's email and start a session for them.
+app.get("/_/api/platform-login", async (c) => {
+  const code = c.req.query("code");
+  const platformURL = c.env.PLATFORM_URL;
+  if (!code || !platformURL) return c.redirect("/_/?error=sso");
+
+  let payload;
+  try {
+    const res = await fetch(`${platformURL}/api/sso/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) return c.redirect("/_/?error=sso");
+    payload = await res.json();
+  } catch {
+    return c.redirect("/_/?error=sso");
+  }
+
+  const siteId = getSiteId(c);
+  const email = (payload.email || "").trim();
+  if (!email || (payload.siteId && payload.siteId !== siteId)) {
+    return c.redirect("/_/?error=sso");
+  }
+
+  let user = await c.env.DB.prepare(
+    "SELECT id FROM users WHERE site_id = ? AND email = ?"
+  ).bind(siteId, email).first();
+  if (!user) {
+    user = await createPlatformSuperadmin(c.env, siteId, email, payload.name || "");
+  }
+
+  const token = await createSiteSession(
+    c.env, user.id,
+    c.req.header("CF-Connecting-IP") || "", c.req.header("User-Agent") || ""
+  );
+  c.header("Set-Cookie", setSiteSessionCookie(token));
+  return c.redirect("/_/");
+});
+
 // --- First-run setup ---
 // The edge has no legacy-admin concept, so hasLegacyAdmin is always false;
 // "needs setup" simply means no user accounts exist for this site yet.
@@ -563,6 +608,21 @@ async function createMember(env, siteId, email, name) {
   ).bind(id, siteId, email, display, now, now).run();
   await createDefaultAuthor(env, siteId, id, display, email);
   return { id, email, name: display, role: "member", created: now };
+}
+
+// createPlatformSuperadmin creates a passwordless superadmin tied to a
+// friendo.world platform account. Login happens only via the platform SSO
+// handoff (see /_/api/platform-login), so there is no password to set.
+async function createPlatformSuperadmin(env, siteId, email, name) {
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  const display = name || email.split("@")[0];
+  await env.DB.prepare(
+    `INSERT INTO users (id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated)
+     VALUES (?, ?, ?, '', ?, '', '', 'superadmin', '["platform"]', ?, ?)`
+  ).bind(id, siteId, email, display, now, now).run();
+  await createDefaultAuthor(env, siteId, id, display, email);
+  return { id, email, name: display, role: "superadmin", created: now };
 }
 
 app.get("/_/api/users", async (c) => {

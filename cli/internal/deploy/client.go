@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -119,6 +120,41 @@ func (c *PlatformClient) Redeploy(subdomain string) error {
 	return nil
 }
 
+// SSOCode mints a one-time SSO code (POST /api/sites/:id/sso-code) that a
+// SiteClient can redeem for a superadmin session — so deploying to friendo.world
+// needs no separate site password.
+func (c *PlatformClient) SSOCode(subdomain string) (string, error) {
+	req, err := http.NewRequest("POST", c.baseURL+"/api/sites/"+subdomain+"/sso-code", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("sso-code request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 {
+		return "", ErrNotAuthenticated
+	}
+	if resp.StatusCode >= 300 {
+		return "", readError(resp)
+	}
+
+	var result struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("reading sso code: %w", err)
+	}
+	if result.Code == "" {
+		return "", fmt.Errorf("platform returned an empty sso code")
+	}
+	return result.Code, nil
+}
+
 // Destroy deprovisions a site: tears down its Worker, D1, and R2 bucket and
 // removes it from the platform registry (DELETE /api/sites/:id).
 func (c *PlatformClient) Destroy(subdomain string) error {
@@ -195,6 +231,41 @@ func (c *SiteClient) Login(email, password string) error {
 		}
 	}
 	return fmt.Errorf("login succeeded but no session cookie was returned")
+}
+
+// PlatformLogin redeems a one-time SSO code from the platform for a superadmin
+// session, storing the resulting friendo_session cookie on the client. The
+// endpoint responds with a 302 that carries the Set-Cookie, so we must not
+// follow the redirect (which would drop it and land on the SPA shell).
+func (c *SiteClient) PlatformLogin(code string) error {
+	req, err := http.NewRequest("GET", c.siteURL+"/_/api/platform-login?code="+url.QueryEscape(code), nil)
+	if err != nil {
+		return err
+	}
+
+	noRedirect := &http.Client{
+		Timeout: c.httpClient.Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		return fmt.Errorf("platform-login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return readError(resp)
+	}
+
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "friendo_session" && ck.Value != "" {
+			c.cookie = ck.Value
+			return nil
+		}
+	}
+	return fmt.Errorf("platform login did not return a session — the code may have expired")
 }
 
 // NeedsSetup reports whether the site has no admin account yet (first run).

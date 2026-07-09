@@ -23,6 +23,8 @@ bucket_name = "friendo-runtime"
 
 [vars]
 DISPATCH_NAMESPACE = "dev"
+# Injected into each site Worker so it can call back to redeem platform SSO codes.
+PLATFORM_URL = "https://local.friendo.world"
 # CF_ACCOUNT_ID and CF_API_TOKEN should be set via `wrangler secret put`
 
 # --- Production ---
@@ -54,6 +56,7 @@ bucket_name = "friendo-runtime"
 
 [env.production.vars]
 DISPATCH_NAMESPACE = "production"
+PLATFORM_URL = "https://friendo.world"
 CF_ACCOUNT_ID = "e6b33d4e3d3fedb38311ab7539341d77"
 # Tenant subdomains are handled by one proxied `*.friendo.world` wildcard DNS
 # record + the `*.friendo.world/*` route — provisioning creates no per-site DNS.
