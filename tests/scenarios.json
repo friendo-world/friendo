@@ -379,5 +379,55 @@
     "method": "PUT", "path": "/settings",
     "body": { "moderation": { "auto_approve": false } },
     "expect": { "status": 200, "json": { "moderation.auto_approve": false } }
+  },
+  {
+    "name": "create a post that declares a poll in its front matter",
+    "method": "POST", "path": "/collections/blog/records",
+    "body": {
+      "title": "Poll host", "slug": "poll-host", "body": "x", "status": "published",
+      "data": { "poll": { "slug": "fav-color", "question": "Favorite color?", "options": ["Red", "Blue"] } }
+    },
+    "expect": { "status": 201 },
+    "capture": { "pollHostId": "record.id" }
+  },
+  {
+    "name": "by-slug resolves and lazily creates the poll from front matter",
+    "method": "GET", "path": "/polls/by-slug/fav-color",
+    "expect": {
+      "status": 200,
+      "length": { "poll.options": 2 },
+      "json": { "poll.slug": "fav-color", "poll.question": "Favorite color?", "poll.total_votes": 0, "poll.options.1.text": "Blue" }
+    },
+    "capture": { "slugPollId": "poll.id" }
+  },
+  {
+    "name": "the same slug resolves to the same poll (create-once id)",
+    "method": "GET", "path": "/polls/by-slug/fav-color",
+    "expect": { "status": 200, "json": { "poll.id": "${slugPollId}" } }
+  },
+  {
+    "name": "vote on the slug-resolved poll",
+    "method": "POST", "path": "/polls/${slugPollId}/vote",
+    "body": { "option_index": 0 },
+    "expect": { "status": 200, "json": { "poll.total_votes": 1, "poll.my_vote": 0 } }
+  },
+  {
+    "name": "edit the poll's question via the post front matter",
+    "method": "PUT", "path": "/records/${pollHostId}",
+    "body": {
+      "slug": "poll-host", "title": "Poll host", "body": "x", "status": "published",
+      "data": { "poll": { "slug": "fav-color", "question": "Best color?", "options": ["Red", "Blue"] } }
+    },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "re-resolving syncs the text in place but keeps votes",
+    "method": "GET", "path": "/polls/by-slug/fav-color",
+    "expect": { "status": 200, "json": { "poll.id": "${slugPollId}", "poll.question": "Best color?", "poll.total_votes": 1 } }
+  },
+  {
+    "name": "an unknown poll slug returns 404",
+    "method": "GET", "path": "/polls/by-slug/nope",
+    "expect": { "status": 404 }
   }
 ]

@@ -520,13 +520,14 @@ app.post("/_/api/collections/:collection/records", async (c) => {
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   const now = nowISO();
   const authorId = await defaultAuthorId(c.env, auth.siteId, auth.user.id);
+  const dataJSON = body.data !== undefined ? JSON.stringify(body.data) : "{}";
   await c.env.DB.prepare(
-    `INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, created, updated)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, data, created, updated)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     id, auth.siteId, c.req.param("collection"),
     body.slug || "", body.title || "", body.body || "", body.status || "draft",
-    authorId, now, now
+    authorId, dataJSON, now, now
   ).run();
 
   const record = await c.env.DB.prepare(
@@ -567,6 +568,11 @@ app.put("/_/api/records/:id", async (c) => {
     nowISO(), id, auth.siteId
   ).run();
   if (!res.meta.changes) return c.json({ error: "record not found" }, 404);
+
+  if (body.data !== undefined) {
+    await c.env.DB.prepare("UPDATE posts SET data = ? WHERE id = ? AND site_id = ?")
+      .bind(JSON.stringify(body.data), id, auth.siteId).run();
+  }
 
   const record = await c.env.DB.prepare(
     `SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated
@@ -774,7 +780,7 @@ app.post("/_/api/reactions", async (c) => {
 // caller's vote) or returns null if the poll does not exist.
 async function pollWithTallies(env, siteId, id, authorId) {
   const poll = await env.DB.prepare(
-    "SELECT id, question, options, closes_at FROM polls WHERE id = ? AND site_id = ?"
+    "SELECT id, slug, question, options, closes_at FROM polls WHERE id = ? AND site_id = ?"
   ).bind(id, siteId).first();
   if (!poll) return null;
 
@@ -801,7 +807,53 @@ async function pollWithTallies(env, siteId, id, authorId) {
     if (v) myVote = v.option_index;
   }
 
-  return { id: poll.id, question: poll.question, options, total_votes: total, closes_at: poll.closes_at, my_vote: myVote };
+  return { id: poll.id, slug: poll.slug, question: poll.question, options, total_votes: total, closes_at: poll.closes_at, my_vote: myVote };
+}
+
+// findPollDef scans posts for one whose data.poll.slug matches, returning the
+// declared poll definition (or null). Mirrors the Go data layer.
+async function findPollDef(env, siteId, slug) {
+  const { results } = await env.DB.prepare("SELECT id, data FROM posts WHERE site_id = ?").bind(siteId).all();
+  for (const row of results || []) {
+    let data;
+    try { data = JSON.parse(row.data || "{}"); } catch { continue; }
+    const p = data && data.poll;
+    if (p && p.slug === slug && p.question && Array.isArray(p.options) && p.options.length >= 2) {
+      return { postId: row.id, slug: p.slug, question: p.question, options: p.options, closesAt: p.closes_at || "" };
+    }
+  }
+  return null;
+}
+
+// resolvePollBySlug returns the id of the poll with the given slug, creating it
+// from the declaring post's front matter on first use and syncing its text
+// (question/options/closes_at) in place when the post's definition changes —
+// votes are preserved. Returns null if no poll and no declaring post exist.
+async function resolvePollBySlug(env, siteId, slug) {
+  if (!slug) return null;
+  const poll = await env.DB.prepare(
+    "SELECT id, post_id, question, options, closes_at FROM polls WHERE site_id = ? AND slug = ?"
+  ).bind(siteId, slug).first();
+
+  if (!poll) {
+    const def = await findPollDef(env, siteId, slug);
+    if (!def) return null;
+    const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    await env.DB.prepare(
+      "INSERT INTO polls (id, site_id, post_id, slug, question, options, closes_at, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(id, siteId, def.postId, def.slug, def.question, JSON.stringify(def.options), def.closesAt, nowISO()).run();
+    return id;
+  }
+
+  const def = await findPollDef(env, siteId, slug);
+  if (def) {
+    const newOpts = JSON.stringify(def.options);
+    if (def.question !== poll.question || newOpts !== poll.options || def.closesAt !== poll.closes_at) {
+      await env.DB.prepare("UPDATE polls SET question = ?, options = ?, closes_at = ? WHERE id = ? AND site_id = ?")
+        .bind(def.question, newOpts, def.closesAt, poll.id, siteId).run();
+    }
+  }
+  return poll.id;
 }
 
 // Create a poll (admin-gated).
@@ -822,11 +874,23 @@ app.post("/_/api/polls", async (c) => {
   }
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   await c.env.DB.prepare(
-    "INSERT INTO polls (id, site_id, post_id, question, options, closes_at, created) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO polls (id, site_id, post_id, slug, question, options, closes_at, created) VALUES (?, ?, ?, '', ?, ?, ?, ?)"
   ).bind(id, auth.siteId, body.post_id || "", question, JSON.stringify(options), body.closes_at || "", nowISO()).run();
 
   const poll = await pollWithTallies(c.env, auth.siteId, id, "");
   return c.json({ poll }, 201);
+});
+
+// Resolve a poll by its author-chosen slug (public), lazily creating it from the
+// declaring post's front matter on first use.
+app.get("/_/api/polls/by-slug/:slug", async (c) => {
+  const siteId = getSiteId(c);
+  const id = await resolvePollBySlug(c.env, siteId, c.req.param("slug"));
+  if (!id) return c.json({ error: "poll not found" }, 404);
+  const user = await getSiteSessionUser(c);
+  const authorId = user ? await defaultAuthorId(c.env, siteId, user.id) : "";
+  const poll = await pollWithTallies(c.env, siteId, id, authorId);
+  return c.json({ poll });
 });
 
 // Read a poll with tallies (public; includes the caller's vote when authed).

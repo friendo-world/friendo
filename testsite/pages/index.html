@@ -1,14 +1,15 @@
 {% extends "layouts/base.html" %}
 {% block content %}
-<h1>Hello, {{ site.name }}!</h1>
-<p>Request path: {{ request.path }}</p>
+<h1>{{ site.name }}</h1>
+<p>A Friendo demo site. Open a post to try comments, reactions, and polls.</p>
 
 {% for post in collections.blog %}
 <article>
     <h2><a href="/blog/{{ post.slug }}">{{ post.title }}</a></h2>
-    <p>{{ post.body }}</p>
+    <friendo-reactions target-type="post" target-id="{{ post.id }}" emojis="👍,❤️"></friendo-reactions>
 </article>
 {% empty %}
-<p>No blog posts yet. Create a "blog" collection in the <a href="/_/">admin UI</a>.</p>
+<p>No blog posts yet. Add one under <code>content/blog/</code> or in the
+<a href="/_/">admin UI</a>.</p>
 {% endfor %}
 {% endblock %}

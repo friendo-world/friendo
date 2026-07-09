@@ -328,15 +328,23 @@
       );
     }
     async render() {
+      // Reference a poll by its author-chosen slug (resolved/created server-side)
+      // or by a raw id. Either way the response carries the real poll id, which
+      // we use to vote.
+      var slug = this.getAttribute("poll-slug") || "";
       var pollId = this.getAttribute("poll-id") || "";
+      var endpoint = slug
+        ? "/polls/by-slug/" + encodeURIComponent(slug)
+        : "/polls/" + encodeURIComponent(pollId);
       var data;
       try {
-        data = await api("/polls/" + encodeURIComponent(pollId));
+        data = await api(endpoint);
       } catch (e) {
         this.paint('<div part="error">' + esc(e.message) + "</div>");
         return;
       }
       var poll = (data && data.poll) || {};
+      pollId = poll.id || pollId;
       var total = poll.total_votes || 0;
       var voted = poll.my_vote != null;
 

@@ -43,6 +43,7 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Post("/posts/{id}/comments", handlePostComment(db, authFunc))
 		r.Get("/reactions", handleListReactions(db, authFunc))
 		r.Post("/reactions", handleToggleReaction(db, authFunc))
+		r.Get("/polls/by-slug/{slug}", handleGetPollBySlug(db, authFunc))
 		r.Get("/polls/{id}", handleGetPoll(db, authFunc))
 		r.Post("/polls/{id}/vote", handleVotePoll(db, authFunc))
 
@@ -166,10 +167,11 @@ func handleGetRecord(db *data.DB) http.HandlerFunc {
 }
 
 type recordInput struct {
-	Slug   string `json:"slug"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	Status string `json:"status"`
+	Slug   string          `json:"slug"`
+	Title  string          `json:"title"`
+	Body   string          `json:"body"`
+	Status string          `json:"status"`
+	Data   json.RawMessage `json:"data"` // optional front-matter fields; omitted leaves data untouched
 }
 
 func (in recordInput) status() string {
@@ -196,6 +198,9 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
 		}
+		if len(in.Data) > 0 && string(in.Data) != "null" {
+			db.SetRecordData(id, string(in.Data))
+		}
 		record, _ := db.GetRecordByID(id)
 		w.WriteHeader(http.StatusCreated)
 		jsonResponse(w, map[string]any{"record": record})
@@ -218,6 +223,9 @@ func handleUpdateRecord(db *data.DB) http.HandlerFunc {
 		if err != nil {
 			jsonError(w, fmt.Sprintf("update error: %v", err), http.StatusInternalServerError)
 			return
+		}
+		if len(in.Data) > 0 && string(in.Data) != "null" {
+			db.SetRecordData(id, string(in.Data))
 		}
 		record, _ := db.GetRecordByID(id)
 		jsonResponse(w, map[string]any{"record": record})
@@ -438,7 +446,7 @@ func handleCreatePoll(db *data.DB) http.HandlerFunc {
 			jsonError(w, "question and at least two options are required", http.StatusBadRequest)
 			return
 		}
-		id, err := db.CreatePoll(in.PostID, in.Question, in.Options, in.ClosesAt)
+		id, err := db.CreatePoll(in.PostID, "", in.Question, in.Options, in.ClosesAt)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
@@ -462,6 +470,32 @@ func handleGetPoll(db *data.DB, authFunc func(*http.Request) *data.User) http.Ha
 			jsonError(w, "poll not found", http.StatusNotFound)
 			return
 		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"poll": poll})
+	}
+}
+
+// handleGetPollBySlug resolves a poll by its author-chosen slug (public),
+// lazily creating it from the declaring post's front matter on first use.
+func handleGetPollBySlug(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := db.ResolvePollBySlug(chi.URLParam(r, "slug"))
+		if err == data.ErrPollNotFound {
+			jsonError(w, "poll not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		authorID := ""
+		if u := authFunc(r); u != nil {
+			authorID = db.DefaultAuthorID(u.ID)
+		}
+		poll, err := db.GetPoll(id, authorID)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return

@@ -2,6 +2,32 @@
 {% block content %}
 <article>
     <h1>{{ record.title }}</h1>
-    <p>{{ record.body }}</p>
+    {{ record.body|markdown }}
 </article>
+
+<!-- Community features. `record.id` is the post's stable id; the components
+     talk to /_/api on their own, so no custom JavaScript is needed here. -->
+<section class="community">
+    <div class="signin">
+        <h2>Join in</h2>
+        <friendo-auth></friendo-auth>
+    </div>
+
+    <div>
+        <h2>Reactions</h2>
+        <friendo-reactions target-type="post" target-id="{{ record.id }}" emojis="👍,❤️,🎉,🤯,Test"></friendo-reactions>
+    </div>
+
+    {% if record.data.poll %}
+    <div>
+        <h2>Poll</h2>
+        <friendo-poll poll-slug="{{ record.data.poll.slug }}"></friendo-poll>
+    </div>
+    {% endif %}
+
+    <div>
+        <h2>Comments</h2>
+        <friendo-comments post-id="{{ record.id }}"></friendo-comments>
+    </div>
+</section>
 {% endblock %}

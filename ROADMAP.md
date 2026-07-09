@@ -80,6 +80,10 @@ runtimes (deferred items noted per slice below). Full design + slices in
 - **3c — Reactions + polls** ✅ — toggle `GET/POST /_/api/reactions`; poll
   `POST /_/api/polls` (admin), `GET /_/api/polls/:id`, `POST /_/api/polls/:id/vote`
   (member, one vote each, closed-poll guard); unique indexes (migration `0005`).
+  Polls can also be **authored in a post's front matter** (`poll: {slug, question,
+  options}`, migration `0007`): `GET /_/api/polls/by-slug/:slug` lazily creates the
+  poll on first view and syncs its text on later edits while preserving votes. The
+  record API accepts an optional `data` field so front-matter fields round-trip.
 - **3d — `friendo.js` SDK** ✅ — dependency-free **Web Components**
   (`<friendo-auth>`, `<friendo-comments>`, `<friendo-reactions>`, `<friendo-poll>`)
   styleable via `::part()`. Built by `npm run sdk` and served byte-identically at

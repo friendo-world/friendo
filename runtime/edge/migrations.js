@@ -12,6 +12,7 @@ import postData from "./migrations/0003_post_data.sql";
 import commentStatus from "./migrations/0004_comment_status.sql";
 import communityConstraints from "./migrations/0005_community_constraints.sql";
 import siteSettings from "./migrations/0006_site_settings.sql";
+import pollSlug from "./migrations/0007_poll_slug.sql";
 
 export const MIGRATIONS = [
   { id: 1, name: "baseline", sql: baselineSchema },
@@ -20,6 +21,7 @@ export const MIGRATIONS = [
   { id: 4, name: "comment_status", sql: commentStatus },
   { id: 5, name: "community_constraints", sql: communityConstraints },
   { id: 6, name: "site_settings", sql: siteSettings },
+  { id: 7, name: "poll_slug", sql: pollSlug },
 ];
 
 // splitStatements drops full-line comments and splits SQL into statements.

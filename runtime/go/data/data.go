@@ -598,8 +598,10 @@ var (
 	ErrAlreadyVoted = fmt.Errorf("already voted")
 )
 
-// CreatePoll inserts a poll and returns its id. options is stored as a JSON array.
-func (db *DB) CreatePoll(postID, question string, options []string, closesAt string) (string, error) {
+// CreatePoll inserts a poll and returns its id. options is stored as a JSON
+// array; slug is optional (empty for admin-created polls, set for file-authored
+// ones so they can be resolved by name).
+func (db *DB) CreatePoll(postID, slug, question string, options []string, closesAt string) (string, error) {
 	opts, err := json.Marshal(options)
 	if err != nil {
 		return "", err
@@ -607,9 +609,9 @@ func (db *DB) CreatePoll(postID, question string, options []string, closesAt str
 	id := GenerateID()
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	_, err = db.Conn.Exec(
-		`INSERT INTO polls (id, site_id, post_id, question, options, closes_at, created)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, db.SiteID, postID, question, string(opts), closesAt, now,
+		`INSERT INTO polls (id, site_id, post_id, slug, question, options, closes_at, created)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, postID, slug, question, string(opts), closesAt, now,
 	)
 	if err != nil {
 		return "", err
@@ -621,11 +623,11 @@ func (db *DB) CreatePoll(postID, question string, options []string, closesAt str
 // `my_vote` is the option index that author chose, or nil. Returns ErrPollNotFound
 // if the poll does not exist.
 func (db *DB) GetPoll(id, authorID string) (map[string]any, error) {
-	var question, optionsJSON, closesAt string
+	var slug, question, optionsJSON, closesAt string
 	err := db.Conn.QueryRow(
-		`SELECT question, options, closes_at FROM polls WHERE id = ? AND site_id = ?`,
+		`SELECT slug, question, options, closes_at FROM polls WHERE id = ? AND site_id = ?`,
 		id, db.SiteID,
-	).Scan(&question, &optionsJSON, &closesAt)
+	).Scan(&slug, &question, &optionsJSON, &closesAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrPollNotFound
 	}
@@ -669,12 +671,118 @@ func (db *DB) GetPoll(id, authorID string) (map[string]any, error) {
 
 	return map[string]any{
 		"id":          id,
+		"slug":        slug,
 		"question":    question,
 		"options":     options,
 		"total_votes": total,
 		"closes_at":   closesAt,
 		"my_vote":     myVote,
 	}, nil
+}
+
+// pollDef is a poll declared in a post's front matter (record.data.poll).
+type pollDef struct {
+	slug     string
+	question string
+	options  []string
+	closesAt string
+	postID   string
+}
+
+// findPollDef scans posts for one whose data.poll.slug matches, returning the
+// declared poll definition. Empty options or question mean "no usable poll".
+func (db *DB) findPollDef(slug string) *pollDef {
+	rows, err := db.Conn.Query(`SELECT id, data FROM posts WHERE site_id = ?`, db.SiteID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var postID, dataJSON string
+		if rows.Scan(&postID, &dataJSON) != nil {
+			continue
+		}
+		def := parsePollDef(dataJSON)
+		if def != nil && def.slug == slug {
+			def.postID = postID
+			return def
+		}
+	}
+	return nil
+}
+
+// parsePollDef extracts a poll definition from a record's data JSON, or nil.
+func parsePollDef(dataJSON string) *pollDef {
+	var data struct {
+		Poll *struct {
+			Slug     string `json:"slug"`
+			Question string `json:"question"`
+			Options  []string `json:"options"`
+			ClosesAt string `json:"closes_at"`
+		} `json:"poll"`
+	}
+	if json.Unmarshal([]byte(dataJSON), &data) != nil || data.Poll == nil {
+		return nil
+	}
+	if data.Poll.Slug == "" || data.Poll.Question == "" || len(data.Poll.Options) < 2 {
+		return nil
+	}
+	return &pollDef{
+		slug:     data.Poll.Slug,
+		question: data.Poll.Question,
+		options:  data.Poll.Options,
+		closesAt: data.Poll.ClosesAt,
+	}
+}
+
+// ResolvePollBySlug returns the id of the poll with the given slug, creating it
+// from the declaring post's front matter on first use. If the post's definition
+// has since changed, the poll's question/options/closes_at are synced in place —
+// existing votes are preserved. Returns ErrPollNotFound if no poll and no
+// declaring post exist for the slug.
+func (db *DB) ResolvePollBySlug(slug string) (string, error) {
+	if slug == "" {
+		return "", ErrPollNotFound
+	}
+
+	var id, postID, question, optionsJSON, closesAt string
+	err := db.Conn.QueryRow(
+		`SELECT id, post_id, question, options, closes_at FROM polls WHERE site_id = ? AND slug = ?`,
+		db.SiteID, slug,
+	).Scan(&id, &postID, &question, &optionsJSON, &closesAt)
+
+	if err == sql.ErrNoRows {
+		def := db.findPollDef(slug)
+		if def == nil {
+			return "", ErrPollNotFound
+		}
+		return db.CreatePoll(def.postID, def.slug, def.question, def.options, def.closesAt)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	// Poll exists — sync its text from the declaring post if it changed.
+	def := db.findPollDef(slug)
+	if def != nil {
+		newOpts, _ := json.Marshal(def.options)
+		if def.question != question || string(newOpts) != optionsJSON || def.closesAt != closesAt {
+			db.Conn.Exec(
+				`UPDATE polls SET question = ?, options = ?, closes_at = ? WHERE id = ? AND site_id = ?`,
+				def.question, string(newOpts), def.closesAt, id, db.SiteID,
+			)
+		}
+	}
+	return id, nil
+}
+
+// SetRecordData replaces a post's `data` JSON blob (front-matter fields).
+func (db *DB) SetRecordData(id, dataJSON string) error {
+	if dataJSON == "" {
+		dataJSON = "{}"
+	}
+	_, err := db.Conn.Exec(`UPDATE posts SET data = ? WHERE id = ? AND site_id = ?`, dataJSON, id, db.SiteID)
+	return err
 }
 
 // CastVote records a member's vote. Enforces one vote per (poll, author) and
