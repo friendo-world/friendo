@@ -95,16 +95,30 @@ async function deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket) {
 
   const namespace = env.DISPATCH_NAMESPACE || "production";
 
+  const bindings = [
+    { type: "d1", name: "DB", id: d1Id },
+    { type: "r2_bucket", name: "ASSETS", bucket_name: r2Bucket },
+    { type: "plain_text", name: "SITE_ID", text: subdomain },
+    { type: "plain_text", name: "SITE_NAME", text: displayName || subdomain },
+    // Where the site Worker calls back to redeem platform SSO codes.
+    { type: "plain_text", name: "PLATFORM_URL", text: env.PLATFORM_URL || "https://friendo.world" },
+  ];
+
+  // Give tenant sites a shared email sender so passwordless (OTP) member login
+  // delivers real codes — the site runtime never echoes codes unless the
+  // dev-only FRIENDO_OTP_ECHO is set, which the platform deliberately omits.
+  if (env.SITE_RESEND_API_KEY) {
+    bindings.push({ type: "secret_text", name: "RESEND_API_KEY", text: env.SITE_RESEND_API_KEY });
+    bindings.push({
+      type: "plain_text",
+      name: "FRIENDO_EMAIL_FROM",
+      text: env.SITE_EMAIL_FROM || "friendo <noreply@friendo.world>",
+    });
+  }
+
   const metadata = {
     main_module: "index.js",
-    bindings: [
-      { type: "d1", name: "DB", id: d1Id },
-      { type: "r2_bucket", name: "ASSETS", bucket_name: r2Bucket },
-      { type: "plain_text", name: "SITE_ID", text: subdomain },
-      { type: "plain_text", name: "SITE_NAME", text: displayName || subdomain },
-      // Where the site Worker calls back to redeem platform SSO codes.
-      { type: "plain_text", name: "PLATFORM_URL", text: env.PLATFORM_URL || "https://friendo.world" },
-    ],
+    bindings,
     compatibility_date: "2024-01-01",
     compatibility_flags: ["nodejs_compat"],
   };

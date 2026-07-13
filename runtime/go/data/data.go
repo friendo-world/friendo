@@ -1401,6 +1401,60 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
+// --- Rate limiting (fixed window) ---
+
+// RateLimitExceeded reports whether a bucket has hit `limit` events within
+// `window` (read-only — does not record anything).
+func (db *DB) RateLimitExceeded(bucket string, limit int, window time.Duration) bool {
+	var count int
+	var windowStart string
+	err := db.Conn.QueryRow(
+		`SELECT count, window_start FROM rate_limits WHERE site_id = ? AND bucket = ?`,
+		db.SiteID, bucket,
+	).Scan(&count, &windowStart)
+	if err != nil {
+		return false
+	}
+	if ws, perr := time.Parse("2006-01-02T15:04:05Z", windowStart); perr == nil && time.Since(ws) > window {
+		return false // window elapsed
+	}
+	return count >= limit
+}
+
+// RateLimitHit records one event in a bucket, starting or rolling the window.
+func (db *DB) RateLimitHit(bucket string, window time.Duration) {
+	now := time.Now().UTC()
+	nowStr := now.Format("2006-01-02T15:04:05Z")
+	var windowStart string
+	err := db.Conn.QueryRow(
+		`SELECT window_start FROM rate_limits WHERE site_id = ? AND bucket = ?`,
+		db.SiteID, bucket,
+	).Scan(&windowStart)
+	if err != nil {
+		db.Conn.Exec(`INSERT INTO rate_limits (site_id, bucket, count, window_start) VALUES (?, ?, 1, ?)`, db.SiteID, bucket, nowStr)
+		return
+	}
+	if ws, perr := time.Parse("2006-01-02T15:04:05Z", windowStart); perr == nil && time.Since(ws) > window {
+		db.Conn.Exec(`UPDATE rate_limits SET count = 1, window_start = ? WHERE site_id = ? AND bucket = ?`, nowStr, db.SiteID, bucket)
+		return
+	}
+	db.Conn.Exec(`UPDATE rate_limits SET count = count + 1 WHERE site_id = ? AND bucket = ?`, db.SiteID, bucket)
+}
+
+// RateLimitAllow records an event and reports whether it stayed under `limit`.
+func (db *DB) RateLimitAllow(bucket string, limit int, window time.Duration) bool {
+	if db.RateLimitExceeded(bucket, limit, window) {
+		return false
+	}
+	db.RateLimitHit(bucket, window)
+	return true
+}
+
+// RateLimitClear resets a bucket (e.g. after a successful login).
+func (db *DB) RateLimitClear(bucket string) {
+	db.Conn.Exec(`DELETE FROM rate_limits WHERE site_id = ? AND bucket = ?`, db.SiteID, bucket)
+}
+
 // --- Roles & capabilities ---
 //
 // Permissions are modeled as capabilities (the atoms). A role is a named bundle

@@ -37,6 +37,10 @@ type expectation struct {
 }
 
 func TestParity(t *testing.T) {
+	// The parity scenarios read OTP codes from request-code responses, so enable
+	// the dev-only echo (off by default in production).
+	t.Setenv("FRIENDO_OTP_ECHO", "1")
+
 	raw, err := os.ReadFile("scenarios.json")
 	if err != nil {
 		t.Fatalf("reading scenarios.json: %v", err)

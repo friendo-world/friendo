@@ -58,6 +58,16 @@ func Start(port int, openAdmin bool) error {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
 
+	// Local dev convenience: unless a real email provider is configured (or the
+	// operator already chose), show one-time login codes in API responses so
+	// community features are testable offline. Warn loudly — this must not be on
+	// for a publicly exposed site.
+	if os.Getenv("FRIENDO_OTP_ECHO") == "" && os.Getenv("RESEND_API_KEY") == "" {
+		os.Setenv("FRIENDO_OTP_ECHO", "1")
+		log.Printf("⚠  Dev mode: one-time login codes are returned in API responses. " +
+			"Set RESEND_API_KEY (+ FRIENDO_EMAIL_FROM) before exposing this site publicly.")
+	}
+
 	pagesDir := filepath.Join(siteDir, "pages")
 	if _, err := os.Stat(pagesDir); os.IsNotExist(err) {
 		return fmt.Errorf("pages directory not found")

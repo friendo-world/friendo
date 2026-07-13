@@ -113,7 +113,8 @@ async function waitForReady(url, tries = 60) {
 const persistDir = mkdtempSync(join(tmpdir(), "friendo-edge-parity-"));
 const child = spawn(
   "npx",
-  ["wrangler", "dev", "--port", String(PORT), "--local", "--persist-to", persistDir],
+  // FRIENDO_OTP_ECHO enables the dev-only code echo the scenarios rely on.
+  ["wrangler", "dev", "--port", String(PORT), "--local", "--persist-to", persistDir, "--var", "FRIENDO_OTP_ECHO:1"],
   { cwd: edgeDir, detached: true, stdio: "ignore" }
 );
 

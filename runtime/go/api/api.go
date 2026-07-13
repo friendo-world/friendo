@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -409,6 +409,10 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			jsonError(w, "body is required", http.StatusBadRequest)
 			return
 		}
+		if !db.RateLimitAllow("comment:"+user.ID, commentRateLimit, commentRateWindow) {
+			jsonError(w, "you're commenting too fast — slow down", http.StatusTooManyRequests)
+			return
+		}
 		status := "pending"
 		if db.GetBoolSetting(settingAutoApprove, false) {
 			status = "approved"
@@ -738,6 +742,14 @@ func handleMe(authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	}
 }
 
+// Rate-limit thresholds.
+const (
+	loginFailLimit    = 5
+	loginFailWindow   = 15 * time.Minute
+	commentRateLimit  = 20
+	commentRateWindow = 5 * time.Minute
+)
+
 // handleLogin authenticates email + password and starts a session.
 func handleLogin(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -750,11 +762,21 @@ func handleLogin(db *data.DB) http.HandlerFunc {
 			return
 		}
 
-		user, err := db.AuthenticateUser(strings.TrimSpace(body.Email), body.Password)
+		email := strings.TrimSpace(body.Email)
+		// Brute-force guard: lock out after too many failed attempts per account.
+		bucket := "login-fail:" + email
+		if db.RateLimitExceeded(bucket, loginFailLimit, loginFailWindow) {
+			jsonError(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
+			return
+		}
+
+		user, err := db.AuthenticateUser(email, body.Password)
 		if err != nil {
+			db.RateLimitHit(bucket, loginFailWindow)
 			jsonError(w, "invalid email or password", http.StatusUnauthorized)
 			return
 		}
+		db.RateLimitClear(bucket)
 
 		token, err := db.CreateSession(user.ID, r.RemoteAddr, r.UserAgent())
 		if err != nil {
@@ -1153,11 +1175,21 @@ func handleMigrate(db *data.DB) http.HandlerFunc {
 const otpResendWindow = 30 * time.Second
 
 // emailConfigured reports whether an email provider is wired up. When it is, the
-// code is delivered by email and never echoed in the API response; without it
-// (local dev, CI) request-code returns the code so the flow still works.
-// Configure by setting RESEND_API_KEY and FRIENDO_EMAIL_FROM in the environment.
+// code is delivered by email. Configure with RESEND_API_KEY + FRIENDO_EMAIL_FROM.
 func emailConfigured() bool {
 	return os.Getenv("RESEND_API_KEY") != "" && os.Getenv("FRIENDO_EMAIL_FROM") != ""
+}
+
+// otpEchoEnabled reports whether request-code may return the login code in its
+// response — a DEV-ONLY affordance, off by default so a production/managed site
+// never leaks codes. Enabled only by explicitly setting FRIENDO_OTP_ECHO (which
+// `friendo serve` does for local dev; the friendo.world provisioner never does).
+func otpEchoEnabled() bool {
+	switch strings.ToLower(os.Getenv("FRIENDO_OTP_ECHO")) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // sendOTPEmail delivers a login code via Resend. Best-effort: a delivery error is
@@ -1241,8 +1273,10 @@ func handleRequestCode(db *data.DB) http.HandlerFunc {
 		sendOTPEmail(email, code)
 
 		resp := map[string]any{"sent": true}
-		if !emailConfigured() {
-			resp["code"] = code // dev/test only — no email provider configured
+		// Echo the code only in explicit dev mode and only when no real email
+		// provider is configured — never on a production/managed site.
+		if !emailConfigured() && otpEchoEnabled() {
+			resp["code"] = code
 		}
 		jsonResponse(w, resp)
 	}

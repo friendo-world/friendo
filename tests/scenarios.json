@@ -735,5 +735,42 @@
     "method": "PUT", "path": "/users/${ownerId}",
     "body": { "role": "admin" },
     "expect": { "status": 200, "json": { "user.role": "admin" } }
+  },
+
+  {
+    "name": "brute-force login attempt 1 fails",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "nobody@test.com", "password": "wrong" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "brute-force login attempt 2 fails",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "nobody@test.com", "password": "wrong" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "brute-force login attempt 3 fails",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "nobody@test.com", "password": "wrong" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "brute-force login attempt 4 fails",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "nobody@test.com", "password": "wrong" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "brute-force login attempt 5 fails",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "nobody@test.com", "password": "wrong" },
+    "expect": { "status": 401 }
+  },
+  {
+    "name": "further attempts are rate-limited (429)",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "nobody@test.com", "password": "wrong" },
+    "expect": { "status": 429 }
   }
 ]

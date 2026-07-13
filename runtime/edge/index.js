@@ -222,6 +222,45 @@ app.get("/_/api/me", async (c) => {
   return c.json({ user: userJSON(user) });
 });
 
+// --- Rate limiting (fixed window, mirrors runtime/go/data) ---
+
+const LOGIN_FAIL_LIMIT = 5;
+const LOGIN_FAIL_WINDOW_MS = 15 * 60 * 1000;
+const COMMENT_LIMIT = 20;
+const COMMENT_WINDOW_MS = 5 * 60 * 1000;
+
+async function rateLimitExceeded(env, siteId, bucket, limit, windowMs) {
+  const row = await env.DB.prepare("SELECT count, window_start FROM rate_limits WHERE site_id = ? AND bucket = ?")
+    .bind(siteId, bucket).first();
+  if (!row) return false;
+  if (Date.now() - new Date(row.window_start).getTime() > windowMs) return false;
+  return row.count >= limit;
+}
+async function rateLimitHit(env, siteId, bucket, windowMs) {
+  const row = await env.DB.prepare("SELECT window_start FROM rate_limits WHERE site_id = ? AND bucket = ?")
+    .bind(siteId, bucket).first();
+  if (!row) {
+    await env.DB.prepare("INSERT INTO rate_limits (site_id, bucket, count, window_start) VALUES (?, ?, 1, ?)")
+      .bind(siteId, bucket, nowISO()).run();
+    return;
+  }
+  if (Date.now() - new Date(row.window_start).getTime() > windowMs) {
+    await env.DB.prepare("UPDATE rate_limits SET count = 1, window_start = ? WHERE site_id = ? AND bucket = ?")
+      .bind(nowISO(), siteId, bucket).run();
+    return;
+  }
+  await env.DB.prepare("UPDATE rate_limits SET count = count + 1 WHERE site_id = ? AND bucket = ?")
+    .bind(siteId, bucket).run();
+}
+async function rateLimitAllow(env, siteId, bucket, limit, windowMs) {
+  if (await rateLimitExceeded(env, siteId, bucket, limit, windowMs)) return false;
+  await rateLimitHit(env, siteId, bucket, windowMs);
+  return true;
+}
+async function rateLimitClear(env, siteId, bucket) {
+  await env.DB.prepare("DELETE FROM rate_limits WHERE site_id = ? AND bucket = ?").bind(siteId, bucket).run();
+}
+
 app.post("/_/api/auth/login", async (c) => {
   const siteId = getSiteId(c);
   let body;
@@ -233,13 +272,20 @@ app.post("/_/api/auth/login", async (c) => {
   const email = (body.email || "").trim();
   const password = body.password || "";
 
+  const bucket = "login-fail:" + email;
+  if (await rateLimitExceeded(c.env, siteId, bucket, LOGIN_FAIL_LIMIT, LOGIN_FAIL_WINDOW_MS)) {
+    return c.json({ error: "too many failed attempts — try again later" }, 429);
+  }
+
   const user = await c.env.DB.prepare(
     "SELECT id, email, name, password_hash, role FROM users WHERE site_id = ? AND email = ?"
   ).bind(siteId, email).first();
 
   if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
+    await rateLimitHit(c.env, siteId, bucket, LOGIN_FAIL_WINDOW_MS);
     return c.json({ error: "invalid email or password" }, 401);
   }
+  await rateLimitClear(c.env, siteId, bucket);
 
   const token = await createSiteSession(
     c.env, user.id,
@@ -352,11 +398,17 @@ app.post("/_/api/setup", async (c) => {
 // One live code at a time per account within this window (rate limit).
 const OTP_RESEND_WINDOW_MS = 30 * 1000;
 
-// emailConfigured reports whether an email provider is wired up. When it is, the
-// code is emailed and never echoed; otherwise (local dev, CI) request-code
-// returns it so the flow still works. Set RESEND_API_KEY + FRIENDO_EMAIL_FROM.
+// emailConfigured reports whether an email provider is wired up (code delivered
+// by email). Set RESEND_API_KEY + FRIENDO_EMAIL_FROM.
 function emailConfigured(env) {
   return !!(env.RESEND_API_KEY && env.FRIENDO_EMAIL_FROM);
+}
+
+// otpEchoEnabled — DEV ONLY. Whether request-code may return the code in its
+// response. Off unless FRIENDO_OTP_ECHO is explicitly set; the friendo.world
+// provisioner never sets it, so managed sites never leak codes.
+function otpEchoEnabled(env) {
+  return ["1", "true", "yes", "on"].includes(String(env.FRIENDO_OTP_ECHO || "").toLowerCase());
 }
 
 // sendOTPEmail delivers a login code via Resend. Best-effort — a failure is
@@ -425,7 +477,8 @@ app.post("/_/api/auth/request-code", async (c) => {
   await sendOTPEmail(c.env, email, code);
 
   const resp = { sent: true };
-  if (!emailConfigured(c.env)) resp.code = code; // dev/test only
+  // Dev only: echo the code when explicitly enabled and no real email is set up.
+  if (!emailConfigured(c.env) && otpEchoEnabled(c.env)) resp.code = code;
   return c.json(resp);
 });
 
@@ -728,6 +781,9 @@ app.post("/_/api/posts/:id/comments", async (c) => {
     return c.json({ error: "invalid JSON" }, 400);
   }
   if (!(body.body || "").trim()) return c.json({ error: "body is required" }, 400);
+  if (!(await rateLimitAllow(c.env, auth.siteId, "comment:" + auth.user.id, COMMENT_LIMIT, COMMENT_WINDOW_MS))) {
+    return c.json({ error: "you're commenting too fast — slow down" }, 429);
+  }
 
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   const now = nowISO();
