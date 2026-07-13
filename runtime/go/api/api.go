@@ -85,8 +85,10 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Post("/push/assets", capGate(authFunc, data.CapSiteConfigure, handlePushAssets(siteDir)))
 		r.Post("/push/data", capGate(authFunc, data.CapSiteConfigure, handlePushData(db)))
 		r.Post("/push/users", capGate(authFunc, data.CapSiteConfigure, handlePushUsers(db)))
+		r.Post("/push/settings", capGate(authFunc, data.CapSiteConfigure, handlePushSettings(db)))
 		r.Get("/pull/data", capGate(authFunc, data.CapSiteConfigure, handlePullData(db)))
 		r.Get("/pull/users", capGate(authFunc, data.CapSiteConfigure, handlePullUsers(db)))
+		r.Get("/pull/settings", capGate(authFunc, data.CapSiteConfigure, handlePullSettings(db)))
 	})
 }
 
@@ -954,7 +956,8 @@ func handlePushData(db *data.DB) http.HandlerFunc {
 func handlePushUsers(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Users []map[string]any `json:"users"`
+			Users   []map[string]any `json:"users"`
+			Authors []map[string]any `json:"authors"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 10<<20)).Decode(&body); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
@@ -1010,7 +1013,53 @@ func handlePushUsers(db *data.DB) http.HandlerFunc {
 			synced++
 		}
 
+		// Author profiles travel with accounts so content's author_id stays valid.
+		authors := 0
+		for _, a := range body.Authors {
+			str := func(key string) string { v, _ := a[key].(string); return v }
+			if err := db.UpsertAuthor(str("id"), str("user_id"), str("name"), str("email"), str("avatar"), str("role"), str("created")); err != nil {
+				log.Printf("Error upserting author %s: %v", str("id"), err)
+				continue
+			}
+			authors++
+		}
+
+		jsonResponse(w, map[string]int{"synced": synced, "authors": authors})
+	}
+}
+
+// handlePushSettings upserts site settings (access policy, moderation) — config
+// that should travel with the site on deploy.
+func handlePushSettings(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Settings map[string]string `json:"settings"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		synced := 0
+		for k, v := range body.Settings {
+			if err := db.SetSetting(k, v); err != nil {
+				log.Printf("Error saving setting %s: %v", k, err)
+				continue
+			}
+			synced++
+		}
 		jsonResponse(w, map[string]int{"synced": synced})
+	}
+}
+
+// handlePullSettings returns all site settings as a flat map.
+func handlePullSettings(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		settings, err := db.AllSettings()
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"settings": settings})
 	}
 }
 
@@ -1086,7 +1135,8 @@ func handlePullUsers(db *data.DB) http.HandlerFunc {
 		if result == nil {
 			result = []map[string]any{}
 		}
-		jsonResponse(w, map[string]any{"users": result})
+		authors, _ := db.ListAuthors()
+		jsonResponse(w, map[string]any{"users": result, "authors": authors})
 	}
 }
 

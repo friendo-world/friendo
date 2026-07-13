@@ -70,7 +70,9 @@ func exportStatic() error {
 	collections := make(map[string]any)
 	names, _ := db.ListCollections()
 	for _, name := range names {
-		records, err := db.QueryCollection(name)
+		// Export only published posts — drafts/pending must not leak into a
+		// public static site (matches the serve + edge render paths).
+		records, err := db.QueryPublishedCollection(name)
 		if err != nil {
 			continue
 		}
@@ -154,7 +156,8 @@ func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map
 	}
 	collectionName := parts[len(parts)-2]
 
-	records, err := db.QueryCollection(collectionName)
+	// Only published posts get a generated page (no draft/pending leak).
+	records, err := db.QueryPublishedCollection(collectionName)
 	if err != nil || len(records) == 0 {
 		return nil
 	}
@@ -230,8 +233,9 @@ func exportBundle() error {
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
 
-	// Directories to include in the bundle.
-	dirs := []string{"pages", "layouts", "assets", "data"}
+	// Directories to include in the bundle (content/ carries file-authored posts;
+	// data/ is added separately as a scrubbed copy below).
+	dirs := []string{"pages", "layouts", "assets", "content"}
 	for _, dir := range dirs {
 		dirPath := filepath.Join(siteDir, dir)
 		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
@@ -240,6 +244,12 @@ func exportBundle() error {
 		if err := addDirToTar(tw, dirPath, dir); err != nil {
 			return fmt.Errorf("adding %s to archive: %w", dir, err)
 		}
+	}
+
+	// Add the database as a scrubbed copy — transient/secret auth material (live
+	// sessions, one-time codes, rate-limit state) must never travel in a bundle.
+	if err := addScrubbedDB(tw, siteDir); err != nil {
+		return fmt.Errorf("bundling database: %w", err)
 	}
 
 	// Include friendo.toml if it exists.
@@ -257,6 +267,50 @@ func exportBundle() error {
 
 	fmt.Printf("Bundled site to %s\n", outPath)
 	return nil
+}
+
+// addScrubbedDB copies the site database, deletes transient/secret auth material
+// (sessions, one-time codes, rate-limit state), and adds the copy to the archive.
+// Content, users (bcrypt hashes are portable by design), and settings are kept.
+func addScrubbedDB(tw *tar.Writer, siteDir string) error {
+	src := filepath.Join(siteDir, "data", "friendo.db")
+	if _, err := os.Stat(src); err != nil {
+		return nil // no database to bundle
+	}
+
+	tmp, err := os.MkdirTemp("", "friendo-bundle-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, "data"), 0o755); err != nil {
+		return err
+	}
+	dst := filepath.Join(tmp, "data", "friendo.db")
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+
+	db, err := data.Open(tmp)
+	if err != nil {
+		return err
+	}
+	for _, table := range []string{"sessions", "otp_codes", "rate_limits"} {
+		db.Conn.Exec("DELETE FROM " + table)
+	}
+	db.Conn.Exec("VACUUM")
+	db.Close()
+
+	return addFileToTar(tw, dst, "data/friendo.db")
+}
+
+// copyFile copies a single file's contents.
+func copyFile(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, b, 0o644)
 }
 
 // addFileToTar adds a single file to the tar writer under the given archive name.

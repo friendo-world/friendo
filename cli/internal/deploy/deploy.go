@@ -246,21 +246,31 @@ func RunPush(opts PushOptions) error {
 		}
 	}
 
-	// Push users if requested.
+	// Push users (with their author profiles) if requested.
 	if opts.Users {
 		fmt.Printf("Pushing users...")
-		users, err := readLocalUsers(siteDir)
+		users, authors, err := readLocalUsers(siteDir)
 		if err != nil {
 			return err
 		}
 		if len(users) > 0 {
-			if err := siteClient.PushUsers(users); err != nil {
+			if err := siteClient.PushUsers(users, authors); err != nil {
 				return err
 			}
 			fmt.Printf(" %d users\n", len(users))
 		} else {
 			fmt.Println(" no users")
 		}
+	}
+
+	// Push site settings (access policy, moderation) — config travels with the
+	// site so a deploy doesn't silently revert to defaults.
+	if settings, err := readLocalSettings(siteDir); err == nil && len(settings) > 0 {
+		fmt.Printf("Pushing settings...")
+		if err := siteClient.PushSettings(settings); err != nil {
+			return err
+		}
+		fmt.Printf(" %d\n", len(settings))
 	}
 
 	return nil
@@ -344,7 +354,7 @@ func RunPull(opts PullOptions) error {
 
 	if opts.Users {
 		fmt.Printf("Pulling users...")
-		users, err := siteClient.PullUsers()
+		users, authors, err := siteClient.PullUsers()
 		if err != nil {
 			return err
 		}
@@ -373,7 +383,22 @@ func RunPull(opts PullOptions) error {
 			}
 			inserted++
 		}
+
+		// Author profiles travel with accounts.
+		for _, a := range authors {
+			str := func(key string) string { v, _ := a[key].(string); return v }
+			if err := db.UpsertAuthor(str("id"), str("user_id"), str("name"), str("email"), str("avatar"), str("role"), str("created")); err != nil {
+				fmt.Printf("\n  Warning: failed to insert author %s: %v\n", str("id"), err)
+			}
+		}
 		fmt.Printf(" %d users\n", inserted)
+	}
+
+	// Pull site settings (config).
+	if settings, err := siteClient.PullSettings(); err == nil {
+		for k, v := range settings {
+			db.SetSetting(k, v)
+		}
 	}
 
 	fmt.Println("Done.")
@@ -792,26 +817,24 @@ func readLocalRecords(siteDir string) ([]map[string]any, error) {
 	return all, nil
 }
 
-func readLocalUsers(siteDir string) ([]map[string]any, error) {
+func readLocalUsers(siteDir string) (users, authors []map[string]any, err error) {
 	dbPath := filepath.Join(siteDir, "data", "friendo.db")
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	db, err := data.Open(siteDir)
 	if err != nil {
-		return nil, fmt.Errorf("opening local database: %w", err)
+		return nil, nil, fmt.Errorf("opening local database: %w", err)
 	}
 	defer db.Close()
 
-	users, err := db.ListUsers()
+	list, err := db.ListUsers()
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-
-	var all []map[string]any
-	for _, u := range users {
-		all = append(all, map[string]any{
+	for _, u := range list {
+		users = append(users, map[string]any{
 			"id":            u.ID,
 			"email":         u.Email,
 			"phone":         u.Phone,
@@ -824,7 +847,22 @@ func readLocalUsers(siteDir string) ([]map[string]any, error) {
 			"updated":       u.Updated,
 		})
 	}
-	return all, nil
+	authors, _ = db.ListAuthors()
+	return users, authors, nil
+}
+
+// readLocalSettings returns the local site's settings (access policy, moderation).
+func readLocalSettings(siteDir string) (map[string]string, error) {
+	dbPath := filepath.Join(siteDir, "data", "friendo.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	db, err := data.Open(siteDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening local database: %w", err)
+	}
+	defer db.Close()
+	return db.AllSettings()
 }
 
 // --- Dry run ---

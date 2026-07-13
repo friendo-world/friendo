@@ -738,6 +738,32 @@
   },
 
   {
+    "name": "push a site setting (sync)",
+    "method": "POST", "path": "/push/settings",
+    "body": { "settings": { "synctest": "ok" } },
+    "expect": { "status": 200, "json": { "synced": 1 } }
+  },
+  {
+    "name": "pull settings round-trips it",
+    "method": "GET", "path": "/pull/settings",
+    "expect": { "status": 200, "json": { "settings.synctest": "ok" } }
+  },
+  {
+    "name": "push a user with its author profile",
+    "method": "POST", "path": "/push/users",
+    "body": {
+      "users": [ { "id": "su1", "email": "su1@test.com", "name": "SU", "password_hash": "x", "role": "member" } ],
+      "authors": [ { "id": "sa1", "user_id": "su1", "name": "SA", "email": "su1@test.com" } ]
+    },
+    "expect": { "status": 200, "json": { "synced": 1, "authors": 1 } }
+  },
+  {
+    "name": "pull users returns an author-profiles array",
+    "method": "GET", "path": "/pull/users",
+    "expect": { "status": 200, "json": { "authors.0.name": "Owner" } }
+  },
+
+  {
     "name": "brute-force login attempt 1 fails",
     "method": "POST", "path": "/auth/login",
     "body": { "email": "nobody@test.com", "password": "wrong" },

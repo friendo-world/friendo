@@ -164,11 +164,12 @@ app.post("/_/api/push/users", async (c) => {
   const auth = await requireSiteAdmin(c);
   if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
 
-  const { users } = await c.req.json();
+  const { users, authors } = await c.req.json();
   if (!Array.isArray(users)) return c.json({ error: "users must be an array" }, 400);
 
   let synced = 0;
   for (const u of users) {
+    const now = nowISO();
     await c.env.DB.prepare(
       `INSERT INTO users (id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -179,8 +180,39 @@ app.post("/_/api/push/users", async (c) => {
     ).bind(
       u.id, auth.siteId, u.email || "", u.phone || "", u.name || "",
       u.avatar || "", u.password_hash || "", u.role || "member",
-      u.auth_methods || '["password"]', u.created || "", u.updated || ""
+      u.auth_methods || '["password"]', u.created || now, now
     ).run();
+    synced++;
+  }
+
+  // Author profiles travel with accounts so content's author_id stays valid.
+  let authorCount = 0;
+  for (const a of authors || []) {
+    if (!a.id) continue;
+    const now = nowISO();
+    await c.env.DB.prepare(
+      `INSERT INTO authors (id, site_id, user_id, name, email, avatar, role, created, updated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         user_id=excluded.user_id, name=excluded.name, email=excluded.email,
+         avatar=excluded.avatar, role=excluded.role, updated=excluded.updated`
+    ).bind(
+      a.id, auth.siteId, a.user_id || "", a.name || "", a.email || "",
+      a.avatar || "", a.role || "member", a.created || now, now
+    ).run();
+    authorCount++;
+  }
+  return c.json({ synced, authors: authorCount });
+});
+
+app.post("/_/api/push/settings", async (c) => {
+  const auth = await requireSiteAdmin(c);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
+
+  const { settings } = await c.req.json();
+  let synced = 0;
+  for (const [k, v] of Object.entries(settings || {})) {
+    await setSetting(c.env, auth.siteId, k, String(v));
     synced++;
   }
   return c.json({ synced });
@@ -206,8 +238,22 @@ app.get("/_/api/pull/users", async (c) => {
     `SELECT id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated
      FROM users WHERE site_id = ?`
   ).bind(auth.siteId).all();
+  const { results: authors } = await c.env.DB.prepare(
+    `SELECT id, user_id, name, email, avatar, role, created, updated FROM authors WHERE site_id = ? ORDER BY created`
+  ).bind(auth.siteId).all();
 
-  return c.json({ users: results || [] });
+  return c.json({ users: results || [], authors: authors || [] });
+});
+
+app.get("/_/api/pull/settings", async (c) => {
+  const auth = await requireSiteAdmin(c);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
+
+  const { results } = await c.env.DB.prepare("SELECT key, value FROM site_settings WHERE site_id = ?")
+    .bind(auth.siteId).all();
+  const settings = {};
+  for (const r of results || []) settings[r.key] = r.value;
+  return c.json({ settings });
 });
 
 // --- REST auth (/_/api/me, /_/api/auth/*) ---

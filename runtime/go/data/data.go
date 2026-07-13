@@ -1002,6 +1002,24 @@ func (db *DB) GetBoolSetting(key string, def bool) bool {
 	}
 }
 
+// AllSettings returns every stored setting for the site (for sync).
+func (db *DB) AllSettings() (map[string]string, error) {
+	rows, err := db.Conn.Query(`SELECT key, value FROM site_settings WHERE site_id = ?`, db.SiteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
 // SetSetting upserts a setting value.
 func (db *DB) SetSetting(key, value string) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
@@ -1096,6 +1114,53 @@ func (db *DB) createDefaultAuthor(userID, name, email string) (string, error) {
 		return "", err
 	}
 	return id, nil
+}
+
+// ListAuthors returns every author profile for the site (for sync with users).
+func (db *DB) ListAuthors() ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT id, user_id, name, email, avatar, role, created, updated FROM authors WHERE site_id = ? ORDER BY created`,
+		db.SiteID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, userID, name, email, avatar, role, created, updated string
+		if err := rows.Scan(&id, &userID, &name, &email, &avatar, &role, &created, &updated); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": id, "user_id": userID, "name": name, "email": email,
+			"avatar": avatar, "role": role, "created": created, "updated": updated,
+		})
+	}
+	return out, rows.Err()
+}
+
+// UpsertAuthor inserts or updates an author profile by id (for sync).
+func (db *DB) UpsertAuthor(id, userID, name, email, avatar, role, created string) error {
+	if id == "" {
+		return nil
+	}
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	if created == "" {
+		created = now
+	}
+	if role == "" {
+		role = "member"
+	}
+	_, err := db.Conn.Exec(
+		`INSERT INTO authors (id, site_id, user_id, name, email, avatar, role, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   user_id=excluded.user_id, name=excluded.name, email=excluded.email,
+		   avatar=excluded.avatar, role=excluded.role, updated=excluded.updated`,
+		id, db.SiteID, userID, name, email, avatar, role, created, now,
+	)
+	return err
 }
 
 // DefaultAuthorID returns the account's default (earliest) profile id, or "".

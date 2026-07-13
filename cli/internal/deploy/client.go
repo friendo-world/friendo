@@ -350,10 +350,17 @@ func (c *SiteClient) PushData(records []map[string]any) error {
 	return c.post("/_/api/push/data", body)
 }
 
-// PushUsers upserts user accounts into the site's database.
-func (c *SiteClient) PushUsers(users []map[string]any) error {
-	body := map[string]any{"users": users}
+// PushUsers upserts user accounts (and their author profiles) into the site's
+// database. Authors travel with users so content's author_id stays valid.
+func (c *SiteClient) PushUsers(users, authors []map[string]any) error {
+	body := map[string]any{"users": users, "authors": authors}
 	return c.post("/_/api/push/users", body)
+}
+
+// PushSettings upserts site settings (access policy, moderation) — site config
+// that travels on deploy.
+func (c *SiteClient) PushSettings(settings map[string]string) error {
+	return c.post("/_/api/push/settings", map[string]any{"settings": settings})
 }
 
 // PullData fetches all records from the site.
@@ -367,15 +374,27 @@ func (c *SiteClient) PullData() ([]map[string]any, error) {
 	return result.Records, nil
 }
 
-// PullUsers fetches all user accounts from the site.
-func (c *SiteClient) PullUsers() ([]map[string]any, error) {
+// PullUsers fetches all user accounts (and author profiles) from the site.
+func (c *SiteClient) PullUsers() (users, authors []map[string]any, err error) {
 	var result struct {
-		Users []map[string]any `json:"users"`
+		Users   []map[string]any `json:"users"`
+		Authors []map[string]any `json:"authors"`
 	}
 	if err := c.get("/_/api/pull/users", &result); err != nil {
+		return nil, nil, err
+	}
+	return result.Users, result.Authors, nil
+}
+
+// PullSettings fetches all site settings.
+func (c *SiteClient) PullSettings() (map[string]string, error) {
+	var result struct {
+		Settings map[string]string `json:"settings"`
+	}
+	if err := c.get("/_/api/pull/settings", &result); err != nil {
 		return nil, err
 	}
-	return result.Users, nil
+	return result.Settings, nil
 }
 
 func (c *SiteClient) post(path string, body any) error {
