@@ -69,18 +69,41 @@ async function cfApiSafe(env, method, path) {
   }
 }
 
+// findD1DatabaseByName returns the uuid of an existing D1 database with the given
+// name, or null. Used to detect orphans from a failed teardown.
+async function findD1DatabaseByName(env, name) {
+  const res = await cfApiSafe(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/d1/database?name=${encodeURIComponent(name)}`);
+  const found = (res?.result || []).find((d) => d.name === name);
+  return found ? found.uuid : null;
+}
+
+async function r2BucketExists(env, name) {
+  const res = await cfApiSafe(env, "GET", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${encodeURIComponent(name)}`);
+  return !!res?.success;
+}
+
+// createD1Database creates the per-site D1. Provisioning is idempotent: the caller
+// has already confirmed via the registry that this subdomain is claimable, so a
+// same-named database is an orphan from a failed teardown — delete it first so the
+// new site starts clean (rather than throwing "already exists" and stranding the
+// subdomain).
 async function createD1Database(env, siteName) {
-  return await cfApi(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/d1/database`, {
-    name: `friendo-site-${siteName}`,
-  });
+  const name = `friendo-site-${siteName}`;
+  const orphan = await findD1DatabaseByName(env, name);
+  if (orphan) {
+    await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${orphan}`);
+  }
+  return await cfApi(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/d1/database`, { name });
 }
 
 async function createR2Bucket(env, siteName) {
   const bucketName = `friendo-site-${siteName}`;
+  if (await r2BucketExists(env, bucketName)) {
+    // Orphaned bucket from a failed teardown — empty + delete before recreating.
+    await emptyAndDeleteR2Bucket(env, bucketName);
+  }
   // R2 create-bucket is POST /r2/buckets (PUT returns "No route matches this url").
-  await cfApi(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets`, {
-    name: bucketName,
-  });
+  await cfApi(env, "POST", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets`, { name: bucketName });
   return bucketName;
 }
 
@@ -116,34 +139,38 @@ async function deployUserWorker(env, subdomain, displayName, d1Id, r2Bucket) {
     });
   }
 
-  const metadata = {
+  // Realtime channel messages fan out through a Durable Object defined in the
+  // site runtime itself (ChannelStream).
+  bindings.push({ type: "durable_object_namespace", name: "CHANNEL_STREAM", class_name: "ChannelStream" });
+
+  const baseMetadata = {
     main_module: "index.js",
     bindings,
     compatibility_date: "2024-01-01",
     compatibility_flags: ["nodejs_compat"],
   };
 
-  const form = new FormData();
-  form.set(
-    "metadata",
-    new Blob([JSON.stringify(metadata)], { type: "application/json" }),
-    "metadata.json"
-  );
-  form.set(
-    "index.js",
-    new Blob([scriptContent], { type: "application/javascript+module" }),
-    "index.js"
-  );
+  const upload = async (withMigration) => {
+    const metadata = withMigration
+      ? { ...baseMetadata, migrations: { new_tag: "v1", new_sqlite_classes: ["ChannelStream"] } }
+      : baseMetadata;
+    const form = new FormData();
+    form.set("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }), "metadata.json");
+    form.set("index.js", new Blob([scriptContent], { type: "application/javascript+module" }), "index.js");
+    const res = await fetch(
+      `${CF_API}/accounts/${env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${namespace}/scripts/${subdomain}`,
+      { method: "PUT", headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` }, body: form }
+    );
+    return await res.json();
+  };
 
-  const res = await fetch(
-    `${CF_API}/accounts/${env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${namespace}/scripts/${subdomain}`,
-    {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
-      body: form,
-    }
-  );
-  const data = await res.json();
+  // First deploy needs the DO migration; on redeploy the class already exists and
+  // re-sending the migration errors — so try with it, fall back without.
+  let data = await upload(true);
+  if (!data.success) {
+    const msg = data.errors?.map((e) => e.message).join(", ") || "";
+    if (/migration|already|defined|class/i.test(msg)) data = await upload(false);
+  }
   if (!data.success) {
     const msg = data.errors?.map((e) => e.message).join(", ") || "Unknown error";
     throw new Error(`Failed to deploy user Worker: ${msg}`);
@@ -172,23 +199,28 @@ async function emptyAndDeleteR2Bucket(env, bucketName) {
       );
     }
   }
-  await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucketName}`);
+  const del = await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/r2/buckets/${bucketName}`);
+  return !!del?.success;
 }
 
 // Tear down every per-site Cloudflare resource. Order: Worker first (stop
 // serving), then the data stores. Safe to call with null ids (skips those).
-// No DNS to remove — tenant subdomains share the `*.friendo.world` wildcard.
+// Returns the list of resource kinds that failed to delete (empty = clean), so
+// callers can report a partial teardown instead of silently stranding orphans.
 async function teardownSite(env, subdomain, d1Id, r2Bucket) {
   const namespace = env.DISPATCH_NAMESPACE || "production";
-  await cfApiSafe(
-    env,
-    "DELETE",
+  const failures = [];
+  const w = await cfApiSafe(
+    env, "DELETE",
     `/accounts/${env.CF_ACCOUNT_ID}/workers/dispatch/namespaces/${namespace}/scripts/${subdomain}`
   );
+  if (!w?.success) failures.push("worker");
   if (d1Id) {
-    await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${d1Id}`);
+    const d = await cfApiSafe(env, "DELETE", `/accounts/${env.CF_ACCOUNT_ID}/d1/database/${d1Id}`);
+    if (!d?.success) failures.push("d1");
   }
-  await emptyAndDeleteR2Bucket(env, r2Bucket);
+  if (r2Bucket && !(await emptyAndDeleteR2Bucket(env, r2Bucket))) failures.push("r2");
+  return failures;
 }
 
 async function provisionSite(env, subdomain, displayName) {
@@ -581,10 +613,18 @@ app.delete("/api/sites/:id", requirePlatformAuth, async (c) => {
   if (!site) return c.json({ error: "Site not found" }, 404);
   if (site.owner_id !== userId) return c.json({ error: "Not owned by you" }, 403);
 
-  // Best-effort teardown of all per-site Cloudflare resources, then the row.
-  await teardownSite(c.env, site.subdomain, site.d1_id, site.r2_bucket);
+  // Tear down all per-site Cloudflare resources, then the registry row. The row
+  // is always removed so the subdomain frees up immediately; any resource that
+  // failed to delete becomes an orphan that a future provision cleans up
+  // (createD1Database/createR2Bucket are idempotent), so the subdomain never gets
+  // stranded. We surface a warning so a partial teardown isn't silent.
+  const failures = await teardownSite(c.env, site.subdomain, site.d1_id, site.r2_bucket);
   await c.env.DB.prepare("DELETE FROM sites WHERE id = ?").bind(site.id).run();
 
+  if (failures.length) {
+    console.error(`[destroy] partial teardown for ${site.subdomain}: ${failures.join(", ")}`);
+    return c.json({ ok: true, id: site.id, warning: `partial teardown: ${failures.join(", ")} not deleted (will be cleaned on re-provision)` });
+  }
   return c.json({ ok: true, id: site.id });
 });
 

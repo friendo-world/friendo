@@ -738,6 +738,68 @@
   },
 
   {
+    "name": "an admin creates a channel",
+    "method": "POST", "path": "/channels",
+    "body": { "name": "General", "kind": "feed" },
+    "expect": { "status": 201, "json": { "channel.name": "General", "channel.kind": "feed" } },
+    "capture": { "channelId": "channel.id" }
+  },
+  {
+    "name": "channels are listed publicly",
+    "method": "GET", "path": "/channels",
+    "expect": { "status": 200, "length": { "channels": 1 }, "json": { "channels.0.id": "${channelId}" } }
+  },
+  {
+    "name": "post a message to the channel",
+    "method": "POST", "path": "/channels/${channelId}/messages",
+    "body": { "body": "Hello channel" },
+    "expect": { "status": 201, "json": { "message.body": "Hello channel", "message.author_name": "Owner" } },
+    "capture": { "messageId": "message.id" }
+  },
+  {
+    "name": "messages are listed for the channel",
+    "method": "GET", "path": "/channels/${channelId}/messages",
+    "expect": { "status": 200, "length": { "messages": 1 }, "json": { "messages.0.id": "${messageId}", "messages.0.mine": true } }
+  },
+  {
+    "name": "posting to a missing channel is a 404",
+    "method": "POST", "path": "/channels/nope/messages",
+    "body": { "body": "x" },
+    "expect": { "status": 404 }
+  },
+  {
+    "name": "a non-author contributor logs in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "contrib2@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "a non-author cannot delete someone else's message",
+    "method": "DELETE", "path": "/messages/${messageId}",
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "admin logs back in to moderate the feed",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "a moderator can delete any message",
+    "method": "DELETE", "path": "/messages/${messageId}",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "the channel's messages are now empty",
+    "method": "GET", "path": "/channels/${channelId}/messages",
+    "expect": { "status": 200, "length": { "messages": 0 } }
+  },
+  {
+    "name": "delete the channel",
+    "method": "DELETE", "path": "/channels/${channelId}",
+    "expect": { "status": 204 }
+  },
+  {
     "name": "push a site setting (sync)",
     "method": "POST", "path": "/push/settings",
     "body": { "settings": { "synctest": "ok" } },

@@ -698,6 +698,165 @@ func (db *DB) DeleteComment(id string) error {
 	return nil
 }
 
+// --- Channels & messages (community feed) ---
+
+// ListChannels returns the site's channels (public).
+func (db *DB) ListChannels() ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT id, name, kind, created, updated FROM channels WHERE site_id = ? ORDER BY created`,
+		db.SiteID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, name, kind, created, updated string
+		if err := rows.Scan(&id, &name, &kind, &created, &updated); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"id": id, "name": name, "kind": kind, "created": created, "updated": updated})
+	}
+	return out, rows.Err()
+}
+
+// CreateChannel inserts a channel and returns its id.
+func (db *DB) CreateChannel(name, kind string) (string, error) {
+	if kind == "" {
+		kind = "feed"
+	}
+	id := GenerateID()
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO channels (id, site_id, name, kind, created, updated) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, name, kind, now, now,
+	)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// GetChannel returns a channel by id, or sql.ErrNoRows.
+func (db *DB) GetChannel(id string) (map[string]any, error) {
+	var name, kind, created, updated string
+	err := db.Conn.QueryRow(
+		`SELECT name, kind, created, updated FROM channels WHERE id = ? AND site_id = ?`, id, db.SiteID,
+	).Scan(&name, &kind, &created, &updated)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": id, "name": name, "kind": kind, "created": created, "updated": updated}, nil
+}
+
+// DeleteChannel removes a channel and its messages.
+func (db *DB) DeleteChannel(id string) error {
+	res, err := db.Conn.Exec(`DELETE FROM channels WHERE id = ? AND site_id = ?`, id, db.SiteID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	db.Conn.Exec(`DELETE FROM messages WHERE channel_id = ? AND site_id = ?`, id, db.SiteID)
+	return nil
+}
+
+// messageSelect joins the author profile's display fields, like comments.
+const messageSelect = `SELECT m.id, m.channel_id, m.parent_id, m.author_id, m.body, m.created,
+       a.name, a.avatar
+FROM messages m LEFT JOIN authors a ON a.id = m.author_id`
+
+func scanMessage(scan func(...any) error) (map[string]any, error) {
+	var id, channelID, parentID, authorID, body, created string
+	var authorName, authorAvatar sql.NullString
+	if err := scan(&id, &channelID, &parentID, &authorID, &body, &created, &authorName, &authorAvatar); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"id": id, "channel_id": channelID, "parent_id": parentID, "author_id": authorID,
+		"author_name": authorName.String, "author_avatar": authorAvatar.String,
+		"body": body, "created": created,
+	}, nil
+}
+
+// ListMessages returns a channel's messages, oldest first. Each row carries a
+// `mine` flag (the viewer wrote it) for inline self-delete.
+func (db *DB) ListMessages(channelID, viewerUserID string) ([]map[string]any, error) {
+	q := `SELECT m.id, m.channel_id, m.parent_id, m.author_id, m.body, m.created, a.name, a.avatar,
+	             CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
+	      FROM messages m LEFT JOIN authors a ON a.id = m.author_id
+	      WHERE m.site_id = ? AND m.channel_id = ? ORDER BY m.created ASC`
+	rows, err := db.Conn.Query(q, viewerUserID, viewerUserID, db.SiteID, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, channelID, parentID, authorID, body, created string
+		var authorName, authorAvatar sql.NullString
+		var mine int
+		if err := rows.Scan(&id, &channelID, &parentID, &authorID, &body, &created, &authorName, &authorAvatar, &mine); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": id, "channel_id": channelID, "parent_id": parentID, "author_id": authorID,
+			"author_name": authorName.String, "author_avatar": authorAvatar.String,
+			"body": body, "created": created, "mine": mine == 1,
+		})
+	}
+	return out, rows.Err()
+}
+
+// CreateMessage inserts a message and returns its id.
+func (db *DB) CreateMessage(channelID, parentID, authorID, body string) (string, error) {
+	id := GenerateID()
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO messages (id, site_id, channel_id, author_id, body, parent_id, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, channelID, authorID, body, parentID, now, now,
+	)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// GetMessage returns a single message by id, or sql.ErrNoRows.
+func (db *DB) GetMessage(id string) (map[string]any, error) {
+	row := db.Conn.QueryRow(messageSelect+` WHERE m.id = ? AND m.site_id = ?`, id, db.SiteID)
+	return scanMessage(row.Scan)
+}
+
+// DeleteMessage removes a message by id.
+func (db *DB) DeleteMessage(id string) error {
+	res, err := db.Conn.Exec(`DELETE FROM messages WHERE id = ? AND site_id = ?`, id, db.SiteID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// UserOwnsMessage reports whether the account wrote the message.
+func (db *DB) UserOwnsMessage(userID, messageID string) bool {
+	if userID == "" {
+		return false
+	}
+	var one int
+	err := db.Conn.QueryRow(
+		`SELECT 1 FROM messages m JOIN authors a ON a.id = m.author_id
+		 WHERE m.site_id = ? AND m.id = ? AND a.user_id = ? LIMIT 1`,
+		db.SiteID, messageID, userID,
+	).Scan(&one)
+	return err == nil
+}
+
 // --- Reactions (community) ---
 
 // ToggleReaction adds a reaction if the author hasn't made it, or removes it if

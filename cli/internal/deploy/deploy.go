@@ -150,9 +150,11 @@ func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain, apiURL s
 
 	// Push everything to the site's sync API. The freshly provisioned site has
 	// no admin yet, so RunPush -> authenticateSite walks the user through
-	// creating the first admin account before uploading.
+	// creating the first admin account before uploading. Include content records
+	// by default (Data) so a content/-authored site isn't deployed empty; users
+	// stay opt-in via `friendo push --users`.
 	fmt.Println()
-	pushOpts := PushOptions{Target: target}
+	pushOpts := PushOptions{Target: target, Data: true}
 	if err := RunPush(pushOpts); err != nil {
 		return fmt.Errorf("push failed: %w", err)
 	}

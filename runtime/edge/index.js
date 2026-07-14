@@ -987,6 +987,132 @@ app.post("/_/api/reactions", async (c) => {
   return c.json({ reacted, reactions });
 });
 
+// --- Channels & messages (community feed) ---
+
+const MESSAGE_SELECT = `SELECT m.id, m.channel_id, m.parent_id, m.author_id, m.body, m.created,
+       a.name AS author_name, a.avatar AS author_avatar
+FROM messages m LEFT JOIN authors a ON a.id = m.author_id`;
+
+function messageJSON(r) {
+  return {
+    id: r.id, channel_id: r.channel_id, parent_id: r.parent_id, author_id: r.author_id,
+    author_name: r.author_name || "", author_avatar: r.author_avatar || "",
+    body: r.body, created: r.created,
+  };
+}
+
+// Public: list the site's channels.
+app.get("/_/api/channels", async (c) => {
+  const siteId = getSiteId(c);
+  const { results } = await c.env.DB.prepare(
+    "SELECT id, name, kind, created, updated FROM channels WHERE site_id = ? ORDER BY created"
+  ).bind(siteId).all();
+  return c.json({ channels: results || [] });
+});
+
+// Admin (site.configure): create a channel.
+app.post("/_/api/channels", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.siteConfigure);
+  if (deny) return deny;
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
+  if (!(body.name || "").trim()) return c.json({ error: "name is required" }, 400);
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  await c.env.DB.prepare(
+    "INSERT INTO channels (id, site_id, name, kind, created, updated) VALUES (?, ?, ?, ?, ?, ?)"
+  ).bind(id, auth.siteId, body.name, body.kind || "feed", now, now).run();
+  const channel = await c.env.DB.prepare("SELECT id, name, kind, created, updated FROM channels WHERE id = ? AND site_id = ?")
+    .bind(id, auth.siteId).first();
+  return c.json({ channel }, 201);
+});
+
+// Admin: delete a channel and its messages.
+app.delete("/_/api/channels/:id", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.siteConfigure);
+  if (deny) return deny;
+  const id = c.req.param("id");
+  const res = await c.env.DB.prepare("DELETE FROM channels WHERE id = ? AND site_id = ?").bind(id, auth.siteId).run();
+  if (!res.meta.changes) return c.json({ error: "channel not found" }, 404);
+  await c.env.DB.prepare("DELETE FROM messages WHERE channel_id = ? AND site_id = ?").bind(id, auth.siteId).run();
+  return c.body(null, 204);
+});
+
+// Public: a channel's messages, oldest first (`mine` per row when signed in).
+app.get("/_/api/channels/:id/messages", async (c) => {
+  const siteId = getSiteId(c);
+  const user = await getSiteSessionUser(c);
+  const viewerId = user ? user.id : "";
+  const { results } = await c.env.DB.prepare(
+    `SELECT m.id, m.channel_id, m.parent_id, m.author_id, m.body, m.created,
+            a.name AS author_name, a.avatar AS author_avatar,
+            CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
+     FROM messages m LEFT JOIN authors a ON a.id = m.author_id
+     WHERE m.site_id = ? AND m.channel_id = ? ORDER BY m.created ASC`
+  ).bind(viewerId, viewerId, siteId, c.req.param("id")).all();
+  return c.json({ messages: (results || []).map((r) => ({ ...messageJSON(r), mine: r.mine === 1 })) });
+});
+
+// channelStreamStub returns the Durable Object that fans out a channel's live
+// messages, or null if the binding isn't present (older deploys degrade to the
+// non-streaming list API).
+function channelStreamStub(env, siteId, channelId) {
+  if (!env.CHANNEL_STREAM) return null;
+  return env.CHANNEL_STREAM.get(env.CHANNEL_STREAM.idFromName(siteId + ":" + channelId));
+}
+
+// SSE: live new messages for a channel (public). Backed by a per-channel Durable
+// Object — the client (EventSource) is identical to the Go runtime's SSE.
+app.get("/_/api/channels/:id/stream", async (c) => {
+  const stub = channelStreamStub(c.env, getSiteId(c), c.req.param("id"));
+  if (!stub) return c.text("streaming unavailable", 501);
+  return stub.fetch("https://do/stream", { headers: c.req.raw.headers });
+});
+
+// Member-gated + rate-limited: post a message to a channel.
+app.post("/_/api/channels/:id/messages", async (c) => {
+  const { auth, deny } = await requireMember(c);
+  if (deny) return deny;
+  const channelId = c.req.param("id");
+  const channel = await c.env.DB.prepare("SELECT id FROM channels WHERE id = ? AND site_id = ?")
+    .bind(channelId, auth.siteId).first();
+  if (!channel) return c.json({ error: "channel not found" }, 404);
+
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
+  if (!(body.body || "").trim()) return c.json({ error: "body is required" }, 400);
+  if (!(await rateLimitAllow(c.env, auth.siteId, "message:" + auth.user.id, COMMENT_LIMIT, COMMENT_WINDOW_MS))) {
+    return c.json({ error: "you're posting too fast — slow down" }, 429);
+  }
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  const authorId = await defaultAuthorId(c.env, auth.siteId, auth.user.id);
+  await c.env.DB.prepare(
+    "INSERT INTO messages (id, site_id, channel_id, author_id, body, parent_id, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(id, auth.siteId, channelId, authorId, body.body, body.parent_id || "", now, now).run();
+  const row = await c.env.DB.prepare(MESSAGE_SELECT + " WHERE m.id = ? AND m.site_id = ?").bind(id, auth.siteId).first();
+  const msg = messageJSON(row);
+  // Push to everyone streaming this channel via the Durable Object.
+  const stub = channelStreamStub(c.env, auth.siteId, channelId);
+  if (stub) c.executionCtx.waitUntil(stub.fetch("https://do/broadcast", { method: "POST", body: JSON.stringify(msg) }));
+  return c.json({ message: msg }, 201);
+});
+
+// Delete a message — its author, or a comment moderator. Self-gates.
+app.delete("/_/api/messages/:id", async (c) => {
+  const user = await getSiteSessionUser(c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  const siteId = getSiteId(c);
+  const id = c.req.param("id");
+  const owns = await c.env.DB.prepare(
+    "SELECT 1 FROM messages m JOIN authors a ON a.id = m.author_id WHERE m.site_id = ? AND m.id = ? AND a.user_id = ? LIMIT 1"
+  ).bind(siteId, id, user.id).first();
+  if (!owns && !roleCan(user.role, CAP.commentModerateAny)) return c.json({ error: "forbidden" }, 403);
+  const res = await c.env.DB.prepare("DELETE FROM messages WHERE id = ? AND site_id = ?").bind(id, siteId).run();
+  if (!res.meta.changes) return c.json({ error: "message not found" }, 404);
+  return c.body(null, 204);
+});
+
 // --- Polls (community) ---
 
 // pollWithTallies builds the public poll shape (options + vote counts + the
@@ -1522,6 +1648,42 @@ app.get("*", async (c) => {
 });
 
 export default app;
+
+// ChannelStream — a Durable Object that fans out a channel's live messages to
+// connected SSE clients. One instance per (site, channel). It holds the open
+// stream writers and broadcasts each new message to them; dead writers are
+// pruned on the next broadcast. This is the edge equivalent of the Go runtime's
+// in-process message hub — the client transport (SSE) is identical.
+export class ChannelStream {
+  constructor(state, env) {
+    this.writers = new Set();
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname.endsWith("/broadcast")) {
+      const data = await request.text();
+      const frame = new TextEncoder().encode(`data: ${data}\n\n`);
+      for (const w of [...this.writers]) {
+        try { await w.write(frame); } catch { this.writers.delete(w); }
+      }
+      return new Response("ok");
+    }
+
+    // Open an SSE stream.
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    this.writers.add(writer);
+    writer.write(new TextEncoder().encode(": connected\n\n")).catch(() => {});
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+  }
+}
 
 // --- Rendering helpers ---
 

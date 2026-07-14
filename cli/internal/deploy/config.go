@@ -40,6 +40,24 @@ func (c *Config) ClearSiteAuth(target string) {
 	delete(c.Sites, target)
 }
 
+// Logout clears the cached platform token and all site sessions from disk.
+func Logout() error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	hadToken := cfg.Token != "" || len(cfg.Sites) > 0
+	cfg.Token = ""
+	cfg.Sites = nil
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	if !hadToken {
+		fmt.Println("Not logged in.")
+	}
+	return nil
+}
+
 // DefaultBaseURL is the production friendo.world URL.
 const DefaultBaseURL = "https://friendo.world"
 

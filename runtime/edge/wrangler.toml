@@ -26,3 +26,12 @@ database_id = "local-dev"
 [[r2_buckets]]
 binding = "ASSETS"
 bucket_name = "friendo-edge-assets"
+
+# Realtime channel messages fan out through a Durable Object (SSE stream).
+[[durable_objects.bindings]]
+name = "CHANNEL_STREAM"
+class_name = "ChannelStream"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChannelStream"]

@@ -34,6 +34,7 @@ themselves, so nothing else is needed.
 | `<friendo-comments>` | `post-id` | Lists approved comments and, for signed-in members, a compose box. |
 | `<friendo-reactions>` | `target-type`, `target-id`, `emojis` (optional, comma-separated; default `👍,❤️,🎉`) | Emoji reactions with live counts; click toggles yours. |
 | `<friendo-poll>` | `poll-slug` (or `poll-id`) | Renders a poll; signed-in members vote once and see the tally. |
+| `<friendo-channel>` | `channel-id` | A **realtime** message feed; signed-in members post and delete their own, and new messages stream in live. |
 
 ## Members: passwordless visitors
 

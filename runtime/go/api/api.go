@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,13 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Post("/posts/{id}/comments", handlePostComment(db, authFunc))
 		r.Get("/reactions", handleListReactions(db, authFunc))
 		r.Post("/reactions", handleToggleReaction(db, authFunc))
+
+		// Channels & messages (community feed): public reads, member-gated posts.
+		r.Get("/channels", handleListChannels(db))
+		r.Get("/channels/{id}/messages", handleListMessages(db, authFunc))
+		r.Get("/channels/{id}/stream", handleChannelStream(db)) // SSE: live new messages
+		r.Post("/channels/{id}/messages", handlePostMessage(db, authFunc))
+		r.Delete("/messages/{id}", handleDeleteMessage(db, authFunc))
 		r.Get("/polls/by-slug/{slug}", handleGetPollBySlug(db, authFunc))
 		r.Get("/polls/{id}", handleGetPoll(db, authFunc))
 		r.Post("/polls/{id}/vote", handleVotePoll(db, authFunc))
@@ -70,6 +78,10 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 
 		// Poll creation — editor+ (content.edit.any).
 		r.Post("/polls", capGate(authFunc, data.CapContentEditAny, handleCreatePoll(db)))
+
+		// Channel management — admin+ (site.configure); posting is member-gated above.
+		r.Post("/channels", capGate(authFunc, data.CapSiteConfigure, handleCreateChannel(db)))
+		r.Delete("/channels/{id}", capGate(authFunc, data.CapSiteConfigure, handleDeleteChannel(db)))
 
 		// Users — admin+ (user.manage). Granting admin/owner additionally needs
 		// site.own (enforced by canAssignRole).
@@ -576,6 +588,223 @@ func handleToggleReaction(db *data.DB, authFunc func(*http.Request) *data.User) 
 		}
 		reactions, _ := db.ReactionCounts(in.TargetType, in.TargetID, authorID)
 		jsonResponse(w, map[string]any{"reacted": reacted, "reactions": reactions})
+	}
+}
+
+// --- Channels & messages (community feed) ---
+
+// messageHub fans out new messages to open SSE streams, per channel. The edge
+// runtime achieves the same with a per-channel Durable Object; the client (an
+// EventSource on /channels/:id/stream) is identical across both.
+type messageHub struct {
+	mu   sync.Mutex
+	subs map[string]map[chan string]struct{} // channelID -> subscriber channels
+}
+
+var msgHub = &messageHub{subs: map[string]map[chan string]struct{}{}}
+
+func (h *messageHub) subscribe(channelID string) chan string {
+	ch := make(chan string, 8)
+	h.mu.Lock()
+	if h.subs[channelID] == nil {
+		h.subs[channelID] = map[chan string]struct{}{}
+	}
+	h.subs[channelID][ch] = struct{}{}
+	h.mu.Unlock()
+	return ch
+}
+
+func (h *messageHub) unsubscribe(channelID string, ch chan string) {
+	h.mu.Lock()
+	if set := h.subs[channelID]; set != nil {
+		delete(set, ch)
+		if len(set) == 0 {
+			delete(h.subs, channelID)
+		}
+	}
+	h.mu.Unlock()
+	close(ch)
+}
+
+func (h *messageHub) broadcast(channelID, data string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for ch := range h.subs[channelID] {
+		select {
+		case ch <- data:
+		default: // drop for a slow/full subscriber rather than block the poster
+		}
+	}
+}
+
+// handleChannelStream is a Server-Sent Events stream of a channel's new messages
+// (public). Each `data:` frame is a message in the same shape as the list API.
+func handleChannelStream(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			jsonError(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		channelID := chi.URLParam(r, "id")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		ch := msgHub.subscribe(channelID)
+		defer msgHub.unsubscribe(channelID, ch)
+		fmt.Fprint(w, ": connected\n\n")
+		flusher.Flush()
+
+		for {
+			select {
+			case data := <-ch:
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
+	}
+}
+
+func handleListChannels(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		channels, err := db.ListChannels()
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"channels": channels})
+	}
+}
+
+// handleCreateChannel creates a channel (admin-gated).
+func handleCreateChannel(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+			Kind string `json:"kind"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(in.Name) == "" {
+			jsonError(w, "name is required", http.StatusBadRequest)
+			return
+		}
+		id, err := db.CreateChannel(in.Name, in.Kind)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		channel, _ := db.GetChannel(id)
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"channel": channel})
+	}
+}
+
+// handleDeleteChannel removes a channel and its messages (admin-gated).
+func handleDeleteChannel(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := db.DeleteChannel(chi.URLParam(r, "id"))
+		if err == sql.ErrNoRows {
+			jsonError(w, "channel not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleListMessages returns a channel's messages (public; `mine` per row when
+// the caller is signed in).
+func handleListMessages(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		viewerID := ""
+		if u := authFunc(r); u != nil {
+			viewerID = u.ID
+		}
+		messages, err := db.ListMessages(chi.URLParam(r, "id"), viewerID)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"messages": messages})
+	}
+}
+
+// handlePostMessage posts a message to a channel. Member-gated + rate-limited.
+func handlePostMessage(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		channelID := chi.URLParam(r, "id")
+		if _, err := db.GetChannel(channelID); err != nil {
+			jsonError(w, "channel not found", http.StatusNotFound)
+			return
+		}
+		var in struct {
+			Body     string `json:"body"`
+			ParentID string `json:"parent_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(in.Body) == "" {
+			jsonError(w, "body is required", http.StatusBadRequest)
+			return
+		}
+		if !db.RateLimitAllow("message:"+user.ID, commentRateLimit, commentRateWindow) {
+			jsonError(w, "you're posting too fast — slow down", http.StatusTooManyRequests)
+			return
+		}
+		id, err := db.CreateMessage(channelID, in.ParentID, db.DefaultAuthorID(user.ID), in.Body)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		message, _ := db.GetMessage(id)
+		// Push the new message to everyone streaming this channel.
+		if b, err := json.Marshal(message); err == nil {
+			msgHub.broadcast(channelID, string(b))
+		}
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"message": message})
+	}
+}
+
+// handleDeleteMessage removes a message — its author, or a comment moderator.
+func handleDeleteMessage(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		id := chi.URLParam(r, "id")
+		if !db.UserOwnsMessage(user.ID, id) && !user.Can(data.CapCommentModerateAny) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		err := db.DeleteMessage(id)
+		if err == sql.ErrNoRows {
+			jsonError(w, "message not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

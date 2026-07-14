@@ -88,6 +88,14 @@ func main() {
 		Use:   "export",
 		Short: "Export your site as static HTML or a self-contained bundle",
 		Run: func(cmd *cobra.Command, args []string) {
+			// Compile content/ first (like serve/build/deploy do) so an export
+			// reflects the latest markdown, not stale database state.
+			if dir, err := os.Getwd(); err == nil && content.HasContent(dir) {
+				if _, err := content.Build(dir); err != nil {
+					fmt.Fprintf(os.Stderr, "Error building content: %v\n", err)
+					os.Exit(1)
+				}
+			}
 			if err := export.Run(exportMode); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
@@ -240,7 +248,20 @@ Targets:
 	}
 	whoamiCmd.Flags().StringVar(&whoamiTarget, "target", "", "Override platform API URL")
 
-	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd, whoamiCmd)
+	// --- logout ---
+	var logoutCmd = &cobra.Command{
+		Use:   "logout",
+		Short: "Sign out — clear the cached friendo.world token and site sessions",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := deploy.Logout(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println("Signed out.")
+		},
+	}
+
+	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd, whoamiCmd, logoutCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

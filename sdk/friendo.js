@@ -443,11 +443,129 @@
     }
   }
 
+  // --- <friendo-channel channel-id> ------------------------------------------
+  // A community feed: lists a channel's messages and, for signed-in members, a
+  // compose box. Members can delete their own messages.
+  class FriendoChannel extends FriendoElement {
+    css() {
+      return (
+        "ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.6em}" +
+        "li{padding:.5em .7em;border:1px solid #eee;border-radius:10px}" +
+        ".meta{font-size:.85em;opacity:.7;margin-bottom:.2em;display:flex;gap:.5em;align-items:center}" +
+        ".del{margin-left:auto;font:inherit;font-size:.8em;cursor:pointer;border:0;background:none;opacity:.6}" +
+        "textarea{font:inherit;width:100%;box-sizing:border-box;padding:.5em;border:1px solid #ccc;border-radius:6px}" +
+        "form{margin-top:.6em;display:flex;flex-direction:column;gap:.5em;align-items:flex-start}" +
+        ".empty{opacity:.6}"
+      );
+    }
+    disconnectedCallback() {
+      super.disconnectedCallback();
+      if (this._es) { this._es.close(); this._es = null; }
+    }
+    // messageLi builds one message row.
+    messageLi(m) {
+      var del = m.mine || this._canModerate
+        ? '<button part="delete" class="del" data-id="' + esc(m.id) + '">delete</button>'
+        : "";
+      return (
+        '<li part="message" data-id="' + esc(m.id) + '"><div part="author" class="meta">' +
+        esc(m.author_name || "Anonymous") + del +
+        '</div><div part="body">' + esc(m.body) + "</div></li>"
+      );
+    }
+    async render() {
+      var channelId = this.getAttribute("channel-id") || "";
+      var user = await currentUser();
+      // Editor+ can moderate (delete any); members can delete only their own.
+      this._canModerate = !!user && ["editor", "admin", "owner"].includes(user.role);
+      var data;
+      try {
+        data = await api("/channels/" + encodeURIComponent(channelId) + "/messages");
+      } catch (e) {
+        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        return;
+      }
+      var messages = (data && data.messages) || [];
+      var self = this;
+
+      var items = messages.length
+        ? messages.map(function (m) { return self.messageLi(m); }).join("")
+        : '<li part="empty" class="empty">No messages yet.</li>';
+
+      var composer = user
+        ? '<form part="form"><textarea part="input" required placeholder="Message…" rows="2"></textarea>' +
+          '<button part="submit" type="submit">Send</button><span part="status" class="meta"></span></form>'
+        : '<p part="signed-out" class="empty">Sign in to join the conversation.</p>';
+
+      this.paint('<ul part="list">' + items + "</ul>" + composer);
+      this.wireActions(channelId);
+      this.openStream(channelId);
+    }
+
+    // openStream subscribes to live new messages via SSE and appends them.
+    openStream(channelId) {
+      if (this._es) return; // one connection per element
+      var self = this;
+      try {
+        var es = new EventSource(API + "/channels/" + encodeURIComponent(channelId) + "/stream");
+        this._es = es;
+        es.onmessage = function (ev) {
+          var m;
+          try { m = JSON.parse(ev.data); } catch (e) { return; }
+          var list = self.shadowRoot.querySelector('[part="list"]');
+          if (!list || list.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(m.id) : m.id) + '"]')) return;
+          var empty = list.querySelector('[part="empty"]');
+          if (empty) empty.remove();
+          list.insertAdjacentHTML("beforeend", self.messageLi(m));
+          self.wireActions(channelId);
+        };
+        es.onerror = function () { self._streaming = false; };
+        this._streaming = true;
+      } catch (e) {
+        this._streaming = false;
+      }
+    }
+
+    wireActions(channelId) {
+      var self = this;
+      this.shadowRoot.querySelectorAll(".del").forEach(function (btn) {
+        btn.onclick = async function () {
+          if (!confirm("Delete this message?")) return;
+          try {
+            await api("/messages/" + encodeURIComponent(btn.dataset.id), { method: "DELETE" });
+            var li = self.shadowRoot.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(btn.dataset.id) : btn.dataset.id) + '"]');
+            if (li) li.remove();
+          } catch (e) { /* leave as-is */ }
+        };
+      });
+      var form = this.shadowRoot.querySelector("form");
+      if (form) {
+        var status = this.shadowRoot.querySelector('[part="status"]');
+        form.onsubmit = async (e) => {
+          e.preventDefault();
+          var input = this.shadowRoot.querySelector('[part="input"]');
+          var body = input.value.trim();
+          if (!body) return;
+          status.textContent = "Sending…";
+          try {
+            await api("/channels/" + encodeURIComponent(channelId) + "/messages", jsonBody("POST", { body: body }));
+            input.value = "";
+            status.textContent = "";
+            // The message arrives back over the SSE stream and is appended there;
+            // if streaming is unavailable, re-render to show it.
+            if (!self._streaming) self.render();
+          } catch (err) { status.textContent = err.message; }
+        };
+      }
+    }
+  }
+
   var defs = {
     "friendo-auth": FriendoAuth,
     "friendo-comments": FriendoComments,
     "friendo-reactions": FriendoReactions,
     "friendo-poll": FriendoPoll,
+    "friendo-channel": FriendoChannel,
   };
   Object.keys(defs).forEach(function (tag) {
     if (!customElements.get(tag)) customElements.define(tag, defs[tag]);
