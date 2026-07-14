@@ -1910,6 +1910,7 @@ async function renderPage(env, site, pathname) {
     for (const [paramName, paramValue] of Object.entries(paramValues)) {
       const record = await queryRecordByField(env, siteId, matched.collectionName, paramName, paramValue);
       if (!record) return renderNotFound(env, site);
+      await attachCommunityRelations(env, siteId, record);
       ctx.record = record;
     }
   }
@@ -2008,6 +2009,45 @@ async function buildCollections(env, siteId) {
     collections[collection] = (results || []).map(decodeRecordData);
   }
   return collections;
+}
+
+// attachCommunityRelations enriches a single focused post record with its public
+// community data — approved comments, reaction tallies, and (if the post declares
+// one in its front matter) its poll — so templates can render community content
+// server-side without JS: {{ record.comments }}, {{ record.reactions }},
+// {{ record.poll }}. Byte-mirrors the Go server's attachCommunityRelations: same
+// SQL, same shape, same no-viewer values (a reaction's `reacted`, a poll's
+// `my_vote`) — the <friendo-*> SDK components own the interactive, signed-in view.
+async function attachCommunityRelations(env, siteId, record) {
+  const id = record.id;
+  if (!id) return;
+
+  // Approved comments, oldest first (always present, possibly empty).
+  const { results: comments } = await env.DB.prepare(
+    COMMENT_SELECT + " WHERE c.site_id = ? AND c.post_id = ? AND c.status = 'approved' ORDER BY c.created ASC"
+  ).bind(siteId, id).all();
+  record.comments = (comments || []).map(commentJSON);
+
+  // Reaction tallies (no server-side viewer → reacted is false). The empty-string
+  // viewer bind mirrors Go's ReactionCounts("post", id, "").
+  const { results: reactions } = await env.DB.prepare(
+    `SELECT emoji, COUNT(*) AS count,
+            SUM(CASE WHEN author_id = ? THEN 1 ELSE 0 END) AS mine
+     FROM reactions WHERE site_id = ? AND target_type = ? AND target_id = ?
+     GROUP BY emoji ORDER BY emoji`
+  ).bind("", siteId, "post", id).all();
+  record.reactions = (reactions || []).map((r) => ({ emoji: r.emoji, count: r.count, reacted: r.mine > 0 }));
+
+  // Poll declared in the post's front matter (data.poll.slug), if any. Resolving
+  // lazily creates the poll on first view — matching the SDK/REST path.
+  const slug = record.data && record.data.poll && record.data.poll.slug;
+  if (slug) {
+    const pollId = await resolvePollBySlug(env, siteId, slug);
+    if (pollId) {
+      const poll = await pollWithTallies(env, siteId, pollId, "");
+      if (poll) record.poll = poll;
+    }
+  }
 }
 
 async function queryRecordByField(env, siteId, collection, field, value) {

@@ -5,8 +5,38 @@
     {{ record.body|markdown }}
 </article>
 
-<!-- Community features. `record.id` is the post's stable id; the components
-     talk to /_/api on their own, so no custom JavaScript is needed here. -->
+<!-- Server-rendered community content. `record.comments`, `record.reactions`, and
+     `record.poll` are attached to the post by the runtime, so approved comments,
+     reaction tallies, and the poll render straight into the page with no JS — great
+     for readers and search engines. The interactive versions live below. -->
+<section class="community-static">
+    <h2>Reactions</h2>
+    <ul class="tallies">
+        {% for r in record.reactions %}
+        <li>{{ r.emoji }} {{ r.count }}</li>
+        {% endfor %}
+    </ul>
+
+    {% if record.poll %}
+    <h2>{{ record.poll.question }}</h2>
+    <ul class="poll-results">
+        {% for opt in record.poll.options %}
+        <li>{{ opt.text }} — {{ opt.votes }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <h2>Comments</h2>
+    <ol class="comments">
+        {% for comment in record.comments %}
+        <li><strong>{{ comment.author_name }}</strong>: {{ comment.body }}</li>
+        {% endfor %}
+    </ol>
+</section>
+
+<!-- The same community data, interactive. `record.id` is the post's stable id; the
+     components talk to /_/api on their own, so no custom JavaScript is needed here.
+     Two spellings of one idea — pick whichever the page needs. -->
 <section class="community">
     <div class="signin">
         <h2>Join in</h2>

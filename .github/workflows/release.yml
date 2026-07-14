@@ -1,12 +1,16 @@
 name: release
 
-# Cut a release by pushing a tag:  git tag v0.1.0 && git push origin v0.1.0
+# Cut a release with:  npm run release -- v0.2.0
+#   (guards the tree, refreshes + checks bundles, runs both parity suites,
+#    publishes the edge runtime to R2, then tags + pushes — see scripts/release.mjs)
+# Or by hand:  git tag v0.2.0 && git push origin v0.2.0
 #
 # The admin SPA is embedded via go:embed from runtime/go/admin/spa, so the
 # committed build is what ships. CI does NOT rebuild it — a rebuild here would
 # produce different content-hashed filenames than what's committed and leave the
 # tree dirty, which GoReleaser refuses to release from. Keep the committed SPA
 # current: run `npm run build` (or `npm run admin`) and commit before tagging.
+# `npm run release` does this check for you.
 on:
   push:
     tags:

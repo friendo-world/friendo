@@ -136,6 +136,7 @@ npm run tunnel            # map *.local.friendo.world → :8787
 | `npm run edge:schema` | Apply schema to local edge D1 |
 | `npm run runtime:bundle` | Bundle `runtime/edge/` → `dist/edge-runtime.js` (the per-site Worker) |
 | `npm run runtime:publish` | Publish the bundle to the `friendo-runtime` R2 bucket (provisioning reads it) |
+| `npm run release -- v0.2.0` | Cut a release: guard + bundle-check + tests, publish the edge runtime, tag + push. Add `--dry-run` to stop before anything irreversible |
 | `npm run platform:dev` | Start platform dispatch Worker on :8787 |
 | `npm run tunnel` | Map *.local.friendo.world → :8787 |
 | `npm run dev` | Full dev environment (Go + platform + tunnel) |

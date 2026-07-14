@@ -406,6 +406,7 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 				renderNotFound(w, req, db, pagesDir, tplSet, siteCfg)
 				return
 			}
+			attachCommunityRelations(db, record)
 			ctx["record"] = record
 		}
 	}
@@ -482,4 +483,47 @@ func buildCollectionsContext(db *data.DB) map[string]any {
 	}
 
 	return result
+}
+
+// attachCommunityRelations enriches a single focused post record with its public
+// community data — approved comments, reaction tallies, and (if the post declares
+// one in its front matter) its poll — so templates can render community content
+// server-side without JS: {{ record.comments }}, {{ record.reactions }},
+// {{ record.poll }}. These are two spellings of what the <friendo-*> SDK components
+// show client-side. Viewer-relative fields (a reaction's `reacted`, a poll's
+// `my_vote`) take their no-viewer values here; the components own the interactive,
+// signed-in view. The edge runtime mirrors this in attachCommunityRelations.
+func attachCommunityRelations(db *data.DB, record map[string]any) {
+	id, _ := record["id"].(string)
+	if id == "" {
+		return
+	}
+
+	// Approved comments, oldest first (always present, possibly empty).
+	if comments, err := db.ListCommentsByPost(id, false); err == nil {
+		record["comments"] = comments
+	}
+
+	// Reaction tallies (no server-side viewer → reacted is false).
+	if reactions, err := db.ReactionCounts("post", id, ""); err == nil {
+		record["reactions"] = reactions
+	}
+
+	// Poll declared in the post's front matter (data.poll.slug), if any. Resolving
+	// lazily creates the poll on first view — matching the SDK/REST path.
+	if slug := recordPollSlug(record); slug != "" {
+		if pollID, err := db.ResolvePollBySlug(slug); err == nil {
+			if poll, err := db.GetPoll(pollID, ""); err == nil {
+				record["poll"] = poll
+			}
+		}
+	}
+}
+
+// recordPollSlug extracts data.poll.slug from a record, or "" if absent.
+func recordPollSlug(record map[string]any) string {
+	data, _ := record["data"].(map[string]any)
+	poll, _ := data["poll"].(map[string]any)
+	slug, _ := poll["slug"].(string)
+	return slug
 }
