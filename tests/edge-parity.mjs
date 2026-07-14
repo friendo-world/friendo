@@ -124,12 +124,39 @@ function teardown() {
 }
 process.on("SIGINT", () => { teardown(); process.exit(130); });
 
+// renderCheck exercises the edge template engine end-to-end: a page with nested
+// same-tag loops + forloop + if, rendered from R2 templates over D1 data. Guards
+// the nesting/forloop fixes from silently regressing.
+async function renderCheck(apiBase, origin) {
+  const login = await fetch(apiBase + "/auth/login", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "owner@test.com", password: "password12345" }),
+  });
+  let cookie = "";
+  for (const sc of login.headers.getSetCookie?.() ?? []) {
+    const m = sc.match(/friendo_session=([^;]*)/); if (m) cookie = m[1];
+  }
+  const H = { "Content-Type": "application/json", Cookie: "friendo_session=" + cookie };
+  const tpl = `<!DOCTYPE html><body>{% for a in collections.rt %}[{{ forloop.Counter }}{% if forloop.First %}F{% endif %}:{% for b in collections.rt %}({{ forloop.Counter }}){% endfor %}]{% endfor %}</body>`;
+  await fetch(apiBase + "/push/templates", { method: "POST", headers: H, body: JSON.stringify({ files: [{ path: "pages/rendertest.html", content: tpl }] }) });
+  await fetch(apiBase + "/push/data", { method: "POST", headers: H, body: JSON.stringify({ records: [
+    { id: "rt1", collection: "rt", slug: "r1", title: "R1", status: "published", created: "2020-01-01T00:00:00Z" },
+    { id: "rt2", collection: "rt", slug: "r2", title: "R2", status: "published", created: "2020-01-02T00:00:00Z" },
+  ] }) });
+  const page = await (await fetch(origin + "/rendertest")).text();
+  const inner = (page.match(/\(1\)\(2\)\]/g) || []).length; // each outer item ran the full inner loop
+  if (!page.includes("[1F:") || inner !== 2) {
+    throw new Error(`render check: nested for/forloop not rendered as expected\ngot: ${page}`);
+  }
+}
+
 let failed = false;
 try {
   const base = `http://127.0.0.1:${PORT}/_/api`;
   await waitForReady(base + "/setup");
   await runScenarios(base);
-  console.log(`edge parity: PASS (${steps.length} steps)`);
+  await renderCheck(base, `http://127.0.0.1:${PORT}`);
+  console.log(`edge parity: PASS (${steps.length} steps + render)`);
 } catch (err) {
   failed = true;
   console.error("edge parity: FAIL");

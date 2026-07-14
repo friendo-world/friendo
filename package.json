@@ -6,6 +6,7 @@
     "admin": "cd admin && npm run build && node scripts/bundle-edge.mjs",
     "admin:dev": "cd admin && npm run dev",
     "sdk": "node sdk/scripts/bundle.mjs",
+    "check": "go vet ./... && go build ./... && npm test",
     "test": "npm run test:go && npm run test:edge",
     "test:go": "go test ./tests/",
     "test:edge": "node tests/edge-parity.mjs",

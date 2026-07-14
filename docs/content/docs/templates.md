@@ -65,10 +65,48 @@ A record's built-in fields are `id`, `slug`, `title`, `body`, `status`,
 `published_at`, `created`, `updated`. Any extra keys from a content file's front
 matter are available under `record.data` — e.g. `{{ record.data.weight }}`.
 
+## Control flow
+
+Both runtimes support the same tags, and they **nest** — a loop inside a loop, an
+`if` inside a loop, and so on:
+
+```html
+{% for post in collections.blog %}
+  <article>
+    <h2>{{ post.title }}</h2>
+    {% if post.status == "published" %}Live{% elif post.data.featured %}Featured{% else %}Draft{% endif %}
+  </article>
+{% empty %}
+  <p>No posts yet.</p>
+{% endfor %}
+```
+
+- `{% for x in list %}…{% empty %}…{% endfor %}` — the `{% empty %}` block renders
+  when the list is empty.
+- `{% if %}…{% elif %}…{% else %}…{% endif %}` — conditions support `and`, `or`,
+  `not`, comparisons (`==`, `!=`, `<`, `>`, `<=`, `>=`), and `in`.
+- `{% set name = value %}`, `{% include "partial.html" %}`, `{# comments #}`, and
+  `{% raw %}…{% endraw %}` (emit template syntax literally).
+
+### Loop variables
+
+Inside a `{% for %}`, `forloop` describes the iteration (these are the portable
+names — they work in both runtimes):
+
+| Variable | Value |
+|---|---|
+| `forloop.Counter` | 1-based index (1, 2, 3, …) |
+| `forloop.Counter0` | 0-based index (0, 1, 2, …) |
+| `forloop.Revcounter` | index counting down to 1 |
+| `forloop.Revcounter0` | index counting down to 0 |
+| `forloop.First` | `true` on the first item |
+| `forloop.Last` | `true` on the last item |
+
 ## Filters
 
 Filters transform values with `|`. Friendo adds these to the standard Pongo2/Jinja
-set (`truncate`, `upper`, `lower`, `date`, `default`, `length`, …):
+set (`truncatechars`, `truncatewords`, `upper`, `lower`, `title`, `capfirst`,
+`length`, `first`, `last`, `join`, `default`, `striptags`, `urlencode`, `safe`, …):
 
 | Filter | Example | Result |
 |---|---|---|

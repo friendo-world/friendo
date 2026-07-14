@@ -700,15 +700,24 @@ func handleVotePoll(db *data.DB, authFunc func(*http.Request) *data.User) http.H
 // sessionCookieName must match the cookie read by admin.GetSessionUser.
 const sessionCookieName = "friendo_session"
 
-func setSessionCookie(w http.ResponseWriter, token string) {
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/_/",
 		HttpOnly: true,
+		// Secure only over HTTPS — a Secure cookie isn't sent over plain http,
+		// which would break local `friendo serve` on http://localhost.
+		Secure:   requestIsHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   86400 * 7,
 	})
+}
+
+// requestIsHTTPS reports whether the request arrived over TLS (directly or via a
+// terminating proxy).
+func requestIsHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 func clearSessionCookie(w http.ResponseWriter) {
@@ -786,7 +795,7 @@ func handleLogin(db *data.DB) http.HandlerFunc {
 			return
 		}
 
-		setSessionCookie(w, token)
+		setSessionCookie(w, r, token)
 		jsonResponse(w, map[string]any{"user": userJSON(user)})
 	}
 }
@@ -1186,7 +1195,7 @@ func handleSetupCreate(db *data.DB) http.HandlerFunc {
 			return
 		}
 		if token, err := db.CreateSession(user.ID, r.RemoteAddr, r.UserAgent()); err == nil {
-			setSessionCookie(w, token)
+			setSessionCookie(w, r, token)
 		}
 		w.WriteHeader(http.StatusCreated)
 		jsonResponse(w, map[string]any{"user": userJSON(user)})
@@ -1353,7 +1362,7 @@ func handleVerifyCode(db *data.DB) http.HandlerFunc {
 			jsonError(w, "could not create session", http.StatusInternalServerError)
 			return
 		}
-		setSessionCookie(w, token)
+		setSessionCookie(w, r, token)
 		jsonResponse(w, map[string]any{"user": userJSON(user)})
 	}
 }

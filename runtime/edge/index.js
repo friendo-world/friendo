@@ -9,7 +9,6 @@
  */
 
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
 import { marked } from "marked";
 import { SPA_INDEX, SPA_ASSETS } from "./spa-bundle.js";
@@ -37,7 +36,9 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-app.use("/_/api/*", cors());
+// No CORS: the admin SPA and the friendo.js SDK are served same-origin, so the
+// API is same-origin only — matching the Go runtime (which sets no CORS either)
+// and avoiding a wildcard Access-Control-Allow-Origin on the edge.
 
 // The site ID for single-site mode. Self-hosters use a fixed value.
 const SITE_ID = "default";
@@ -83,7 +84,8 @@ async function createSiteSession(env, userId, ip, ua) {
 }
 
 function setSiteSessionCookie(token) {
-  return `${SITE_SESSION_COOKIE}=${token}; Path=/_/; HttpOnly; SameSite=Strict; Max-Age=${86400 * 7}`;
+  // Secure is safe here: Cloudflare Workers always serve over HTTPS.
+  return `${SITE_SESSION_COOKIE}=${token}; Path=/_/; HttpOnly; Secure; SameSite=Strict; Max-Age=${86400 * 7}`;
 }
 
 function getSiteId(c) {
@@ -1806,55 +1808,118 @@ function evalFiltered(expr, ctx) {
   return value instanceof SafeString ? value.val : value;
 }
 
-async function processForLoops(template, ctx, loader) {
-  const re = /\{%\s*for\s+(\w+)\s+in\s+(.+?)\s*%\}([\s\S]*?)\{%\s*endfor\s*%\}/g;
-  let match, result = "", lastIndex = 0;
-  while ((match = re.exec(template)) !== null) {
-    result += template.slice(lastIndex, match.index);
-    const [, varName, listExpr, body] = match;
-    const list = evalFiltered(listExpr.trim(), ctx);
-    const parts = body.split(/\{%\s*else\s*%\}/);
-    if (!Array.isArray(list) || list.length === 0) {
-      result += await renderString(parts[1] || "", ctx, loader);
+// findTagBlock finds the first top-level {% openTag … %}…{% endTag %} block in
+// `template`, respecting nested blocks of the same tag (so {% for %}{% for %}…
+// {% endfor %}{% endfor %} matches the OUTER endfor, not the inner one). Returns
+// { start, header, bodyStart, bodyEnd, end } or null.
+function findTagBlock(template, openTag, endTag) {
+  const tokenRe = new RegExp(`\\{%-?\\s*(${openTag}|${endTag})\\b[\\s\\S]*?%\\}`, "g");
+  let m, start = -1, headerEnd = -1, header = "", depth = 0;
+  while ((m = tokenRe.exec(template)) !== null) {
+    if (m[1] === openTag) {
+      if (depth === 0) { start = m.index; headerEnd = tokenRe.lastIndex; header = m[0]; }
+      depth++;
     } else {
-      for (let i = 0; i < list.length; i++) {
-        result += await renderString(parts[0], {
-          ...ctx, [varName]: list[i],
-          loop: { index: i + 1, index0: i, first: i === 0, last: i === list.length - 1, length: list.length },
-        }, loader);
+      depth--;
+      if (depth === 0) return { start, header, bodyStart: headerEnd, bodyEnd: m.index, end: tokenRe.lastIndex };
+    }
+  }
+  return null;
+}
+
+// splitTopLevelElse splits a for-body at its own {% else %} (the empty-clause),
+// ignoring any {% else %} that belongs to a nested if/for.
+function splitTopLevelElse(body) {
+  const re = /\{%-?\s*(for|endfor|if|endif|else)\b[\s\S]*?%\}/g;
+  let depth = 0, m;
+  while ((m = re.exec(body)) !== null) {
+    const t = m[1];
+    if (t === "for" || t === "if") depth++;
+    else if (t === "endfor" || t === "endif") depth--;
+    else if (t === "else" && depth === 0) return [body.slice(0, m.index), body.slice(re.lastIndex)];
+  }
+  return [body, ""];
+}
+
+async function processForLoops(template, ctx, loader) {
+  let result = "";
+  while (true) {
+    const blk = findTagBlock(template, "for", "endfor");
+    if (!blk) return result + template;
+    result += template.slice(0, blk.start);
+
+    const header = blk.header.replace(/^\{%-?\s*for\s+/, "").replace(/\s*%\}$/, "").trim();
+    const [loopBody, elseBody] = splitTopLevelElse(template.slice(blk.bodyStart, blk.bodyEnd));
+    const hm = header.match(/^(\w+)\s+in\s+([\s\S]+)$/);
+    if (hm) {
+      const varName = hm[1];
+      const list = evalFiltered(hm[2].trim(), ctx);
+      if (!Array.isArray(list) || list.length === 0) {
+        result += await renderString(elseBody, ctx, loader);
+      } else {
+        for (let i = 0; i < list.length; i++) {
+          result += await renderString(loopBody, {
+            ...ctx, [varName]: list[i],
+            // forloop.* mirrors Pongo2 exactly (Counter, Counter0, Revcounter,
+            // Revcounter0, First, Last) — the portable loop variables. loop.* is
+            // kept as an edge-only alias.
+            forloop: {
+              Counter: i + 1, Counter0: i,
+              Revcounter: list.length - i, Revcounter0: list.length - 1 - i,
+              First: i === 0, Last: i === list.length - 1,
+            },
+            loop: { index: i + 1, index0: i, first: i === 0, last: i === list.length - 1, length: list.length },
+          }, loader);
+        }
       }
     }
-    lastIndex = match.index + match[0].length;
+    template = template.slice(blk.end);
   }
-  return result + template.slice(lastIndex);
+}
+
+// splitIfBranches splits an if-body into its top-level if / elif / else branches,
+// ignoring elif/else that belong to nested blocks.
+function splitIfBranches(body) {
+  const re = /\{%-?\s*(for|endfor|if|endif|elif|else)\b([\s\S]*?)%\}/g;
+  let depth = 0, m;
+  const marks = [];
+  while ((m = re.exec(body)) !== null) {
+    const t = m[1];
+    if (t === "for" || t === "if") depth++;
+    else if (t === "endfor" || t === "endif") depth--;
+    else if ((t === "elif" || t === "else") && depth === 0) {
+      marks.push({ type: t, cond: t === "elif" ? m[2].trim() : null, start: m.index, end: re.lastIndex });
+    }
+  }
+  const ifContent = body.slice(0, marks.length ? marks[0].start : body.length);
+  const elifs = [];
+  let elseContent = null;
+  for (let i = 0; i < marks.length; i++) {
+    const content = body.slice(marks[i].end, i + 1 < marks.length ? marks[i + 1].start : body.length);
+    if (marks[i].type === "elif") elifs.push({ cond: marks[i].cond, content });
+    else elseContent = content;
+  }
+  return { ifContent, elifs, elseContent };
 }
 
 async function processIfs(template, ctx, loader) {
-  const re = /\{%\s*if\s+([\s\S]*?)\s*%\}([\s\S]*?)\{%\s*endif\s*%\}/g;
-  let match, result = "", lastIndex = 0;
-  while ((match = re.exec(template)) !== null) {
-    result += template.slice(lastIndex, match.index);
-    const [, condition, body] = match;
-    const allParts = body.split(/\{%\s*(?:elif\s+[\s\S]*?|else)\s*%\}/);
-    const conditions = [condition];
-    const elifRe = /\{%\s*elif\s+([\s\S]*?)\s*%\}/g;
-    let m;
-    while ((m = elifRe.exec(body)) !== null) conditions.push(m[1]);
-    const hasElse = /\{%\s*else\s*%\}/.test(body);
+  let result = "";
+  while (true) {
+    const blk = findTagBlock(template, "if", "endif");
+    if (!blk) return result + template;
+    result += template.slice(0, blk.start);
+
+    const condition = blk.header.replace(/^\{%-?\s*if\s+/, "").replace(/\s*%\}$/, "").trim();
+    const { ifContent, elifs, elseContent } = splitIfBranches(template.slice(blk.bodyStart, blk.bodyEnd));
+    const conds = [condition, ...elifs.map((e) => e.cond)];
+    const contents = [ifContent, ...elifs.map((e) => e.content)];
     let matched = false;
-    for (let i = 0; i < conditions.length; i++) {
-      if (evaluateCondition(conditions[i], ctx)) {
-        result += await renderString(allParts[i], ctx, loader);
-        matched = true;
-        break;
-      }
+    for (let i = 0; i < conds.length; i++) {
+      if (evaluateCondition(conds[i], ctx)) { result += await renderString(contents[i], ctx, loader); matched = true; break; }
     }
-    if (!matched && hasElse && allParts.length > conditions.length) {
-      result += await renderString(allParts[allParts.length - 1], ctx, loader);
-    }
-    lastIndex = match.index + match[0].length;
+    if (!matched && elseContent !== null) result += await renderString(elseContent, ctx, loader);
+    template = template.slice(blk.end);
   }
-  return result + template.slice(lastIndex);
 }
 
 function evaluateCondition(expr, ctx) {
@@ -1945,10 +2010,14 @@ function applyFilter(name, value, arg) {
     }
     case "upper": return s().toUpperCase();
     case "lower": return s().toLowerCase();
+    // capfirst is the Pongo2/Django name; capitalize is kept as an edge alias.
+    case "capfirst":
     case "capitalize": return s().charAt(0).toUpperCase() + s().slice(1);
     case "title": return s().replace(/\b\w/g, (c) => c.toUpperCase());
     case "trim": return s().trim();
     case "striptags": return s().replace(/<[^>]*>/g, "");
+    // truncatechars is the Pongo2 name; truncate is kept as an edge alias.
+    case "truncatechars":
     case "truncate": { const len = parseInt(arg) || 200; return s().length > len ? s().slice(0, len) + "..." : s(); }
     case "truncatewords": { const count = parseInt(arg) || 20; const words = s().split(/\s+/); return words.length > count ? words.slice(0, count).join(" ") + "..." : s(); }
     case "length": return Array.isArray(value) ? value.length : s().length;
@@ -2017,5 +2086,9 @@ function resizeQuery(spec) {
 
 function escapeHtml(str) {
   if (!str) return "";
-  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  // Escapes the same five characters Pongo2 does (including the single quote),
+  // so record data inside single-quoted attributes can't break out on the edge.
+  return String(str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }

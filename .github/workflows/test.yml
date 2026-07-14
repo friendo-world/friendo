@@ -1,0 +1,51 @@
+name: test
+
+# Runs the parity harness (both runtimes) + build/vet on every PR and push to
+# main, so the "one UI, two runtimes, identical behavior" invariant is enforced
+# before anything merges — not just at release time.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./tests/ # Go-side parity harness
+
+  edge-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd runtime/edge && npm install
+      - run: node tests/edge-parity.mjs # boots wrangler, drives scenarios.json
+
+  bundles-current:
+    # The admin SPA + friendo.js SDK are committed (served byte-for-byte by both
+    # runtimes). Fail if the committed bundles are stale vs the source.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd admin && npm install
+      - run: npm run admin && npm run sdk
+      - name: committed bundles must be current
+        run: |
+          if ! git diff --quiet -- runtime/go/admin/spa runtime/edge/spa-bundle.js runtime/go/sdk runtime/edge/sdk-bundle.js; then
+            echo "::error::Committed SPA/SDK bundles are stale. Run 'npm run admin && npm run sdk' and commit."
+            git --no-pager diff --stat -- runtime/go/admin/spa runtime/edge/spa-bundle.js runtime/go/sdk runtime/edge/sdk-bundle.js
+            exit 1
+          fi
