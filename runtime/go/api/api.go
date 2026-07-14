@@ -55,6 +55,12 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/polls/{id}", handleGetPoll(db, authFunc))
 		r.Post("/polls/{id}/vote", handleVotePoll(db, authFunc))
 
+		// Locations (geo-tagging): public reads; editor+ attaches/removes.
+		r.Get("/locations", handleListLocations(db))
+
+		// Files (per-record media): public reads; contributor+ uploads/removes.
+		r.Get("/files", handleListFiles(db))
+
 		// Content — contributor+ (holds content.create). The handlers scope to the
 		// actor's own posts unless they also hold content.edit.any.
 		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db)))
@@ -78,6 +84,15 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 
 		// Poll creation — editor+ (content.edit.any).
 		r.Post("/polls", capGate(authFunc, data.CapContentEditAny, handleCreatePoll(db)))
+
+		// Location tagging — editor+ (content.edit.any).
+		r.Post("/locations", capGate(authFunc, data.CapContentEditAny, handleCreateLocation(db)))
+		r.Delete("/locations/{id}", capGate(authFunc, data.CapContentEditAny, handleDeleteLocation(db)))
+
+		// Media upload — contributor+ (content.create). Bytes land in assets/ and
+		// are served by the static /assets/* handler; the row links them to a record.
+		r.Post("/files", capGate(authFunc, data.CapContentCreate, handleUploadFile(db, siteDir)))
+		r.Delete("/files/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteFile(db, siteDir)))
 
 		// Channel management — admin+ (site.configure); posting is member-gated above.
 		r.Post("/channels", capGate(authFunc, data.CapSiteConfigure, handleCreateChannel(db)))
@@ -588,6 +603,195 @@ func handleToggleReaction(db *data.DB, authFunc func(*http.Request) *data.User) 
 		}
 		reactions, _ := db.ReactionCounts(in.TargetType, in.TargetID, authorID)
 		jsonResponse(w, map[string]any{"reacted": reacted, "reactions": reactions})
+	}
+}
+
+// --- Locations (geo-tagging) ---
+
+// handleListLocations returns the locations attached to a target (public).
+func handleListLocations(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		targetType := r.URL.Query().Get("target_type")
+		targetID := r.URL.Query().Get("target_id")
+		if targetType == "" || targetID == "" {
+			jsonError(w, "target_type and target_id are required", http.StatusBadRequest)
+			return
+		}
+		locations, err := db.ListLocations(targetType, targetID)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"locations": locations})
+	}
+}
+
+// handleCreateLocation attaches a location to a target (editor+).
+func handleCreateLocation(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			TargetType string  `json:"target_type"`
+			TargetID   string  `json:"target_id"`
+			Lat        float64 `json:"lat"`
+			Lng        float64 `json:"lng"`
+			Label      string  `json:"label"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if in.TargetType == "" || in.TargetID == "" {
+			jsonError(w, "target_type and target_id are required", http.StatusBadRequest)
+			return
+		}
+		if in.Lat < -90 || in.Lat > 90 || in.Lng < -180 || in.Lng > 180 {
+			jsonError(w, "lat/lng out of range", http.StatusBadRequest)
+			return
+		}
+		id, err := db.CreateLocation(in.TargetType, in.TargetID, in.Lat, in.Lng, in.Label)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		location, _ := db.GetLocation(id)
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"location": location})
+	}
+}
+
+// handleDeleteLocation removes a location (editor+).
+func handleDeleteLocation(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := db.DeleteLocation(chi.URLParam(r, "id"))
+		if err == sql.ErrNoRows {
+			jsonError(w, "location not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// --- Files (per-record media) ---
+
+// extForMime maps an image content-type to a file extension, so uploads keep a
+// sensible extension even when the client omits a filename.
+func extForMime(mime string) string {
+	switch mime {
+	case "image/png":
+		return ".png"
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/svg+xml":
+		return ".svg"
+	default:
+		return ""
+	}
+}
+
+// handleListFiles returns the media attached to a record (public — URLs are public).
+func handleListFiles(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		recordType := r.URL.Query().Get("record_type")
+		recordID := r.URL.Query().Get("record_id")
+		if recordType == "" || recordID == "" {
+			jsonError(w, "record_type and record_id are required", http.StatusBadRequest)
+			return
+		}
+		files, err := db.ListFiles(recordType, recordID)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"files": files})
+	}
+}
+
+// handleUploadFile accepts a multipart image upload and links it to a record
+// (contributor+). The bytes land in the site's assets/ dir so the existing
+// /assets/* static handler serves them; the edge runtime stores the same key in R2.
+func handleUploadFile(db *data.DB, siteDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			jsonError(w, "expected a multipart form upload", http.StatusBadRequest)
+			return
+		}
+		recordType := r.FormValue("record_type")
+		recordID := r.FormValue("record_id")
+		if recordType == "" || recordID == "" {
+			jsonError(w, "record_type and record_id are required", http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			jsonError(w, "a file field is required", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		mime := header.Header.Get("Content-Type")
+		if !strings.HasPrefix(mime, "image/") {
+			jsonError(w, "only image uploads are supported", http.StatusBadRequest)
+			return
+		}
+		ext := strings.ToLower(filepath.Ext(header.Filename))
+		if ext == "" {
+			ext = extForMime(mime)
+		}
+		id := data.GenerateID()
+		key := "assets/uploads/" + id + ext
+
+		fullPath := filepath.Join(siteDir, filepath.FromSlash(key))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			jsonError(w, fmt.Sprintf("storage error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		dst, err := os.Create(fullPath)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("storage error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		size, err := io.Copy(dst, io.LimitReader(file, 10<<20))
+		dst.Close()
+		if err != nil {
+			os.Remove(fullPath)
+			jsonError(w, fmt.Sprintf("storage error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if _, err := db.CreateFileWithID(id, recordType, recordID, r.FormValue("field"), key, mime, size); err != nil {
+			os.Remove(fullPath)
+			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		out, _ := db.GetFile(id)
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"file": out})
+	}
+}
+
+// handleDeleteFile removes a file row and the stored object (contributor+).
+func handleDeleteFile(db *data.DB, siteDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key, err := db.DeleteFile(chi.URLParam(r, "id"))
+		if err == sql.ErrNoRows {
+			jsonError(w, "file not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		// Best-effort removal of the stored object; the DB row is the source of truth.
+		os.Remove(filepath.Join(siteDir, filepath.FromSlash(key)))
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

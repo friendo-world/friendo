@@ -32,8 +32,12 @@ There are two runtimes that implement it:
 |---|---|---|
 | Runs as | A single Go binary (`friendo serve`), e.g. on a VPS | A Cloudflare Worker (Hono app) |
 | Data | SQLite (`modernc.org/sqlite`, no CGO) | D1 |
-| Assets | `assets/` on disk | R2 |
+| Assets | `assets/` on disk (uploads land in `assets/uploads/`) | R2 (same key layout) |
 | Templates | [Pongo2](https://github.com/flosch/pongo2) (Jinja2) | a custom Jinja2-compatible engine (no `eval`, Workers-safe) |
+| Realtime | in-process message hub (SSE) | a `ChannelStream` Durable Object (SSE) |
+
+The client transport is identical either way — `<friendo-channel>` opens one
+`EventSource` on `/channels/:id/stream` and new messages stream in live.
 
 **Common schema.** Both use identical table definitions (`posts`, `comments`,
 `reactions`, `channels`, `messages`, `polls`, `poll_votes`, `authors`,
@@ -63,13 +67,21 @@ Both runtimes implement the same endpoints. Most require site admin auth (a
 `friendo_session` cookie); the bootstrap endpoints are public so the SPA and CLI
 can start cold.
 
-| Area | Endpoints | Auth |
+Access is **capability-based**, not a fixed admin gate (see *Auth model* below):
+each route requires a capability, and content/comment routes additionally scope to
+the actor's *own* rows unless they hold the `.any` variant.
+
+| Area | Endpoints | Capability |
 |---|---|---|
 | Bootstrap | `GET /me`, `POST /auth/login`, `POST /auth/logout`, `GET/POST /setup`, `POST /migrate`, `POST /auth/request-code`, `POST /auth/verify-code` | public |
-| Content | `GET /collections`, CRUD under `/collections/:c/records` and `/records/:id` | admin+ |
-| Users | `GET/POST /users`, `PUT/DELETE /users/:id` (role rules enforced) | admin+ |
-| Settings | `GET /settings` | admin+ |
-| Sync | `POST /push/{templates,assets,data,users}`, `GET /pull/{data,users}` | admin+ |
+| Content | `GET /collections`, CRUD under `/collections/:c/records` and `/records/:id`; `GET /records`, `PUT /records/:id/status` (review queue) | `content.create` (own); `content.edit.any` / `content.publish` for others' posts + publishing |
+| Community | `GET/POST /posts/:id/comments`, `PUT/DELETE /comments/:id` (moderation); `POST/DELETE /reactions`; `GET/POST /polls`, `POST /polls/:id/vote` | authenticated baseline (comment/react/vote); `comment.moderate.own/any` to moderate; `content.edit.any` to author a poll |
+| Channels (realtime) | `GET/POST /channels`, `DELETE /channels/:id`; `GET/POST /channels/:id/messages`, `DELETE /messages/:id`; `GET /channels/:id/stream` (SSE) | read/post = authenticated member; channel mgmt = `site.configure` |
+| Locations | `GET /locations` (public); `POST /locations`, `DELETE /locations/:id` | read public; write = `content.edit.any` |
+| Media | `GET /files` (public); `POST /files` (multipart image → `assets/`), `DELETE /files/:id` | read public; write = `content.create` |
+| Users | `GET/POST /users`, `PUT/DELETE /users/:id` (role rules + last-owner guard) | `user.manage`; granting admin/owner needs `site.own` |
+| Settings | `GET/PUT /settings` (site name + `access.*` / `content.require_approval` policy) | `site.configure` |
+| Sync | `POST /push/{templates,assets,data,users}`, `GET /pull/{data,users}` | `site.configure` |
 
 ## Deploy, push, pull
 

@@ -698,6 +698,155 @@ func (db *DB) DeleteComment(id string) error {
 	return nil
 }
 
+// --- Files (per-record media) ---
+
+// CreateFile records an uploaded file linked to a record, returning its id.
+func (db *DB) CreateFile(recordType, recordID, field, r2Key, mime string, size int64) (string, error) {
+	return db.CreateFileWithID(GenerateID(), recordType, recordID, field, r2Key, mime, size)
+}
+
+// CreateFileWithID is CreateFile with a caller-supplied id, used when the id is
+// needed up front (e.g. to name the stored object before the row is written).
+func (db *DB) CreateFileWithID(id, recordType, recordID, field, r2Key, mime string, size int64) (string, error) {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO files (id, site_id, record_type, record_id, field, r2_key, mime, size, created)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, recordType, recordID, field, r2Key, mime, size, now,
+	)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func fileJSON(id, recordType, recordID, field, r2Key, mime string, size int64, created string) map[string]any {
+	return map[string]any{
+		"id": id, "record_type": recordType, "record_id": recordID, "field": field,
+		"url": "/" + r2Key, "r2_key": r2Key, "mime": mime, "size": size, "created": created,
+	}
+}
+
+// ListFiles returns the files attached to a record (public — URLs are public).
+func (db *DB) ListFiles(recordType, recordID string) ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT id, record_type, record_id, field, r2_key, mime, size, created
+		 FROM files WHERE site_id = ? AND record_type = ? AND record_id = ? ORDER BY created`,
+		db.SiteID, recordType, recordID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, rt, rid, field, key, mime, created string
+		var size int64
+		if err := rows.Scan(&id, &rt, &rid, &field, &key, &mime, &size, &created); err != nil {
+			return nil, err
+		}
+		out = append(out, fileJSON(id, rt, rid, field, key, mime, size, created))
+	}
+	return out, rows.Err()
+}
+
+// GetFile returns a single file's r2_key (and metadata), or sql.ErrNoRows.
+func (db *DB) GetFile(id string) (map[string]any, error) {
+	var rt, rid, field, key, mime, created string
+	var size int64
+	err := db.Conn.QueryRow(
+		`SELECT record_type, record_id, field, r2_key, mime, size, created FROM files WHERE id = ? AND site_id = ?`,
+		id, db.SiteID,
+	).Scan(&rt, &rid, &field, &key, &mime, &size, &created)
+	if err != nil {
+		return nil, err
+	}
+	return fileJSON(id, rt, rid, field, key, mime, size, created), nil
+}
+
+// DeleteFile removes a file row and returns its r2_key so the caller can delete
+// the stored object.
+func (db *DB) DeleteFile(id string) (string, error) {
+	var key string
+	if err := db.Conn.QueryRow(`SELECT r2_key FROM files WHERE id = ? AND site_id = ?`, id, db.SiteID).Scan(&key); err != nil {
+		return "", err
+	}
+	_, err := db.Conn.Exec(`DELETE FROM files WHERE id = ? AND site_id = ?`, id, db.SiteID)
+	return key, err
+}
+
+// --- Locations (geo-tagging) ---
+
+// ListLocations returns the locations attached to a target (public).
+func (db *DB) ListLocations(targetType, targetID string) ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT id, target_type, target_id, lat, lng, label, created
+		 FROM locations WHERE site_id = ? AND target_type = ? AND target_id = ? ORDER BY created`,
+		db.SiteID, targetType, targetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, tt, tid, label, created string
+		var lat, lng float64
+		if err := rows.Scan(&id, &tt, &tid, &lat, &lng, &label, &created); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": id, "target_type": tt, "target_id": tid,
+			"lat": lat, "lng": lng, "label": label, "created": created,
+		})
+	}
+	return out, rows.Err()
+}
+
+// CreateLocation attaches a location to a target and returns its id.
+func (db *DB) CreateLocation(targetType, targetID string, lat, lng float64, label string) (string, error) {
+	id := GenerateID()
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO locations (id, site_id, target_type, target_id, lat, lng, label, created)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, targetType, targetID, lat, lng, label, now,
+	)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// GetLocation returns a single location by id, or sql.ErrNoRows.
+func (db *DB) GetLocation(id string) (map[string]any, error) {
+	var tt, tid, label, created string
+	var lat, lng float64
+	err := db.Conn.QueryRow(
+		`SELECT target_type, target_id, lat, lng, label, created FROM locations WHERE id = ? AND site_id = ?`,
+		id, db.SiteID,
+	).Scan(&tt, &tid, &lat, &lng, &label, &created)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"id": id, "target_type": tt, "target_id": tid,
+		"lat": lat, "lng": lng, "label": label, "created": created,
+	}, nil
+}
+
+// DeleteLocation removes a location by id.
+func (db *DB) DeleteLocation(id string) error {
+	res, err := db.Conn.Exec(`DELETE FROM locations WHERE id = ? AND site_id = ?`, id, db.SiteID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // --- Channels & messages (community feed) ---
 
 // ListChannels returns the site's channels (public).

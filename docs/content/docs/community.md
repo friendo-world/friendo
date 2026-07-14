@@ -148,6 +148,45 @@ curl -X POST https://yoursite.example/_/api/polls \
 <friendo-poll poll-id="THE_RETURNED_ID"></friendo-poll>
 ```
 
+## Uploading images
+
+Attach an image to any record (a post, a page — anything with an id) through the
+media API. Editors and contributors (anyone who can create content) may upload;
+the file is stored in your site's `assets/` folder and served from `/assets/`,
+exactly the same locally and on a deployed site.
+
+```bash
+curl -X POST https://yoursite.example/_/api/files \
+  --cookie 'friendo_session=…' \
+  -F record_type=post -F record_id=<post id> -F field=cover \
+  -F file=@photo.jpg
+```
+
+The response includes a public `url` you can drop straight into a template or a
+post body:
+
+```json
+{ "file": { "id": "…", "url": "/assets/uploads/….jpg", "mime": "image/jpeg", "size": 20481 } }
+```
+
+List a record's images with `GET /_/api/files?record_type=post&record_id=<id>`
+(public), and remove one with `DELETE /_/api/files/<file id>`. Only images are
+accepted, up to 10 MB.
+
+## Tagging a location
+
+Pin a latitude/longitude to any record — useful for event maps or "where this was
+taken." Reads are public; attaching or removing a pin is an editor task.
+
+```bash
+curl -X POST https://yoursite.example/_/api/locations \
+  --cookie 'friendo_session=…' -H 'Content-Type: application/json' \
+  -d '{"target_type":"post","target_id":"<post id>","lat":40.7128,"lng":-74.006,"label":"NYC"}'
+```
+
+Fetch them with `GET /_/api/locations?target_type=post&target_id=<id>` (public)
+and remove one with `DELETE /_/api/locations/<location id>`.
+
 ## Sending email
 
 Until an email provider is configured, `<friendo-auth>` shows the sign-in code in

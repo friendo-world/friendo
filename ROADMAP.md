@@ -145,6 +145,20 @@ D1's per-account cap from 10 to 50,000.)
 
 ## Recently shipped
 
+- **v0.2 release hardening (Tier 0–2)** — the sequenced audit work toward the 0.2
+  tag. **Security:** OTP echo gated behind an explicit dev flag + per-site email in
+  provisioning; login/comment rate limiting. **Correctness:** `authors` +
+  `site_settings` now sync; static export is published-only; the bundle scrubs
+  `data/`. **Parity:** the edge template engine aligned to Pongo2 (nesting,
+  `forloop.*`, filters, `'` escaping) with a CI render smoke; CORS removed +
+  `Secure` cookies; CI runs both parity suites + a bundle-currency check on every
+  PR. **Coherence:** provisioning idempotency; the once-dead `channels` /
+  `messages` / `locations` / `files` tables are now wired in both runtimes —
+  **channels are a realtime feed** (SSE via a Go in-process hub / an edge
+  `ChannelStream` Durable Object), **locations** are geo-tags, and **media upload**
+  attaches per-record images (multipart → `assets/` on disk / R2). Parity harness
+  now 152 steps + render smoke; media covered by a dual-runtime e2e. Roadmap +
+  status: [design/v0.2-roadmap.md](design/v0.2-roadmap.md).
 - **Auth & permissions redesign (toward 0.2)** — capability-based roles (owner >
   admin > editor > contributor > member) with an **ownership axis** (`edit.own` vs
   `edit.any`), so contributors edit only their own posts and authors moderate
@@ -152,7 +166,7 @@ D1's per-account cap from 10 to 50,000.)
   **last-owner guard** (migration `0008`); per-site access presets (Personal /
   Community / Blog) backed by `access.*` + `content.require_approval` settings; a
   post-approval workflow; and a published-only public render path. Both runtimes at
-  parity (109 test steps). Design: [design/auth-permissions.md](design/auth-permissions.md).
+  parity. Design: [design/auth-permissions.md](design/auth-permissions.md).
 - **File-based `content/` authoring** — Hugo-style markdown → DB, with a `data`
   JSON column for arbitrary front matter, `friendo build`, serve/push integration,
   and a `sort_by` filter. See [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -169,5 +183,11 @@ D1's per-account cap from 10 to 50,000.)
   platform has no admin scope yet) or a script iterating owned sites.
 - **Customer custom domains** (`friendo.toml deploy.domain` → a user's own
   domain, e.g. Cloudflare for SaaS) aren't wired up yet.
+- **Media sync.** Per-record image *upload* ships (`POST /_/api/files`), but two
+  sync gaps remain before deployed sites see uploaded media: `files` rows don't
+  travel with `push`/`pull`, and the asset push serializes content as a UTF-8
+  string, so binary images don't round-trip. Nothing reads `/files` live in 0.2
+  (galleries deferred), so it's a pre-tag decision, not a blocker. Details:
+  [design/v0.2-roadmap.md](design/v0.2-roadmap.md) → *After Tier 2*.
 - **Image galleries / page bundles** (folder of images + `index.md`) are the
-  planned phase 2 of file-based content — needs a binary-safe asset push.
+  planned phase 2 of file-based content — needs the binary-safe asset push above.

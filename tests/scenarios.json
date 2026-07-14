@@ -738,6 +738,62 @@
   },
 
   {
+    "name": "an editor attaches a location to a target",
+    "method": "POST", "path": "/locations",
+    "body": { "target_type": "post", "target_id": "p1", "lat": 40.5, "lng": -74.25, "label": "NYC" },
+    "expect": { "status": 201, "json": { "location.label": "NYC", "location.lat": 40.5 } },
+    "capture": { "locationId": "location.id" }
+  },
+  {
+    "name": "locations are listed for a target",
+    "method": "GET", "path": "/locations?target_type=post&target_id=p1",
+    "expect": { "status": 200, "length": { "locations": 1 }, "json": { "locations.0.id": "${locationId}", "locations.0.label": "NYC" } }
+  },
+  {
+    "name": "listing locations needs a target",
+    "method": "GET", "path": "/locations",
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "out-of-range coordinates are rejected",
+    "method": "POST", "path": "/locations",
+    "body": { "target_type": "post", "target_id": "p1", "lat": 200, "lng": 0 },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "a contributor cannot attach a location",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "contrib2@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "location tagging is editor+ only",
+    "method": "POST", "path": "/locations",
+    "body": { "target_type": "post", "target_id": "p1", "lat": 0, "lng": 0 },
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "admin logs back in after the location checks",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "delete the location",
+    "method": "DELETE", "path": "/locations/${locationId}",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "listing files needs a record",
+    "method": "GET", "path": "/files",
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "a record with no media lists no files",
+    "method": "GET", "path": "/files?record_type=post&record_id=p1",
+    "expect": { "status": 200, "length": { "files": 0 } }
+  },
+  {
     "name": "an admin creates a channel",
     "method": "POST", "path": "/channels",
     "body": { "name": "General", "kind": "feed" },

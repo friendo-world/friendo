@@ -987,6 +987,124 @@ app.post("/_/api/reactions", async (c) => {
   return c.json({ reacted, reactions });
 });
 
+// --- Files (per-record media) ---
+
+function extForMime(mime) {
+  switch (mime) {
+    case "image/png": return ".png";
+    case "image/jpeg": case "image/jpg": return ".jpg";
+    case "image/gif": return ".gif";
+    case "image/webp": return ".webp";
+    case "image/svg+xml": return ".svg";
+    default: return "";
+  }
+}
+
+function fileExt(name) {
+  const i = name.lastIndexOf(".");
+  return i >= 0 ? name.slice(i).toLowerCase() : "";
+}
+
+// Public: media attached to a record (URLs are public).
+app.get("/_/api/files", async (c) => {
+  const siteId = getSiteId(c);
+  const recordType = c.req.query("record_type") || "";
+  const recordId = c.req.query("record_id") || "";
+  if (!recordType || !recordId) return c.json({ error: "record_type and record_id are required" }, 400);
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, record_type, record_id, field, r2_key, mime, size, created
+     FROM files WHERE site_id = ? AND record_type = ? AND record_id = ? ORDER BY created`
+  ).bind(siteId, recordType, recordId).all();
+  const files = (results || []).map((f) => ({ ...f, url: "/" + f.r2_key }));
+  return c.json({ files });
+});
+
+// Contributor+ (content.create): upload an image and link it to a record. The
+// bytes go to R2 under the same assets/ key the Go runtime writes to disk, so
+// the shared /assets/* handler serves them identically.
+app.post("/_/api/files", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.contentCreate);
+  if (deny) return deny;
+  let form;
+  try { form = await c.req.parseBody(); } catch { return c.json({ error: "expected a multipart form upload" }, 400); }
+  const recordType = form.record_type || "";
+  const recordId = form.record_id || "";
+  if (!recordType || !recordId) return c.json({ error: "record_type and record_id are required" }, 400);
+  const file = form.file;
+  if (!file || typeof file === "string") return c.json({ error: "a file field is required" }, 400);
+  const mime = file.type || "";
+  if (!mime.startsWith("image/")) return c.json({ error: "only image uploads are supported" }, 400);
+
+  const ext = fileExt(file.name || "") || extForMime(mime);
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const key = "assets/uploads/" + id + ext;
+  const bytes = await file.arrayBuffer();
+  await c.env.ASSETS.put(`sites/${auth.siteId}/${key}`, bytes, { httpMetadata: { contentType: mime } });
+  await c.env.DB.prepare(
+    "INSERT INTO files (id, site_id, record_type, record_id, field, r2_key, mime, size, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(id, auth.siteId, recordType, recordId, form.field || "", key, mime, bytes.byteLength, nowISO()).run();
+  const row = await c.env.DB.prepare(
+    "SELECT id, record_type, record_id, field, r2_key, mime, size, created FROM files WHERE id = ? AND site_id = ?"
+  ).bind(id, auth.siteId).first();
+  return c.json({ file: { ...row, url: "/" + row.r2_key } }, 201);
+});
+
+// Contributor+: remove a file row and its stored object.
+app.delete("/_/api/files/:id", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.contentCreate);
+  if (deny) return deny;
+  const row = await c.env.DB.prepare("SELECT r2_key FROM files WHERE id = ? AND site_id = ?")
+    .bind(c.req.param("id"), auth.siteId).first();
+  if (!row) return c.json({ error: "file not found" }, 404);
+  await c.env.ASSETS.delete(`sites/${auth.siteId}/${row.r2_key}`);
+  await c.env.DB.prepare("DELETE FROM files WHERE id = ? AND site_id = ?").bind(c.req.param("id"), auth.siteId).run();
+  return c.body(null, 204);
+});
+
+// --- Locations (geo-tagging) ---
+
+// Public: locations attached to a target.
+app.get("/_/api/locations", async (c) => {
+  const siteId = getSiteId(c);
+  const targetType = c.req.query("target_type") || "";
+  const targetId = c.req.query("target_id") || "";
+  if (!targetType || !targetId) return c.json({ error: "target_type and target_id are required" }, 400);
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, target_type, target_id, lat, lng, label, created
+     FROM locations WHERE site_id = ? AND target_type = ? AND target_id = ? ORDER BY created`
+  ).bind(siteId, targetType, targetId).all();
+  return c.json({ locations: results || [] });
+});
+
+// Editor+ (content.edit.any): attach a location to a target.
+app.post("/_/api/locations", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.contentEditAny);
+  if (deny) return deny;
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
+  if (!body.target_type || !body.target_id) return c.json({ error: "target_type and target_id are required" }, 400);
+  const lat = Number(body.lat), lng = Number(body.lng);
+  if (!(lat >= -90 && lat <= 90) || !(lng >= -180 && lng <= 180)) return c.json({ error: "lat/lng out of range" }, 400);
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  await c.env.DB.prepare(
+    "INSERT INTO locations (id, site_id, target_type, target_id, lat, lng, label, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(id, auth.siteId, body.target_type, body.target_id, lat, lng, body.label || "", nowISO()).run();
+  const location = await c.env.DB.prepare(
+    "SELECT id, target_type, target_id, lat, lng, label, created FROM locations WHERE id = ? AND site_id = ?"
+  ).bind(id, auth.siteId).first();
+  return c.json({ location }, 201);
+});
+
+// Editor+: remove a location.
+app.delete("/_/api/locations/:id", async (c) => {
+  const { auth, deny } = await requireCapability(c, CAP.contentEditAny);
+  if (deny) return deny;
+  const res = await c.env.DB.prepare("DELETE FROM locations WHERE id = ? AND site_id = ?")
+    .bind(c.req.param("id"), auth.siteId).run();
+  if (!res.meta.changes) return c.json({ error: "location not found" }, 404);
+  return c.body(null, 204);
+});
+
 // --- Channels & messages (community feed) ---
 
 const MESSAGE_SELECT = `SELECT m.id, m.channel_id, m.parent_id, m.author_id, m.body, m.created,

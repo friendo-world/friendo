@@ -105,4 +105,4 @@ friendo-reactions::part(button)[aria-pressed="true"] { background: #e8f0ff; }
   per-member comment-rate limiting.
 
 Each slice extends `tests/scenarios.json`, keeping Go/edge parity enforced (now
-63 steps).
+152 steps + a render smoke, run against both runtimes on every PR).
