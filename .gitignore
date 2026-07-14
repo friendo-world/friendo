@@ -20,6 +20,10 @@ world/.wrangler/
 *.db-wal
 *.db-shm
 
+# Page-bundle gallery mirror (regenerated from content/ on every build; the
+# images under content/<collection>/<slug>/ are the source of truth)
+**/assets/galleries/
+
 # Dist output
 dist/
 

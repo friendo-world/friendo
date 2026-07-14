@@ -815,6 +815,48 @@ func (db *DB) DeleteFile(id string) (string, error) {
 	return key, err
 }
 
+// ListFilesByField returns a record's files with a given field (e.g. "gallery"),
+// oldest first — the render helper behind record.gallery.
+func (db *DB) ListFilesByField(recordType, recordID, field string) ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT id, record_type, record_id, field, r2_key, mime, size, created
+		 FROM files WHERE site_id = ? AND record_type = ? AND record_id = ? AND field = ? ORDER BY created`,
+		db.SiteID, recordType, recordID, field,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, rt, rid, f, key, mime, created string
+		var size int64
+		if err := rows.Scan(&id, &rt, &rid, &f, &key, &mime, &size, &created); err != nil {
+			return nil, err
+		}
+		out = append(out, fileJSON(id, rt, rid, f, key, mime, size, created))
+	}
+	return out, rows.Err()
+}
+
+// DeleteFilesByField removes all of a record's files with the given field. Used by
+// content import to reconcile a page bundle's gallery before re-importing it.
+func (db *DB) DeleteFilesByField(recordType, recordID, field string) error {
+	_, err := db.Conn.Exec(
+		`DELETE FROM files WHERE site_id = ? AND record_type = ? AND record_id = ? AND field = ?`,
+		db.SiteID, recordType, recordID, field,
+	)
+	return err
+}
+
+// DeterministicFileID derives a stable file id from a record id and a source name,
+// mirroring contentID for records. Same (record, name) → same id across builds and
+// machines, so re-import and re-push upsert in place instead of duplicating.
+func DeterministicFileID(recordID, name string) string {
+	sum := sha256.Sum256([]byte(recordID + "\n" + name))
+	return hex.EncodeToString(sum[:])[:24]
+}
+
 // --- Locations (geo-tagging) ---
 
 // ListLocations returns the locations attached to a target (public).

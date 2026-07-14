@@ -13,6 +13,7 @@ package content
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -141,15 +142,108 @@ func Import(siteDir string, db *data.DB) (*Result, error) {
 			}
 		}
 
-		if _, err := db.UpsertRecordBySlug(collection, slug, title, body, status, publishedAt, dataJSON); err != nil {
+		recordID, err := db.UpsertRecordBySlug(collection, slug, title, body, status, publishedAt, dataJSON)
+		if err != nil {
 			res.warn("%s → %s/%s: %v", rel, collection, slug, err)
 			continue
 		}
 		res.Imported++
 		res.ByCollection[collection]++
+
+		// Page bundle (content/<collection>/<slug>/index.md): sibling images become
+		// the post's gallery (record.gallery), attached as field="gallery" files.
+		if strings.EqualFold(filepath.Base(path), "index.md") {
+			importGallery(siteDir, db, res, collection, slug, recordID, filepath.Dir(path))
+		}
 	}
 
 	return res, nil
+}
+
+// galleryExts are the image extensions a page bundle contributes to record.gallery.
+var galleryExts = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+}
+
+// importGallery copies a page bundle's sibling images into the site's assets/ tree
+// (so the existing static handler serves them and push syncs them) and attaches a
+// field="gallery" file row per image to the post. It reconciles: the managed asset
+// dir and the post's gallery rows are cleared and rebuilt from the current folder,
+// so removing an image from the bundle removes it on the next build. Ids are
+// deterministic, so re-import and re-push upsert in place. Per-image failures are
+// warnings, not fatal.
+func importGallery(siteDir string, db *data.DB, res *Result, collection, slug, recordID, bundleDir string) {
+	entries, err := os.ReadDir(bundleDir)
+	if err != nil {
+		res.warn("%s/%s gallery: %v", collection, slug, err)
+		return
+	}
+
+	// Collect images in a stable order so `created` ordering is deterministic.
+	var images []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if _, ok := galleryExts[strings.ToLower(filepath.Ext(e.Name()))]; ok {
+			images = append(images, e.Name())
+		}
+	}
+	sort.Strings(images)
+
+	// Reconcile: clear the managed asset dir and this post's gallery rows, then
+	// rebuild from the current folder.
+	assetDir := filepath.Join("assets", "galleries", collection, slug)
+	destDir := filepath.Join(siteDir, assetDir)
+	os.RemoveAll(destDir)
+	if err := db.DeleteFilesByField("post", recordID, "gallery"); err != nil {
+		res.warn("%s/%s gallery: %v", collection, slug, err)
+		return
+	}
+	if len(images) == 0 {
+		return
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		res.warn("%s/%s gallery: %v", collection, slug, err)
+		return
+	}
+
+	for _, name := range images {
+		size, err := copyFile(filepath.Join(bundleDir, name), filepath.Join(destDir, name))
+		if err != nil {
+			res.warn("%s/%s gallery %s: %v", collection, slug, name, err)
+			continue
+		}
+		r2Key := filepath.ToSlash(filepath.Join(assetDir, name))
+		mime := galleryExts[strings.ToLower(filepath.Ext(name))]
+		id := data.DeterministicFileID(recordID, name)
+		if err := db.UpsertFile(id, "post", recordID, "gallery", r2Key, mime, size, ""); err != nil {
+			res.warn("%s/%s gallery %s: %v", collection, slug, name, err)
+		}
+	}
+}
+
+// copyFile copies src to dst, returning the number of bytes written.
+func copyFile(src, dst string) (int64, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return 0, err
+	}
+	n, err := io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return n, err
 }
 
 // routeFor maps a content-relative path to (collection, slug):

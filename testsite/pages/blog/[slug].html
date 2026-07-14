@@ -5,6 +5,17 @@
     {{ record.body|markdown }}
 </article>
 
+{% if record.gallery %}
+<!-- Gallery images imported from this post's page bundle (the images sitting next
+     to index.md). `record.gallery` is attached by the runtime, so they render with
+     no upload step and no JS. -->
+<section class="gallery">
+    {% for img in record.gallery %}
+    <img src="{{ img.url }}" alt="">
+    {% endfor %}
+</section>
+{% endif %}
+
 <!-- Server-rendered community content. `record.comments`, `record.reactions`, and
      `record.poll` are attached to the post by the runtime, so approved comments,
      reaction tallies, and the poll render straight into the page with no JS — great

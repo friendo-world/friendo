@@ -406,7 +406,7 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 				renderNotFound(w, req, db, pagesDir, tplSet, siteCfg)
 				return
 			}
-			attachCommunityRelations(db, record)
+			attachRecordRelations(db, record)
 			ctx["record"] = record
 		}
 	}
@@ -485,15 +485,16 @@ func buildCollectionsContext(db *data.DB) map[string]any {
 	return result
 }
 
-// attachCommunityRelations enriches a single focused post record with its public
-// community data — approved comments, reaction tallies, and (if the post declares
-// one in its front matter) its poll — so templates can render community content
-// server-side without JS: {{ record.comments }}, {{ record.reactions }},
-// {{ record.poll }}. These are two spellings of what the <friendo-*> SDK components
-// show client-side. Viewer-relative fields (a reaction's `reacted`, a poll's
-// `my_vote`) take their no-viewer values here; the components own the interactive,
-// signed-in view. The edge runtime mirrors this in attachCommunityRelations.
-func attachCommunityRelations(db *data.DB, record map[string]any) {
+// attachRecordRelations enriches a single focused post record with the related
+// data templates can render server-side without JS: its public community data —
+// approved comments ({{ record.comments }}), reaction tallies ({{ record.reactions }}),
+// and (if the post declares one in its front matter) its poll ({{ record.poll }}) —
+// plus its gallery images ({{ record.gallery }}). These are two spellings of what
+// the <friendo-*> SDK components show client-side. Viewer-relative fields (a
+// reaction's `reacted`, a poll's `my_vote`) take their no-viewer values here; the
+// components own the interactive, signed-in view. The edge runtime mirrors this in
+// attachRecordRelations.
+func attachRecordRelations(db *data.DB, record map[string]any) {
 	id, _ := record["id"].(string)
 	if id == "" {
 		return
@@ -517,6 +518,11 @@ func attachCommunityRelations(db *data.DB, record map[string]any) {
 				record["poll"] = poll
 			}
 		}
+	}
+
+	// Gallery images imported from the post's page bundle (field="gallery").
+	if gallery, err := db.ListFilesByField("post", id, "gallery"); err == nil {
+		record["gallery"] = gallery
 	}
 }
 

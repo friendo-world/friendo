@@ -1910,7 +1910,7 @@ async function renderPage(env, site, pathname) {
     for (const [paramName, paramValue] of Object.entries(paramValues)) {
       const record = await queryRecordByField(env, siteId, matched.collectionName, paramName, paramValue);
       if (!record) return renderNotFound(env, site);
-      await attachCommunityRelations(env, siteId, record);
+      await attachRecordRelations(env, siteId, record);
       ctx.record = record;
     }
   }
@@ -2011,14 +2011,15 @@ async function buildCollections(env, siteId) {
   return collections;
 }
 
-// attachCommunityRelations enriches a single focused post record with its public
-// community data — approved comments, reaction tallies, and (if the post declares
-// one in its front matter) its poll — so templates can render community content
-// server-side without JS: {{ record.comments }}, {{ record.reactions }},
-// {{ record.poll }}. Byte-mirrors the Go server's attachCommunityRelations: same
-// SQL, same shape, same no-viewer values (a reaction's `reacted`, a poll's
-// `my_vote`) — the <friendo-*> SDK components own the interactive, signed-in view.
-async function attachCommunityRelations(env, siteId, record) {
+// attachRecordRelations enriches a single focused post record with the related
+// data templates can render server-side without JS: its public community data —
+// approved comments ({{ record.comments }}), reaction tallies ({{ record.reactions }}),
+// and (if the post declares one in its front matter) its poll ({{ record.poll }}) —
+// plus its gallery images ({{ record.gallery }}). Byte-mirrors the Go server's
+// attachRecordRelations: same SQL, same shape, same no-viewer values (a reaction's
+// `reacted`, a poll's `my_vote`) — the <friendo-*> SDK components own the
+// interactive, signed-in view.
+async function attachRecordRelations(env, siteId, record) {
   const id = record.id;
   if (!id) return;
 
@@ -2048,6 +2049,14 @@ async function attachCommunityRelations(env, siteId, record) {
       if (poll) record.poll = poll;
     }
   }
+
+  // Gallery images imported from the post's page bundle (field="gallery"). Rendered
+  // from the synced files rows + R2 bytes; the Go build is the only import path.
+  const { results: gallery } = await env.DB.prepare(
+    `SELECT id, record_type, record_id, field, r2_key, mime, size, created
+     FROM files WHERE site_id = ? AND record_type = ? AND record_id = ? AND field = ? ORDER BY created`
+  ).bind(siteId, "post", id, "gallery").all();
+  record.gallery = (gallery || []).map((f) => ({ ...f, url: "/" + f.r2_key }));
 }
 
 async function queryRecordByField(env, siteId, collection, field, value) {
