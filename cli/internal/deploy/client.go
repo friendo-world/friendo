@@ -363,6 +363,23 @@ func (c *SiteClient) PushSettings(settings map[string]string) error {
 	return c.post("/_/api/push/settings", map[string]any{"settings": settings})
 }
 
+// PushFiles upserts media rows into the site's database. The bytes travel
+// separately via PushAssets; these rows link the media to their records.
+func (c *SiteClient) PushFiles(files []map[string]any) error {
+	return c.post("/_/api/push/files", map[string]any{"files": files})
+}
+
+// PullFiles fetches all media rows from the site.
+func (c *SiteClient) PullFiles() ([]map[string]any, error) {
+	var result struct {
+		Files []map[string]any `json:"files"`
+	}
+	if err := c.get("/_/api/pull/files", &result); err != nil {
+		return nil, err
+	}
+	return result.Files, nil
+}
+
 // PullData fetches all records from the site.
 func (c *SiteClient) PullData() ([]map[string]any, error) {
 	var result struct {

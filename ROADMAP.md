@@ -156,9 +156,11 @@ D1's per-account cap from 10 to 50,000.)
   `messages` / `locations` / `files` tables are now wired in both runtimes —
   **channels are a realtime feed** (SSE via a Go in-process hub / an edge
   `ChannelStream` Durable Object), **locations** are geo-tags, and **media upload**
-  attaches per-record images (multipart → `assets/` on disk / R2). Parity harness
-  now 152 steps + render smoke; media covered by a dual-runtime e2e. Roadmap +
-  status: [design/v0.2-roadmap.md](design/v0.2-roadmap.md).
+  attaches per-record images (multipart → `assets/` on disk / R2) that **sync on
+  deploy** — a binary-safe (base64) asset push plus `files`-row sync so uploaded
+  images travel byte-identical. Parity harness now 155 steps + render smoke; media
+  upload + binary round-trip covered by dual-runtime e2e. Roadmap + status:
+  [design/v0.2-roadmap.md](design/v0.2-roadmap.md).
 - **Auth & permissions redesign (toward 0.2)** — capability-based roles (owner >
   admin > editor > contributor > member) with an **ownership axis** (`edit.own` vs
   `edit.any`), so contributors edit only their own posts and authors moderate
@@ -183,11 +185,7 @@ D1's per-account cap from 10 to 50,000.)
   platform has no admin scope yet) or a script iterating owned sites.
 - **Customer custom domains** (`friendo.toml deploy.domain` → a user's own
   domain, e.g. Cloudflare for SaaS) aren't wired up yet.
-- **Media sync.** Per-record image *upload* ships (`POST /_/api/files`), but two
-  sync gaps remain before deployed sites see uploaded media: `files` rows don't
-  travel with `push`/`pull`, and the asset push serializes content as a UTF-8
-  string, so binary images don't round-trip. Nothing reads `/files` live in 0.2
-  (galleries deferred), so it's a pre-tag decision, not a blocker. Details:
-  [design/v0.2-roadmap.md](design/v0.2-roadmap.md) → *After Tier 2*.
 - **Image galleries / page bundles** (folder of images + `index.md`) are the
-  planned phase 2 of file-based content — needs the binary-safe asset push above.
+  planned phase 2 of file-based content. The plumbing they need now exists —
+  per-record media upload (`POST /_/api/files`), binary-safe asset push, and
+  `files`-row sync — so this is a UI/importer feature, not a runtime gap.

@@ -3,6 +3,7 @@ package deploy
 import (
 	"bufio"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -218,8 +219,8 @@ func RunPush(opts PushOptions) error {
 		fmt.Printf(" %d files\n", len(templates))
 	}
 
-	// Push assets.
-	assets, err := readFilesAsJSON(siteDir, "assets")
+	// Push assets (base64-encoded so binary images round-trip intact).
+	assets, err := readAssetsAsJSON(siteDir)
 	if err != nil {
 		return err
 	}
@@ -245,6 +246,19 @@ func RunPush(opts PushOptions) error {
 			fmt.Printf(" %d records\n", len(records))
 		} else {
 			fmt.Println(" no records")
+		}
+
+		// Media rows ride along with records (the bytes went up with assets).
+		files, err := readLocalFiles(siteDir)
+		if err != nil {
+			return err
+		}
+		if len(files) > 0 {
+			fmt.Printf("Pushing media...")
+			if err := siteClient.PushFiles(files); err != nil {
+				return err
+			}
+			fmt.Printf(" %d files\n", len(files))
 		}
 	}
 
@@ -352,6 +366,38 @@ func RunPull(opts PullOptions) error {
 			inserted++
 		}
 		fmt.Printf(" %d records\n", inserted)
+
+		// Media rows travel with records.
+		files, err := siteClient.PullFiles()
+		if err != nil {
+			return err
+		}
+		if len(files) > 0 {
+			fmt.Printf("Pulling media...")
+			pulled := 0
+			for _, f := range files {
+				str := func(key string) string {
+					v, _ := f[key].(string)
+					return v
+				}
+				num := func(key string) int64 {
+					switch v := f[key].(type) {
+					case float64:
+						return int64(v)
+					case int64:
+						return v
+					}
+					return 0
+				}
+				if err := db.UpsertFile(str("id"), str("record_type"), str("record_id"),
+					str("field"), str("r2_key"), str("mime"), num("size"), str("created")); err != nil {
+					fmt.Printf("\n  Warning: failed to insert file %s: %v\n", str("id"), err)
+					continue
+				}
+				pulled++
+			}
+			fmt.Printf(" %d files\n", pulled)
+		}
 	}
 
 	if opts.Users {
@@ -457,6 +503,38 @@ func saveDeployTarget(siteDir, target string) error {
 
 	s += fmt.Sprintf("\n[deploy]\ntarget = \"%s\"\n", target)
 	return os.WriteFile(tomlPath, []byte(s), 0o644)
+}
+
+// readAssetsAsJSON reads the assets/ tree and base64-encodes each file's
+// content so binary assets (images uploaded via the media API) survive the
+// JSON round-trip — a plain string would mangle non-UTF-8 bytes. The runtime
+// push/assets handlers decode entries marked `encoding: "base64"`.
+func readAssetsAsJSON(siteDir string) ([]map[string]string, error) {
+	dirPath := filepath.Join(siteDir, "assets")
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	var files []map[string]string
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(siteDir, path)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", rel, err)
+		}
+		files = append(files, map[string]string{
+			"path":     filepath.ToSlash(rel),
+			"content":  base64.StdEncoding.EncodeToString(content),
+			"encoding": "base64",
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // readFilesAsJSON reads all files from the given directories (relative to siteDir)
@@ -817,6 +895,21 @@ func readLocalRecords(siteDir string) ([]map[string]any, error) {
 		}
 	}
 	return all, nil
+}
+
+// readLocalFiles reads media rows from the local database so they can be pushed
+// alongside records. The bytes themselves travel via the assets push.
+func readLocalFiles(siteDir string) ([]map[string]any, error) {
+	dbPath := filepath.Join(siteDir, "data", "friendo.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	db, err := data.Open(siteDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening local database: %w", err)
+	}
+	defer db.Close()
+	return db.AllFiles()
 }
 
 func readLocalUsers(siteDir string) (users, authors []map[string]any, err error) {

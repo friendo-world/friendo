@@ -128,7 +128,12 @@ app.post("/_/api/push/assets", async (c) => {
   for (const f of files) {
     if (!f.path || !f.path.startsWith("assets/")) continue;
     const key = `sites/${auth.siteId}/${f.path}`;
-    await c.env.ASSETS.put(key, f.content, { httpMetadata: { contentType: guessContentType(f.path) } });
+    // base64 content carries binary assets (uploaded images) intact; plain
+    // strings are text assets pushed as-is. Mirrors the Go runtime.
+    const content = f.encoding === "base64"
+      ? Uint8Array.from(atob(f.content), (ch) => ch.charCodeAt(0))
+      : f.content;
+    await c.env.ASSETS.put(key, content, { httpMetadata: { contentType: guessContentType(f.path) } });
     written++;
   }
   return c.json({ written });
@@ -256,6 +261,43 @@ app.get("/_/api/pull/settings", async (c) => {
   const settings = {};
   for (const r of results || []) settings[r.key] = r.value;
   return c.json({ settings });
+});
+
+// Media rows travel with sync so a deployed site's GET /files matches the source
+// (the bytes ride along via push/assets). Mirrors the Go push/pull files handlers.
+app.post("/_/api/push/files", async (c) => {
+  const auth = await requireSiteAdmin(c);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
+
+  const { files } = await c.req.json();
+  if (!Array.isArray(files)) return c.json({ error: "files must be an array" }, 400);
+  let synced = 0;
+  for (const f of files) {
+    if (!f.id) continue;
+    await c.env.DB.prepare(
+      `INSERT INTO files (id, site_id, record_type, record_id, field, r2_key, mime, size, created)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         record_type=excluded.record_type, record_id=excluded.record_id, field=excluded.field,
+         r2_key=excluded.r2_key, mime=excluded.mime, size=excluded.size`
+    ).bind(
+      f.id, auth.siteId, f.record_type || "", f.record_id || "", f.field || "",
+      f.r2_key || "", f.mime || "", f.size || 0, f.created || nowISO()
+    ).run();
+    synced++;
+  }
+  return c.json({ synced });
+});
+
+app.get("/_/api/pull/files", async (c) => {
+  const auth = await requireSiteAdmin(c);
+  if (!auth || !roleCan(auth.user.role, CAP.siteConfigure)) return c.json({ error: "unauthorized" }, 401);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, record_type, record_id, field, r2_key, mime, size, created
+     FROM files WHERE site_id = ? ORDER BY created`
+  ).bind(auth.siteId).all();
+  return c.json({ files: results || [] });
 });
 
 // --- REST auth (/_/api/me, /_/api/auth/*) ---

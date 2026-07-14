@@ -880,6 +880,24 @@
     "method": "GET", "path": "/pull/users",
     "expect": { "status": 200, "json": { "authors.0.name": "Owner" } }
   },
+  {
+    "name": "push a media row (sync)",
+    "method": "POST", "path": "/push/files",
+    "body": {
+      "files": [ { "id": "sf1", "record_type": "post", "record_id": "p1", "field": "cover", "r2_key": "assets/uploads/sf1.png", "mime": "image/png", "size": 67, "created": "2026-01-01T00:00:00Z" } ]
+    },
+    "expect": { "status": 200, "json": { "synced": 1 } }
+  },
+  {
+    "name": "pull files round-trips the media row",
+    "method": "GET", "path": "/pull/files",
+    "expect": { "status": 200, "length": { "files": 1 }, "json": { "files.0.id": "sf1", "files.0.r2_key": "assets/uploads/sf1.png", "files.0.size": 67 } }
+  },
+  {
+    "name": "the synced media now shows on its record",
+    "method": "GET", "path": "/files?record_type=post&record_id=p1",
+    "expect": { "status": 200, "length": { "files": 1 }, "json": { "files.0.id": "sf1", "files.0.url": "/assets/uploads/sf1.png" } }
+  },
 
   {
     "name": "brute-force login attempt 1 fails",

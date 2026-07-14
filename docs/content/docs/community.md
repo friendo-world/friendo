@@ -173,6 +173,10 @@ List a record's images with `GET /_/api/files?record_type=post&record_id=<id>`
 (public), and remove one with `DELETE /_/api/files/<file id>`. Only images are
 accepted, up to 10 MB.
 
+Uploaded images travel on deploy: `friendo push --data` carries both the image
+bytes (in `assets/uploads/`) and the record link, so a deployed site shows the
+same media as your local one.
+
 ## Tagging a location
 
 Pin a latitude/longitude to any record — useful for event maps or "where this was

@@ -764,6 +764,46 @@ func (db *DB) GetFile(id string) (map[string]any, error) {
 	return fileJSON(id, rt, rid, field, key, mime, size, created), nil
 }
 
+// AllFiles returns every file row for the site as raw column maps — used by
+// sync (pull) so deployed sites learn which media belongs to which record.
+func (db *DB) AllFiles() ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT id, record_type, record_id, field, r2_key, mime, size, created
+		 FROM files WHERE site_id = ? ORDER BY created`, db.SiteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, rt, rid, field, key, mime, created string
+		var size int64
+		if err := rows.Scan(&id, &rt, &rid, &field, &key, &mime, &size, &created); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": id, "record_type": rt, "record_id": rid, "field": field,
+			"r2_key": key, "mime": mime, "size": size, "created": created,
+		})
+	}
+	return out, rows.Err()
+}
+
+// UpsertFile inserts or updates a file row by id — the sync (push/pull) writer.
+func (db *DB) UpsertFile(id, recordType, recordID, field, r2Key, mime string, size int64, created string) error {
+	if created == "" {
+		created = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	}
+	_, err := db.Conn.Exec(
+		`INSERT INTO files (id, site_id, record_type, record_id, field, r2_key, mime, size, created)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   record_type=excluded.record_type, record_id=excluded.record_id, field=excluded.field,
+		   r2_key=excluded.r2_key, mime=excluded.mime, size=excluded.size`,
+		id, db.SiteID, recordType, recordID, field, r2Key, mime, size, created)
+	return err
+}
+
 // DeleteFile removes a file row and returns its r2_key so the caller can delete
 // the stored object.
 func (db *DB) DeleteFile(id string) (string, error) {
@@ -1185,10 +1225,10 @@ func (db *DB) findPollDef(slug string) *pollDef {
 func parsePollDef(dataJSON string) *pollDef {
 	var data struct {
 		Poll *struct {
-			Slug     string `json:"slug"`
-			Question string `json:"question"`
+			Slug     string   `json:"slug"`
+			Question string   `json:"question"`
 			Options  []string `json:"options"`
-			ClosesAt string `json:"closes_at"`
+			ClosesAt string   `json:"closes_at"`
 		} `json:"poll"`
 	}
 	if json.Unmarshal([]byte(dataJSON), &data) != nil || data.Poll == nil {

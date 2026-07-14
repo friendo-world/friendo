@@ -81,7 +81,7 @@ the actor's *own* rows unless they hold the `.any` variant.
 | Media | `GET /files` (public); `POST /files` (multipart image → `assets/`), `DELETE /files/:id` | read public; write = `content.create` |
 | Users | `GET/POST /users`, `PUT/DELETE /users/:id` (role rules + last-owner guard) | `user.manage`; granting admin/owner needs `site.own` |
 | Settings | `GET/PUT /settings` (site name + `access.*` / `content.require_approval` policy) | `site.configure` |
-| Sync | `POST /push/{templates,assets,data,users}`, `GET /pull/{data,users}` | `site.configure` |
+| Sync | `POST /push/{templates,assets,data,users,settings,files}`, `GET /pull/{data,users,settings,files}` | `site.configure` |
 
 ## Deploy, push, pull
 
@@ -91,8 +91,11 @@ host (friendo.world, your Cloudflare account, or a VPS).
 - **`friendo deploy`** — one-time interactive setup. Provisions the site on a
   chosen target, writes `[deploy] target = …` to `friendo.toml`, then pushes.
 - **`friendo push`** — upload templates + assets (`--data` / `--users` to include
-  records and accounts).
-- **`friendo pull`** — fetch remote records/accounts back into the local database.
+  records and accounts). Assets are base64-encoded so binary files (uploaded
+  images in `assets/uploads/`) round-trip intact, and `--data` also carries
+  `files` rows so a deployed site's media metadata matches the source.
+- **`friendo pull`** — fetch remote records/accounts (and media rows) back into
+  the local database.
 
 **Auth + first-run bootstrap.** `push`/`pull` authenticate via `authenticateSite()`:
 reuse a cached session from `~/.friendo/config`, else log in. If the target has

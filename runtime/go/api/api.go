@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -113,9 +114,11 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Post("/push/data", capGate(authFunc, data.CapSiteConfigure, handlePushData(db)))
 		r.Post("/push/users", capGate(authFunc, data.CapSiteConfigure, handlePushUsers(db)))
 		r.Post("/push/settings", capGate(authFunc, data.CapSiteConfigure, handlePushSettings(db)))
+		r.Post("/push/files", capGate(authFunc, data.CapSiteConfigure, handlePushFiles(db)))
 		r.Get("/pull/data", capGate(authFunc, data.CapSiteConfigure, handlePullData(db)))
 		r.Get("/pull/users", capGate(authFunc, data.CapSiteConfigure, handlePullUsers(db)))
 		r.Get("/pull/settings", capGate(authFunc, data.CapSiteConfigure, handlePullSettings(db)))
+		r.Get("/pull/files", capGate(authFunc, data.CapSiteConfigure, handlePullFiles(db)))
 	})
 }
 
@@ -1290,14 +1293,17 @@ func handlePushTemplates(siteDir string) http.HandlerFunc {
 }
 
 // handlePushAssets accepts static asset files and writes them to assets/.
-// Expects multipart form or JSON body with base64-encoded content.
-// Simple JSON mode: {"files": [{"path": "assets/style.css", "content": "..."}]}
+// Each file's content is a plain string, or base64 when "encoding":"base64" —
+// which is how binary assets (images uploaded via the media API) round-trip
+// intact, since JSON strings can't carry raw bytes.
+// Body: {"files": [{"path": "assets/logo.png", "content": "...", "encoding": "base64"}]}
 func handlePushAssets(siteDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Files []struct {
-				Path    string `json:"path"`
-				Content string `json:"content"`
+				Path     string `json:"path"`
+				Content  string `json:"content"`
+				Encoding string `json:"encoding"`
 			} `json:"files"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -1315,12 +1321,22 @@ func handlePushAssets(siteDir string) http.HandlerFunc {
 				continue
 			}
 
+			content := []byte(f.Content)
+			if f.Encoding == "base64" {
+				decoded, err := base64.StdEncoding.DecodeString(f.Content)
+				if err != nil {
+					log.Printf("Error decoding %s: %v", cleanPath, err)
+					continue
+				}
+				content = decoded
+			}
+
 			fullPath := filepath.Join(siteDir, cleanPath)
 			if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 				log.Printf("Error creating dir for %s: %v", cleanPath, err)
 				continue
 			}
-			if err := os.WriteFile(fullPath, []byte(f.Content), 0o644); err != nil {
+			if err := os.WriteFile(fullPath, content, 0o644); err != nil {
 				log.Printf("Error writing %s: %v", cleanPath, err)
 				continue
 			}
@@ -1546,6 +1562,54 @@ func handlePullData(db *data.DB) http.HandlerFunc {
 			records = []map[string]any{}
 		}
 		jsonResponse(w, map[string]any{"records": records})
+	}
+}
+
+// handlePushFiles upserts media rows into the local database. The bytes travel
+// separately via push/assets; these rows record which media belongs to which
+// record so a deployed site's GET /files matches the source.
+func handlePushFiles(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Files []struct {
+				ID         string `json:"id"`
+				RecordType string `json:"record_type"`
+				RecordID   string `json:"record_id"`
+				Field      string `json:"field"`
+				R2Key      string `json:"r2_key"`
+				Mime       string `json:"mime"`
+				Size       int64  `json:"size"`
+				Created    string `json:"created"`
+			} `json:"files"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		synced := 0
+		for _, f := range body.Files {
+			if f.ID == "" {
+				continue
+			}
+			if err := db.UpsertFile(f.ID, f.RecordType, f.RecordID, f.Field, f.R2Key, f.Mime, f.Size, f.Created); err != nil {
+				jsonError(w, fmt.Sprintf("upsert error: %v", err), http.StatusInternalServerError)
+				return
+			}
+			synced++
+		}
+		jsonResponse(w, map[string]int{"synced": synced})
+	}
+}
+
+// handlePullFiles returns all media rows as JSON.
+func handlePullFiles(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		files, err := db.AllFiles()
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"files": files})
 	}
 }
 
