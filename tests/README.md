@@ -1,17 +1,36 @@
 # Parity tests
 
 Friendo's core bet is *one admin UI, two runtimes, identical behavior*. These
-tests encode that guarantee: a single [`scenarios.json`](scenarios.json) of
-request→assert steps is run against **both** runtimes, and both must agree.
+tests encode that guarantee across three layers, each driven by a shared fixture
+file run against **both** runtimes:
 
-| | Runner | What it does |
-|---|---|---|
-| Go runtime | [`parity_test.go`](parity_test.go) | Mounts the real router in-process (`httptest`) over a fresh temp SQLite DB |
-| Edge runtime | [`edge-parity.mjs`](edge-parity.mjs) | Boots `wrangler dev` in an isolated `--persist-to` dir (fresh D1, schema auto-created on first request), drives it over HTTP |
+| Layer | Fixtures | Go runner | Edge runner |
+|---|---|---|---|
+| **REST API** | [`scenarios.json`](scenarios.json) | [`parity_test.go`](parity_test.go) | [`edge-parity.mjs`](edge-parity.mjs) |
+| **Template render** | [`render-scenarios.json`](render-scenarios.json) | `render_test.go` | `edge-parity.mjs` |
+| **SQL splitter** | [`splitter-cases.json`](splitter-cases.json) | `splitter_test.go` | `edge-parity.mjs` |
 
-Each run is self-contained: it starts from an **empty database**, calls `/setup`
-to create the admin, then exercises records CRUD, users + role enforcement,
-settings, and the session lifecycle — so the same scenarios are valid on both.
+- The Go runner mounts the real router in-process (`httptest`) over a fresh temp
+  SQLite DB; render_test.go mounts the real site handler (`server.BuildSiteHandler`).
+- The edge runner boots `wrangler dev` in an isolated `--persist-to` dir (fresh D1,
+  schema auto-created on first request) and drives it over HTTP.
+
+Each REST run is self-contained: it starts from an **empty database**, calls
+`/setup` to create the admin, then exercises records CRUD, users + role
+enforcement, settings, and the session lifecycle — so the same scenarios are valid
+on both.
+
+**Render fixtures** push a template + records and assert the rendered output equals
+a golden `expect` (so matching the golden on both sides proves the two template
+engines render identically — nesting, `forloop.*`, autoescape, filters,
+conditionals, published-only filtering). Fixtures are fragments (no `</body>`) so
+the Go serve path's dev-only live-reload injection stays a no-op.
+
+**Splitter cases** feed a multi-statement SQL string through each runtime's schema
+statement splitter and assert identical output (guards the historical
+comment-led-file bug). The **CLI sync round-trip** (`init → push → pull`) is covered
+separately in [`cli/internal/deploy/roundtrip_test.go`](../cli/internal/deploy/roundtrip_test.go),
+driving the real deploy client against an in-process runtime.
 
 ## Running
 

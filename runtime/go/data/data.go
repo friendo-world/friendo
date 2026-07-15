@@ -125,7 +125,7 @@ func runMigrations(conn *sql.DB) error {
 		if err != nil {
 			return err
 		}
-		for _, stmt := range splitStatements(m.sql) {
+		for _, stmt := range SplitStatements(m.sql) {
 			if _, err := tx.Exec(stmt); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.id, m.name, err)
@@ -143,7 +143,13 @@ func runMigrations(conn *sql.DB) error {
 }
 
 // splitStatements drops full-line comments and splits SQL into statements.
-func splitStatements(sqlText string) []string {
+// SplitStatements drops full-line comments and splits a multi-statement SQL string
+// (schema / migration) into individual statements. Mirrors runtime/edge/sql-split.js
+// splitStatements — the two must split identically (enforced by
+// tests/splitter-cases.json). Filtering full-line comments before splitting on ";"
+// keeps a comment-led file (schema.sql opens with a comment) from folding its
+// leading comment into — and dropping — the first real statement.
+func SplitStatements(sqlText string) []string {
 	var kept []string
 	for _, line := range strings.Split(sqlText, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "--") {

@@ -6,6 +6,7 @@
 // create runtime/edge/migrations/NNNN_name.sql, import it, and append an entry
 // with the next id. Keep statements idempotent where practical.
 
+import { splitStatements } from "./sql-split.js";
 import baselineSchema from "./schema.sql";
 import authorProfiles from "./migrations/0002_author_profiles.sql";
 import postData from "./migrations/0003_post_data.sql";
@@ -27,17 +28,6 @@ export const MIGRATIONS = [
   { id: 8, name: "role_owner", sql: roleOwner },
   { id: 9, name: "rate_limits", sql: rateLimits },
 ];
-
-// splitStatements drops full-line comments and splits SQL into statements.
-function splitStatements(sql) {
-  return sql
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("--"))
-    .join("\n")
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
 
 function nowISO() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");

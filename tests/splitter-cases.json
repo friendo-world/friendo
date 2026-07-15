@@ -1,0 +1,27 @@
+[
+  {
+    "name": "comment-led (the historical bug: first statement must survive)",
+    "sql": "-- Friendo common schema\n-- second comment line\nCREATE TABLE a (id TEXT);\nCREATE TABLE b (id TEXT);",
+    "expect": ["CREATE TABLE a (id TEXT)", "CREATE TABLE b (id TEXT)"]
+  },
+  {
+    "name": "interspersed full-line comments",
+    "sql": "CREATE TABLE a (id TEXT);\n-- a note about b\nCREATE TABLE b (id TEXT);\n-- trailing comment\n",
+    "expect": ["CREATE TABLE a (id TEXT)", "CREATE TABLE b (id TEXT)"]
+  },
+  {
+    "name": "blank lines and trailing semicolon",
+    "sql": "\n\nCREATE INDEX idx_a ON a(id);\n\n\nCREATE INDEX idx_b ON b(id);\n\n",
+    "expect": ["CREATE INDEX idx_a ON a(id)", "CREATE INDEX idx_b ON b(id)"]
+  },
+  {
+    "name": "multi-line statement kept intact",
+    "sql": "CREATE TABLE a (\n  id TEXT PRIMARY KEY,\n  name TEXT NOT NULL DEFAULT ''\n);",
+    "expect": ["CREATE TABLE a (\n  id TEXT PRIMARY KEY,\n  name TEXT NOT NULL DEFAULT ''\n)"]
+  },
+  {
+    "name": "indented comment line is still dropped",
+    "sql": "CREATE TABLE a (id TEXT);\n    -- indented comment\nCREATE TABLE b (id TEXT);",
+    "expect": ["CREATE TABLE a (id TEXT)", "CREATE TABLE b (id TEXT)"]
+  }
+]

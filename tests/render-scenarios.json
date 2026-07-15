@@ -1,0 +1,45 @@
+[
+  {
+    "name": "nested-forloop",
+    "template": "{% for a in collections.rt %}[{{ forloop.Counter }}{% if forloop.First %}F{% endif %}{% if forloop.Last %}L{% endif %}:{% for b in collections.rt %}({{ forloop.Counter }}){% endfor %}]{% endfor %}",
+    "records": [
+      { "collection": "rt", "slug": "r1", "title": "R1", "status": "published", "created": "2020-01-02T00:00:00Z" },
+      { "collection": "rt", "slug": "r2", "title": "R2", "status": "published", "created": "2020-01-01T00:00:00Z" }
+    ],
+    "expect": "[1F:(1)(2)][2L:(1)(2)]"
+  },
+  {
+    "name": "autoescape",
+    "template": "{% for e in collections.esc %}{{ e.title }}{% endfor %}",
+    "records": [
+      { "collection": "esc", "slug": "e1", "title": "<b>\"Tom & 'Jerry'\"</b>", "status": "published", "created": "2020-01-01T00:00:00Z" }
+    ],
+    "expect": "&lt;b&gt;&quot;Tom &amp; &#39;Jerry&#39;&quot;&lt;/b&gt;"
+  },
+  {
+    "name": "filters",
+    "template": "{% for f in collections.fl %}{{ f.title|upper }}|{{ f.title|lower }}|{{ f.title|capfirst }}{% endfor %}|{{ collections.fl|length }}",
+    "records": [
+      { "collection": "fl", "slug": "f1", "title": "hello World", "status": "published", "created": "2020-01-01T00:00:00Z" }
+    ],
+    "expect": "HELLO WORLD|hello world|Hello World|1"
+  },
+  {
+    "name": "conditional",
+    "template": "{% for a in collections.cond %}{{ a.title }}:{% if a.data.featured %}*{% else %}-{% endif %} {% endfor %}",
+    "records": [
+      { "collection": "cond", "slug": "c1", "title": "A", "status": "published", "created": "2020-01-02T00:00:00Z", "data": { "featured": true } },
+      { "collection": "cond", "slug": "c2", "title": "B", "status": "published", "created": "2020-01-01T00:00:00Z", "data": { "featured": false } }
+    ],
+    "expect": "A:* B:- "
+  },
+  {
+    "name": "draft-excluded",
+    "template": "{% for d in collections.dr %}{{ d.title }} {% endfor %}",
+    "records": [
+      { "collection": "dr", "slug": "d1", "title": "Published", "status": "published", "created": "2020-01-02T00:00:00Z" },
+      { "collection": "dr", "slug": "d2", "title": "Draft", "status": "draft", "created": "2020-01-01T00:00:00Z" }
+    ],
+    "expect": "Published "
+  }
+]

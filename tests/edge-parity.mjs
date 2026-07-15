@@ -10,6 +10,7 @@ import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { splitStatements } from "../runtime/edge/sql-split.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const edgeDir = join(here, "..", "runtime", "edge");
@@ -124,10 +125,15 @@ function teardown() {
 }
 process.on("SIGINT", () => { teardown(); process.exit(130); });
 
-// renderCheck exercises the edge template engine end-to-end: a page with nested
-// same-tag loops + forloop + if, rendered from R2 templates over D1 data. Guards
-// the nesting/forloop fixes from silently regressing.
-async function renderCheck(apiBase, origin) {
+// renderScenarios runs the shared render-scenarios.json fixtures against the edge
+// template engine end-to-end: push each fixture's template (to R2) and records (to
+// D1), fetch the page, and assert the output equals the golden `expect`. The Go
+// runtime asserts the same goldens in render_test.go, so matching the golden on both
+// sides proves the two engines render identically (nesting, forloop.*, autoescape,
+// filters, conditionals, published-only filtering).
+async function renderScenarios(apiBase, origin) {
+  const fixtures = JSON.parse(readFileSync(join(here, "render-scenarios.json"), "utf8"));
+
   const login = await fetch(apiBase + "/auth/login", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: "owner@test.com", password: "password12345" }),
@@ -137,17 +143,35 @@ async function renderCheck(apiBase, origin) {
     const m = sc.match(/friendo_session=([^;]*)/); if (m) cookie = m[1];
   }
   const H = { "Content-Type": "application/json", Cookie: "friendo_session=" + cookie };
-  const tpl = `<!DOCTYPE html><body>{% for a in collections.rt %}[{{ forloop.Counter }}{% if forloop.First %}F{% endif %}:{% for b in collections.rt %}({{ forloop.Counter }}){% endfor %}]{% endfor %}</body>`;
-  await fetch(apiBase + "/push/templates", { method: "POST", headers: H, body: JSON.stringify({ files: [{ path: "pages/rendertest.html", content: tpl }] }) });
-  await fetch(apiBase + "/push/data", { method: "POST", headers: H, body: JSON.stringify({ records: [
-    { id: "rt1", collection: "rt", slug: "r1", title: "R1", status: "published", created: "2020-01-01T00:00:00Z" },
-    { id: "rt2", collection: "rt", slug: "r2", title: "R2", status: "published", created: "2020-01-02T00:00:00Z" },
-  ] }) });
-  const page = await (await fetch(origin + "/rendertest")).text();
-  const inner = (page.match(/\(1\)\(2\)\]/g) || []).length; // each outer item ran the full inner loop
-  if (!page.includes("[1F:") || inner !== 2) {
-    throw new Error(`render check: nested for/forloop not rendered as expected\ngot: ${page}`);
+
+  // Push every fixture's template and records once (distinct collections, no clash).
+  const files = fixtures.map((f) => ({ path: `pages/${f.name}.html`, content: f.template }));
+  const records = fixtures.flatMap((f) =>
+    (f.records || []).map((r) => ({ id: `${r.collection}-${r.slug}`, ...r }))
+  );
+  await fetch(apiBase + "/push/templates", { method: "POST", headers: H, body: JSON.stringify({ files }) });
+  await fetch(apiBase + "/push/data", { method: "POST", headers: H, body: JSON.stringify({ records }) });
+
+  for (const f of fixtures) {
+    const got = await (await fetch(origin + "/" + f.name)).text();
+    if (got !== f.expect) {
+      throw new Error(`render[${f.name}]: mismatch\n got: ${JSON.stringify(got)}\nwant: ${JSON.stringify(f.expect)}`);
+    }
   }
+}
+
+// splitterCheck runs the shared splitter-cases.json through the edge SQL splitter;
+// the Go runtime asserts the same cases in splitter_test.go, so both must agree.
+// A pure in-process check (no Worker needed).
+function splitterCheck() {
+  const cases = JSON.parse(readFileSync(join(here, "splitter-cases.json"), "utf8"));
+  for (const c of cases) {
+    const got = splitStatements(c.sql);
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      throw new Error(`splitter[${c.name}]: mismatch\n got: ${JSON.stringify(got)}\nwant: ${JSON.stringify(c.expect)}`);
+    }
+  }
+  return cases.length;
 }
 
 let failed = false;
@@ -155,8 +179,10 @@ try {
   const base = `http://127.0.0.1:${PORT}/_/api`;
   await waitForReady(base + "/setup");
   await runScenarios(base);
-  await renderCheck(base, `http://127.0.0.1:${PORT}`);
-  console.log(`edge parity: PASS (${steps.length} steps + render)`);
+  await renderScenarios(base, `http://127.0.0.1:${PORT}`);
+  const fixtureCount = JSON.parse(readFileSync(join(here, "render-scenarios.json"), "utf8")).length;
+  const splitterCount = splitterCheck();
+  console.log(`edge parity: PASS (${steps.length} steps + ${fixtureCount} render fixtures + ${splitterCount} splitter cases)`);
 } catch (err) {
   failed = true;
   console.error("edge parity: FAIL");

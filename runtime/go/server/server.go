@@ -86,6 +86,28 @@ func Start(port int, openAdmin bool) error {
 		log.Printf("Content: %s", res.Summary())
 	}
 
+	// Start file watcher for hot reload.
+	go watchForChanges(siteDir, db)
+
+	handler, err := BuildSiteHandler(siteDir, db, openAdmin)
+	if err != nil {
+		return err
+	}
+
+	addr := fmt.Sprintf(":%d", port)
+	fmt.Printf("Serving on http://localhost%s\n", addr)
+	fmt.Printf("Admin UI on http://localhost%s/_/\n", addr)
+	return http.ListenAndServe(addr, handler)
+}
+
+// BuildSiteHandler assembles the site-serving HTTP handler: the admin UI + REST/sync
+// API at /_/, the community SDK at /friendo.js, static /assets/*, and the catch-all
+// template renderer. Start wraps it with a listener and a file watcher; the parity
+// tests mount it directly over a temp site + DB, so both drive the exact same
+// rendering path. Callers own content import and (for dev) the reload watcher.
+func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler, error) {
+	pagesDir := filepath.Join(siteDir, "pages")
+
 	// Load site configuration from friendo.toml (or use directory name).
 	siteCfg := loadSiteConfig(siteDir)
 
@@ -101,11 +123,8 @@ func Start(port int, openAdmin bool) error {
 	// Build the route table from the pages directory.
 	routes, err := buildRoutes(pagesDir)
 	if err != nil {
-		return fmt.Errorf("building routes: %w", err)
+		return nil, fmt.Errorf("building routes: %w", err)
 	}
-
-	// Start file watcher for hot reload.
-	go watchForChanges(siteDir, db)
 
 	r := chi.NewRouter()
 
@@ -129,10 +148,7 @@ func Start(port int, openAdmin bool) error {
 		handleTemplate(w, req, db, pagesDir, tplSet, routes, siteCfg)
 	})
 
-	addr := fmt.Sprintf(":%d", port)
-	fmt.Printf("Serving on http://localhost%s\n", addr)
-	fmt.Printf("Admin UI on http://localhost%s/_/\n", addr)
-	return http.ListenAndServe(addr, r)
+	return r, nil
 }
 
 // --- Hot reload ---
