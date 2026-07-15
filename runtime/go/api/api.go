@@ -30,6 +30,12 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 	r.Route("/api", func(r chi.Router) {
 		// Public endpoints — used by the SPA to bootstrap and authenticate.
 		r.Get("/me", handleMe(authFunc))
+
+		// Personas: an account's author profiles. Any authenticated member may
+		// list/create their own and pick which one their comments/messages use.
+		r.Get("/me/personas", handleListPersonas(db, authFunc))
+		r.Post("/me/personas", handleCreatePersona(db, authFunc))
+		r.Post("/me/personas/{id}/default", handleSetDefaultPersona(db, authFunc))
 		r.Post("/auth/login", handleLogin(db))
 		r.Post("/auth/logout", handleLogout(db))
 		r.Get("/setup", handleSetupStatus(db))
@@ -1186,6 +1192,74 @@ func handleMe(authFunc func(*http.Request) *data.User) http.HandlerFunc {
 			return
 		}
 		jsonResponse(w, map[string]any{"user": userJSON(user)})
+	}
+}
+
+// handleListPersonas returns the caller's author profiles (personas).
+func handleListPersonas(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		personas, err := db.ListPersonas(user.ID)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"personas": personas})
+	}
+}
+
+// handleCreatePersona adds a new persona to the caller's account.
+func handleCreatePersona(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var in struct {
+			Name   string `json:"name"`
+			Avatar string `json:"avatar"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(in.Name) == "" {
+			jsonError(w, "name is required", http.StatusBadRequest)
+			return
+		}
+		persona, err := db.CreatePersona(user.ID, in.Name, in.Avatar)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		jsonResponse(w, map[string]any{"persona": persona})
+	}
+}
+
+// handleSetDefaultPersona points the caller's default at one of their personas.
+func handleSetDefaultPersona(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		err := db.SetDefaultPersona(user.ID, chi.URLParam(r, "id"))
+		if err == sql.ErrNoRows {
+			jsonError(w, "persona not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("update error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, map[string]any{"ok": true})
 	}
 }
 

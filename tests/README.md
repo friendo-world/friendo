@@ -32,6 +32,13 @@ comment-led-file bug). The **CLI sync round-trip** (`init → push → pull`) is
 separately in [`cli/internal/deploy/roundtrip_test.go`](../cli/internal/deploy/roundtrip_test.go),
 driving the real deploy client against an in-process runtime.
 
+**SDK browser check** ([`sdk-map.mjs`](sdk-map.mjs), `npm run test:sdk`) covers what
+a REST/render harness can't: the `friendo.js` Web Components only render in a
+browser. It boots the Go runtime over a throwaway site, seeds locations, and drives
+Chromium (Playwright) to assert `<friendo-map>` paints its markers. It needs network
+(Leaflet + OSM tiles load from a CDN), so it is **not** part of `npm test` — run it
+on demand.
+
 ## Running
 
 ```bash

@@ -1559,14 +1559,85 @@ func (db *DB) UpsertAuthor(id, userID, name, email, avatar, role, created string
 	return err
 }
 
-// DefaultAuthorID returns the account's default (earliest) profile id, or "".
+// DefaultAuthorID returns the account's default persona id, or "". It honors the
+// account's chosen default (users.default_author_id) when that still points at one
+// of its profiles, and otherwise falls back to the earliest profile — so a member
+// who has picked a persona has all their comments/messages attributed to it.
 func (db *DB) DefaultAuthorID(userID string) string {
+	var chosen string
+	db.Conn.QueryRow(
+		`SELECT default_author_id FROM users WHERE id = ? AND site_id = ?`, userID, db.SiteID,
+	).Scan(&chosen)
+	if chosen != "" && db.authorBelongsTo(chosen, userID) {
+		return chosen
+	}
 	var id string
 	db.Conn.QueryRow(
 		`SELECT id FROM authors WHERE site_id = ? AND user_id = ? ORDER BY created LIMIT 1`,
 		db.SiteID, userID,
 	).Scan(&id)
 	return id
+}
+
+// authorBelongsTo reports whether authorID is one of userID's profiles on this site.
+func (db *DB) authorBelongsTo(authorID, userID string) bool {
+	var ok string
+	err := db.Conn.QueryRow(
+		`SELECT id FROM authors WHERE id = ? AND site_id = ? AND user_id = ?`,
+		authorID, db.SiteID, userID,
+	).Scan(&ok)
+	return err == nil
+}
+
+// ListPersonas returns an account's author profiles (personas), earliest first,
+// each flagged with whether it's the current default (the one attribution uses).
+func (db *DB) ListPersonas(userID string) ([]map[string]any, error) {
+	def := db.DefaultAuthorID(userID)
+	rows, err := db.Conn.Query(
+		`SELECT id, name, avatar FROM authors WHERE site_id = ? AND user_id = ? ORDER BY created`,
+		db.SiteID, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, name, avatar string
+		if err := rows.Scan(&id, &name, &avatar); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"id": id, "name": name, "avatar": avatar, "is_default": id == def})
+	}
+	return out, rows.Err()
+}
+
+// CreatePersona adds a new author profile (persona) to an account and returns it.
+func (db *DB) CreatePersona(userID, name, avatar string) (map[string]any, error) {
+	id := GenerateID()
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO authors (id, site_id, user_id, name, avatar, email, role, created, updated)
+		 VALUES (?, ?, ?, ?, ?, '', 'member', ?, ?)`,
+		id, db.SiteID, userID, name, avatar, now, now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": id, "name": name, "avatar": avatar, "is_default": false}, nil
+}
+
+// SetDefaultPersona points an account's default at one of its own profiles. Returns
+// sql.ErrNoRows if the persona doesn't belong to the account.
+func (db *DB) SetDefaultPersona(userID, authorID string) error {
+	if !db.authorBelongsTo(authorID, userID) {
+		return sql.ErrNoRows
+	}
+	_, err := db.Conn.Exec(
+		`UPDATE users SET default_author_id = ? WHERE id = ? AND site_id = ?`,
+		authorID, userID, db.SiteID,
+	)
+	return err
 }
 
 // GetUserByEmail returns the account for an email, or sql.ErrNoRows.

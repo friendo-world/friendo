@@ -312,6 +312,43 @@ app.get("/_/api/me", async (c) => {
   return c.json({ user: userJSON(user) });
 });
 
+// Personas: an account's author profiles. Any authenticated member may list/create
+// their own and pick which one their comments/messages use. Mirror the Go routes.
+app.get("/_/api/me/personas", async (c) => {
+  const { auth, deny } = await requireMember(c);
+  if (deny) return deny;
+  return c.json({ personas: await listPersonas(c.env, auth.siteId, auth.user.id) });
+});
+
+app.post("/_/api/me/personas", async (c) => {
+  const { auth, deny } = await requireMember(c);
+  if (deny) return deny;
+  let body;
+  try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
+  const name = (body && body.name ? String(body.name) : "").trim();
+  if (!name) return c.json({ error: "name is required" }, 400);
+  const avatar = body && body.avatar ? String(body.avatar) : "";
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const now = nowISO();
+  await c.env.DB.prepare(
+    `INSERT INTO authors (id, site_id, user_id, name, avatar, email, role, created, updated)
+     VALUES (?, ?, ?, ?, ?, '', 'member', ?, ?)`
+  ).bind(id, auth.siteId, auth.user.id, name, avatar, now, now).run();
+  return c.json({ persona: { id, name, avatar, is_default: false } }, 201);
+});
+
+app.post("/_/api/me/personas/:id/default", async (c) => {
+  const { auth, deny } = await requireMember(c);
+  if (deny) return deny;
+  const id = c.req.param("id");
+  if (!(await authorBelongsTo(c.env, auth.siteId, id, auth.user.id))) {
+    return c.json({ error: "persona not found" }, 404);
+  }
+  await c.env.DB.prepare("UPDATE users SET default_author_id = ? WHERE id = ? AND site_id = ?")
+    .bind(id, auth.user.id, auth.siteId).run();
+  return c.json({ ok: true });
+});
+
 // --- Rate limiting (fixed window, mirrors runtime/go/data) ---
 
 const LOGIN_FAIL_LIMIT = 5;
@@ -1539,11 +1576,38 @@ async function createDefaultAuthor(env, siteId, userId, name, email) {
 }
 
 // defaultAuthorId returns the account's default (earliest) profile id, or "".
+// defaultAuthorId returns the account's default persona id, or "". It honors the
+// account's chosen default (users.default_author_id) when it still points at one of
+// its profiles, else falls back to the earliest profile. Mirrors Go DefaultAuthorID.
 async function defaultAuthorId(env, siteId, userId) {
+  const u = await env.DB.prepare(
+    "SELECT default_author_id FROM users WHERE id = ? AND site_id = ?"
+  ).bind(userId, siteId).first();
+  if (u && u.default_author_id && (await authorBelongsTo(env, siteId, u.default_author_id, userId))) {
+    return u.default_author_id;
+  }
   const row = await env.DB.prepare(
     "SELECT id FROM authors WHERE site_id = ? AND user_id = ? ORDER BY created LIMIT 1"
   ).bind(siteId, userId).first();
   return row?.id || "";
+}
+
+// authorBelongsTo reports whether authorId is one of userId's profiles on this site.
+async function authorBelongsTo(env, siteId, authorId, userId) {
+  const row = await env.DB.prepare(
+    "SELECT id FROM authors WHERE id = ? AND site_id = ? AND user_id = ?"
+  ).bind(authorId, siteId, userId).first();
+  return !!row;
+}
+
+// listPersonas returns an account's author profiles, earliest first, each flagged
+// with whether it's the current default (the one attribution uses).
+async function listPersonas(env, siteId, userId) {
+  const def = await defaultAuthorId(env, siteId, userId);
+  const { results } = await env.DB.prepare(
+    "SELECT id, name, avatar FROM authors WHERE site_id = ? AND user_id = ? ORDER BY created"
+  ).bind(siteId, userId).all();
+  return (results || []).map((a) => ({ id: a.id, name: a.name, avatar: a.avatar, is_default: a.id === def }));
 }
 
 // createMember creates a passwordless OTP account with the given role (the

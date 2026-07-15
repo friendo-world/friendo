@@ -900,6 +900,46 @@
   },
 
   {
+    "name": "log in as owner for the persona flow",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "the account starts with one persona, marked default",
+    "method": "GET", "path": "/me/personas",
+    "expect": { "status": 200, "length": { "personas": 1 }, "json": { "personas.0.is_default": true } },
+    "capture": { "persona0": "personas.0.id" }
+  },
+  {
+    "name": "create a second persona",
+    "method": "POST", "path": "/me/personas",
+    "body": { "name": "Alter Ego" },
+    "expect": { "status": 201, "json": { "persona.name": "Alter Ego", "persona.is_default": false } },
+    "capture": { "persona1": "persona.id" }
+  },
+  {
+    "name": "both personas now list, earliest first, only the first default",
+    "method": "GET", "path": "/me/personas",
+    "expect": { "status": 200, "length": { "personas": 2 }, "json": { "personas.0.is_default": true, "personas.1.name": "Alter Ego", "personas.1.is_default": false } }
+  },
+  {
+    "name": "switch the default to the second persona",
+    "method": "POST", "path": "/me/personas/${persona1}/default",
+    "expect": { "status": 200, "json": { "ok": true } }
+  },
+  {
+    "name": "the default now follows the chosen persona",
+    "method": "GET", "path": "/me/personas",
+    "expect": { "status": 200, "json": { "personas.0.is_default": false, "personas.1.is_default": true } }
+  },
+  {
+    "name": "cannot default to a persona that isn't yours",
+    "method": "POST", "path": "/me/personas/does-not-exist/default",
+    "expect": { "status": 404 }
+  },
+
+  {
     "name": "brute-force login attempt 1 fails",
     "method": "POST", "path": "/auth/login",
     "body": { "email": "nobody@test.com", "password": "wrong" },

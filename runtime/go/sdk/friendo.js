@@ -9,6 +9,7 @@
  *   <friendo-comments post-id="…"></friendo-comments>
  *   <friendo-reactions target-type="post" target-id="…"></friendo-reactions>
  *   <friendo-poll poll-id="…"></friendo-poll>
+ *   <friendo-map target-type="post" target-id="…"></friendo-map>
  *
  * Every component renders into a shadow root and exposes its internals through
  * `part` attributes, so authors style them from their own stylesheet with
@@ -109,24 +110,94 @@
       return (
         "input{font:inherit;padding:.4em .5em;border:1px solid #ccc;border-radius:6px}" +
         "form{display:flex;gap:.5em;flex-wrap:wrap;align-items:center}" +
-        ".status{opacity:.7;font-size:.9em}"
+        ".status{opacity:.7;font-size:.9em}" +
+        ".link{border:0;background:none;padding:0;color:inherit;text-decoration:underline;font:inherit;opacity:.8}" +
+        ".panel{margin-top:.5em;font-size:.9em}" +
+        ".persona{display:block;width:100%;text-align:left;margin:.2em 0;padding:.35em .5em;border:1px solid #ddd;" +
+        "border-radius:8px;background:#fafafa}" +
+        '.persona[aria-pressed="true"]{font-weight:600;border-color:#4299e1;background:#e8f0ff}' +
+        ".panel form{margin-top:.4em}"
       );
     }
     async render() {
       var user = await currentUser();
-      if (user) {
-        this.paint(
-          '<div part="signed-in" class="status">Signed in as <b part="name">' +
-            esc(user.name || user.email) +
-            '</b> · <button part="logout">Sign out</button></div>'
-        );
-        this.shadowRoot.querySelector('[part="logout"]').onclick = async () => {
-          await api("/auth/logout", { method: "POST" }).catch(function () {});
-          broadcastAuth(null);
-        };
-        return;
-      }
+      if (user) return this._renderSignedIn(user);
       this._renderRequest();
+    }
+    // Signed-in view: shows the persona attribution flows to, with a switcher to
+    // pick a different persona or add one. The chosen persona is the account's
+    // default (server-side), so comments/messages attribute to it everywhere.
+    async _renderSignedIn(user) {
+      var personas = [];
+      try {
+        var r = await api("/me/personas");
+        personas = (r && r.personas) || [];
+      } catch (e) { /* older runtime or no personas — degrade to the account name */ }
+      var current = personas.filter(function (p) { return p.is_default; })[0] || personas[0];
+      var name = current ? current.name : user.name || user.email;
+      var many = personas.length > 1;
+
+      this.paint(
+        '<div part="signed-in" class="status">Posting as <b part="name">' + esc(name) + "</b>" +
+          ' · <button part="personas-toggle" class="link">personas</button>' +
+          ' · <button part="logout">Sign out</button></div>' +
+          '<div part="personas" class="panel" hidden></div>'
+      );
+
+      var self = this;
+      this.shadowRoot.querySelector('[part="logout"]').onclick = async function () {
+        await api("/auth/logout", { method: "POST" }).catch(function () {});
+        broadcastAuth(null);
+      };
+
+      var panel = this.shadowRoot.querySelector('[part="personas"]');
+      this.shadowRoot.querySelector('[part="personas-toggle"]').onclick = function () {
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) self._paintPersonas(panel, personas);
+      };
+      // If the account already has several personas, open the switcher by default so
+      // it's discoverable; a single-persona account keeps it tucked away.
+      if (many) { panel.hidden = false; this._paintPersonas(panel, personas); }
+    }
+    // _paintPersonas fills the switcher panel: a row per persona (click to make it
+    // the default) plus an inline "new persona" form.
+    _paintPersonas(panel, personas) {
+      var self = this;
+      var rows = personas
+        .map(function (p) {
+          return (
+            '<button part="persona" class="persona" data-id="' + esc(p.id) + '" aria-pressed="' +
+            (p.is_default ? "true" : "false") + '">' + esc(p.name) +
+            (p.is_default ? " ✓" : "") + "</button>"
+          );
+        })
+        .join("");
+      panel.innerHTML =
+        rows +
+        '<form part="new-persona"><input part="new-name" placeholder="New persona name" required />' +
+        '<button part="add" type="submit">Add</button></form>';
+
+      panel.querySelectorAll(".persona").forEach(function (btn) {
+        btn.onclick = async function () {
+          if (btn.getAttribute("aria-pressed") === "true") return;
+          try {
+            await api("/me/personas/" + encodeURIComponent(btn.dataset.id) + "/default", { method: "POST" });
+            self.render(); // refresh the "Posting as …" line + panel
+          } catch (e) { /* leave as-is */ }
+        };
+      });
+
+      var form = panel.querySelector("form");
+      form.onsubmit = async function (e) {
+        e.preventDefault();
+        var input = panel.querySelector('[part="new-name"]');
+        var name = input.value.trim();
+        if (!name) return;
+        try {
+          await api("/me/personas", jsonBody("POST", { name: name }));
+          self.render();
+        } catch (err) { /* ignore */ }
+      };
     }
     _renderRequest() {
       this.paint(
@@ -560,12 +631,109 @@
     }
   }
 
+  // --- <friendo-map target-type target-id> -----------------------------------
+  // Renders a target's geo-tags (the locations API) as an interactive map with a
+  // marker per location. Public read — no sign-in needed. Uses Leaflet (open-source,
+  // BSD-2) with OpenStreetMap tiles (free, no API key), lazy-loaded from a CDN only
+  // on pages that actually use a <friendo-map>, so the rest of the SDK stays lean.
+  var LEAFLET_VERSION = "1.9.4";
+  var LEAFLET_JS = "https://unpkg.com/leaflet@" + LEAFLET_VERSION + "/dist/leaflet.js";
+  var LEAFLET_CSS = "https://unpkg.com/leaflet@" + LEAFLET_VERSION + "/dist/leaflet.css";
+  var leafletPromise = null;
+  function loadLeaflet() {
+    if (leafletPromise) return leafletPromise;
+    leafletPromise = new Promise(function (resolve, reject) {
+      if (window.L) return resolve(window.L);
+      var s = document.createElement("script");
+      s.src = LEAFLET_JS;
+      s.crossOrigin = "";
+      s.onload = function () { window.L ? resolve(window.L) : reject(new Error("map library failed to initialize")); };
+      s.onerror = function () { reject(new Error("could not load the map library")); };
+      document.head.appendChild(s);
+    });
+    return leafletPromise;
+  }
+
+  class FriendoMap extends FriendoElement {
+    css() {
+      // Leaflet needs a definite height on its container at init; aspect-ratio isn't
+      // reliably resolved in time, so use a fixed height (override via ::part(map)).
+      return (
+        ".map{width:100%;height:380px;border:1px solid #ddd;border-radius:10px;background:#eef}" +
+        ".empty{opacity:.6}"
+      );
+    }
+    disconnectedCallback() {
+      super.disconnectedCallback();
+      if (this._map) { this._map.remove(); this._map = null; }
+    }
+    async render() {
+      // Tear down any prior map instance (re-render on auth change) before repainting.
+      if (this._map) { this._map.remove(); this._map = null; }
+
+      var targetType = this.getAttribute("target-type") || "";
+      var targetId = this.getAttribute("target-id") || "";
+      var data;
+      try {
+        data = await api(
+          "/locations?target_type=" + encodeURIComponent(targetType) + "&target_id=" + encodeURIComponent(targetId)
+        );
+      } catch (e) {
+        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        return;
+      }
+      var locations = (data && data.locations) || [];
+      if (!locations.length) {
+        this.paint('<div part="empty" class="empty">No locations yet.</div>');
+        return;
+      }
+
+      // Leaflet's stylesheet is scoped into the shadow root so it can't leak into
+      // the host page; the map container needs a definite size before init.
+      this.paint('<link rel="stylesheet" href="' + LEAFLET_CSS + '"><div part="map" class="map"></div>');
+      var el = this.shadowRoot.querySelector(".map");
+
+      var L;
+      try {
+        L = await loadLeaflet();
+      } catch (e) {
+        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        return;
+      }
+      if (!this.isConnected) return; // removed while the library loaded
+
+      var map = L.map(el, { scrollWheelZoom: false });
+      this._map = map;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
+
+      // A circle marker per point (SVG — no external icon images, so it renders
+      // reliably inside the shadow root); the label shows in a popup.
+      var pts = locations.map(function (l) {
+        var m = L.circleMarker([l.lat, l.lng], { radius: 7, color: "#2b6cb0", fillColor: "#4299e1", fillOpacity: 0.9, weight: 2 }).addTo(map);
+        if (l.label) m.bindPopup(esc(l.label));
+        return [l.lat, l.lng];
+      });
+      if (pts.length === 1) {
+        map.setView(pts[0], 13);
+      } else {
+        map.fitBounds(pts, { padding: [30, 30] });
+      }
+      // The container may have been laid out after init (aspect-ratio / shadow DOM);
+      // recompute the map size so tiles fill it.
+      setTimeout(function () { map.invalidateSize(); }, 0);
+    }
+  }
+
   var defs = {
     "friendo-auth": FriendoAuth,
     "friendo-comments": FriendoComments,
     "friendo-reactions": FriendoReactions,
     "friendo-poll": FriendoPoll,
     "friendo-channel": FriendoChannel,
+    "friendo-map": FriendoMap,
   };
   Object.keys(defs).forEach(function (tag) {
     if (!customElements.get(tag)) customElements.define(tag, defs[tag]);
