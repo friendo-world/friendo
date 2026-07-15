@@ -18,6 +18,8 @@ friendo/
 │   ├── src/              # Preact + TypeScript app
 │   ├── scripts/          # bundle-edge.mjs (mirrors the build into the edge)
 │   └── vite.config.ts    # builds to runtime/go/admin/spa
+├── sdk/                  # friendo.js — community Web Components, served by BOTH
+│   └── friendo.js        #   runtimes at /friendo.js (auth/comments/reactions/poll/channel/map)
 ├── runtime/
 │   ├── go/               # Go site runtime (local dev server)
 │   │   ├── server/       # HTTP server, routing, hot reload
@@ -36,6 +38,7 @@ friendo/
 │   ├── worker.js         # Dispatch Worker: subdomain routing, platform auth, provisioning
 │   └── schema.sql        # Platform-only tables (sites registry, Better Auth)
 ├── testsite/             # Example site for local development
+├── tests/                # Parity harness (REST + render + splitter) + SDK browser check
 ├── go.mod                # Single Go module at repo root
 └── package.json          # Dev scripts
 ```
@@ -144,11 +147,26 @@ npm run tunnel            # map *.local.friendo.world → :8787
 
 ## Testing
 
-[tests/](tests/) holds a **parity harness**: one shared `scenarios.json` of
-request→assert steps, run against both the Go and edge runtimes, asserting they
-behave identically. `npm test` runs both; `npm run test:go` is a fast
-Cloudflare-free subset. To extend coverage, add a step to `scenarios.json` and it
-runs against both runtimes automatically — see [tests/README.md](tests/README.md).
+[tests/](tests/) holds a **parity harness** that proves the two runtimes behave
+identically, driven by shared fixture files run against both:
+
+- **REST API** — `scenarios.json` (request→assert steps).
+- **Template render** — `render-scenarios.json` (a template + records → a golden the
+  Go and edge engines must both produce, byte-for-byte).
+- **SQL splitter** — `splitter-cases.json` (the schema/migration statement splitter
+  must split identically in both runtimes).
+
+`npm test` runs both runtimes; `npm run test:go` is a fast Cloudflare-free subset.
+A **CLI push/pull round-trip** is covered in `cli/internal/deploy/roundtrip_test.go`.
+
+`npm run test:sdk` is a separate **browser check** (Playwright): it boots the Go
+runtime over a throwaway site and drives Chromium to confirm the `friendo.js` Web
+Components render — `<friendo-map>` paints its markers and the `<friendo-auth>`
+persona switcher works. It needs network (the map loads Leaflet + OSM tiles from a
+CDN), so it isn't part of `npm test`.
+
+To extend coverage, add a fixture and it runs against both runtimes automatically —
+see [tests/README.md](tests/README.md).
 
 ## Architecture
 

@@ -93,12 +93,13 @@ runtimes (deferred items noted per slice below). Full design + slices in
   `site_settings`, migration `0006`, `GET/PUT /_/api/settings` + SPA switch);
   a durable `request-code` rate limit (429); and an email-provider seam
   (Resend via `RESEND_API_KEY` + `FRIENDO_EMAIL_FROM`; the OTP echo disables once
-  configured). **Deferred:** the persona switcher UI and per-member comment-rate
-  limiting.
+  configured). Per-member comment/message rate limiting and the persona switcher
+  (once deferred) both shipped in v0.3.
 
-Not yet wired: exposing approved comments/reactions/polls in the *server-side*
-template context (`{{ post.comments }}`). The SDK delivers them client-side
-today; server-side relations need a lazy-load mechanism in both template engines.
+Server-side relations are now wired (v0.3, Tier 0): a post template can render
+`{{ record.comments }}`, `{{ record.reactions }}`, and `{{ record.poll }}` directly
+— approved/public data attached to the focused record in both engines, no JS
+required. The SDK components remain the interactive, signed-in path.
 
 ## Testing
 
@@ -145,6 +146,23 @@ D1's per-account cap from 10 to 50,000.)
 
 ## Recently shipped
 
+- **v0.3 — consolidation toward 1.0** (Tiers 0–3; see
+  [design/v0.3-roadmap.md](design/v0.3-roadmap.md)). Makes the shipped surface solid
+  end-to-end rather than adding a new marquee. **Tier 0 — server-side community
+  content:** a post template renders `{{ record.comments }}` / `.reactions` /
+  `.poll` directly (approved/public data, lazy-loaded in both engines) so community
+  data reads with no JS; the SDK stays the interactive path. **Tier 1 — galleries:**
+  a page bundle (`content/blog/trip/index.md` + sibling images) auto-attaches its
+  images as `field="gallery"` files (deterministic ids → idempotent re-import + push)
+  rendered via `{{ record.gallery }}`. **Tier 2 — coverage past REST:** a shared
+  render-parity suite (`render-scenarios.json`, both runtimes), a hardened + tested
+  SQL statement splitter (`splitter-cases.json`), a CLI push/pull round-trip test,
+  and a Playwright SDK browser check (`npm run test:sdk`). **Tier 3 — polish:** a
+  `<friendo-map>` SDK component (interactive Leaflet + OSM tiles, lazy-loaded), a
+  **persona switcher** (`users.default_author_id`, migration `0010`; member
+  endpoints `/_/api/me/personas`; a switcher in `<friendo-auth>`), and confirmation
+  that per-member comment/message rate limiting was already at parity. Parity harness
+  now **162 steps + 5 render fixtures + 5 splitter cases**, plus the browser check.
 - **v0.2 release hardening (Tier 0–2)** — the sequenced audit work toward the 0.2
   tag. **Security:** OTP echo gated behind an explicit dev flag + per-site email in
   provisioning; login/comment rate limiting. **Correctness:** `authors` +
@@ -185,7 +203,7 @@ D1's per-account cap from 10 to 50,000.)
   platform has no admin scope yet) or a script iterating owned sites.
 - **Customer custom domains** (`friendo.toml deploy.domain` → a user's own
   domain, e.g. Cloudflare for SaaS) aren't wired up yet.
-- **Image galleries / page bundles** (folder of images + `index.md`) are the
-  planned phase 2 of file-based content. The plumbing they need now exists —
-  per-record media upload (`POST /_/api/files`), binary-safe asset push, and
-  `files`-row sync — so this is a UI/importer feature, not a runtime gap.
+- ~~Image galleries / page bundles~~ — **shipped in v0.3 (Tier 1):** a page bundle's
+  sibling images auto-import as `field="gallery"` files and render via
+  `{{ record.gallery }}` (and a `<friendo-gallery>` remains an optional client-side
+  nicety, not built since the server-side path covers it).

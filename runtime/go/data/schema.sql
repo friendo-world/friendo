@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS locations (
     created     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_locations_target ON locations(site_id, target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_locations_geo ON locations(site_id, target_type, lat, lng);
 
 -- Media
 CREATE TABLE IF NOT EXISTS files (

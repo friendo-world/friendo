@@ -131,14 +131,14 @@ Friendo ships with built-in content types that work identically on your machine 
 | Type | What it's for | Template access |
 |---|---|---|
 | **Posts** | Blog posts, pages, any authored content | `{{ collections.blog }}` |
-| **Comments** | Threaded comments on any post | `{{ post.comments }}` |
-| **Reactions** | Emoji reactions on posts or comments | `{{ post.reactions }}` |
-| **Channels** | Chat rooms, forums, feeds | `{{ channels }}` |
-| **Messages** | Messages within a channel | `{{ channel.messages }}` |
-| **Polls** | Polls attached to posts | `{{ post.poll }}` |
-| **Authors** | People who create content | `{{ authors }}` |
-| **Locations** | Geotag any record | `{{ post.location }}` |
-| **Files** | Media and uploads | `{{ post.files }}` |
+| **Comments** | Comments on any post | `{{ record.comments }}` or `<friendo-comments>` |
+| **Reactions** | Emoji reactions on posts or comments | `{{ record.reactions }}` or `<friendo-reactions>` |
+| **Channels** | Chat rooms, forums, feeds (realtime) | `<friendo-channel>` |
+| **Messages** | Messages within a channel | `<friendo-channel>` |
+| **Polls** | Polls attached to posts | `{{ record.poll }}` or `<friendo-poll>` |
+| **Authors** | People (personas) who create content | `{{ record.author_name }}` |
+| **Locations** | Geotag any record | `<friendo-map>` |
+| **Files** | Media, uploads, page-bundle galleries | `{{ record.gallery }}` |
 
 Enable what you need in `friendo.toml`:
 
@@ -228,8 +228,9 @@ All sync goes through the site's own `/_/api/*` endpoints, authenticated with si
 |---|---|---|
 | **Phase 1** | CLI + Go runtime + friendo.world foundation | Complete |
 | **Phase 1.5** | Auth, shared admin SPA + REST API, codebase refactor, Workers for Platforms, working deploy | Complete |
-| **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
-| **Phase 3** | Community features (visitor comments/reactions/polls), template marketplace | Planned |
+| **Phase 3** | Community features — visitor comments/reactions/polls, realtime channels, locations, media, the `friendo.js` SDK | Complete |
+| **v0.2 / v0.3** | Public-safe hardening + parity, then consolidation toward 1.0: server-side community rendering, page-bundle galleries, render/CLI/SDK test coverage, `<friendo-map>`, persona switcher | Complete |
+| **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned (0.4+) |
 
 See [ROADMAP.md](ROADMAP.md) for details and known gaps.
 

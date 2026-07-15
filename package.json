@@ -10,7 +10,7 @@
     "test": "npm run test:go && npm run test:edge",
     "test:go": "go test ./tests/",
     "test:edge": "node tests/edge-parity.mjs",
-    "test:sdk": "go build -o bin/friendo ./cli/cmd/friendo/ && node tests/sdk-persona.mjs && node tests/sdk-map.mjs",
+    "test:sdk": "go build -o bin/friendo ./cli/cmd/friendo/ && node tests/sdk-persona.mjs && node tests/sdk-map.mjs && node tests/sdk-map-aggregate.mjs",
     "build": "npm run admin && npm run sdk && go build -o bin/friendo ./cli/cmd/friendo/",
     "runtime:bundle": "node platform/scripts/build-runtime.mjs",
     "runtime:publish": "wrangler r2 object put friendo-runtime/edge-runtime.js --file=runtime/edge/dist/edge-runtime.js --remote",

@@ -129,7 +129,9 @@ func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler
 	r := chi.NewRouter()
 
 	// Admin UI + REST/sync API at /_/ (the admin package mounts the api package).
-	admin.Mount(r, db, openAdmin, siteCfg.Site.Name, siteDir)
+	// The permalink resolver lets the locations API return each post's public URL
+	// so an aggregate <friendo-map> can link markers back to their posts.
+	admin.Mount(r, db, openAdmin, siteCfg.Site.Name, siteDir, permalinkResolver(routes))
 
 	// Live reload SSE endpoint.
 	r.Get("/_/reload", handleReloadSSE)
@@ -285,6 +287,7 @@ type route struct {
 	filePath       string
 	params         []string
 	collectionName string
+	urlTemplate    string // literal path with [param] segments, e.g. "/blog/[slug]"
 }
 
 // buildRoutes walks the pages directory and creates a route table.
@@ -345,12 +348,36 @@ func buildRoutes(pagesDir string) ([]route, error) {
 			filePath:       path,
 			params:         params,
 			collectionName: collectionName,
+			urlTemplate:    urlPath,
 		})
 
 		return nil
 	})
 
 	return routes, err
+}
+
+// permalinkResolver builds a data.PermalinkFunc from the route table — the
+// reverse of buildRoutes. Given a collection and a record's field values it
+// finds the collection's dynamic page and substitutes the values back into the
+// URL template (e.g. blog + {slug: "hello"} -> "/blog/hello"). It returns "" for
+// collections with no public page. This is why a link on the aggregate map is
+// correct even for nested pages, where a naive "/{collection}/{slug}" is wrong.
+func permalinkResolver(routes []route) data.PermalinkFunc {
+	return func(collection string, fields map[string]string) string {
+		for i := range routes {
+			r := &routes[i]
+			if r.collectionName != collection || r.urlTemplate == "" {
+				continue
+			}
+			url := r.urlTemplate
+			for _, p := range r.params {
+				url = strings.ReplaceAll(url, "["+p+"]", fields[p])
+			}
+			return url
+		}
+		return ""
+	}
 }
 
 // --- Template rendering ---

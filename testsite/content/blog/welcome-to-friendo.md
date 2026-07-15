@@ -3,6 +3,7 @@ title: Welcome to Friendo
 slug: welcome-to-friendo
 status: published
 date: 2026-07-01
+location: 48.8584, 2.2945
 ---
 
 This is a demo site built with **Friendo** — your site is a folder, you build it

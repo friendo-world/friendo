@@ -60,10 +60,32 @@ Every page is rendered with:
 | `collections.<name>` | All records in a collection |
 | `record` | The matched record on a dynamic `[param]` route |
 | `record.data.<field>` | Custom [front matter](/docs/content) fields (tags, weight, …) |
+| `record.comments` / `.reactions` / `.poll` / `.gallery` | The post's public [community relations](#community-relations) (server-rendered) |
 
 A record's built-in fields are `id`, `slug`, `title`, `body`, `status`,
 `published_at`, `created`, `updated`. Any extra keys from a content file's front
 matter are available under `record.data` — e.g. `{{ record.data.weight }}`.
+
+### Community relations
+
+On a dynamic post route, `record` also carries the post's **public community data**,
+so you can render it server-side with no JavaScript (the interactive
+[`friendo.js` components](/docs/community) are the signed-in path):
+
+| Relation | What |
+|---|---|
+| `record.comments` | The post's **approved** comments (oldest first): `author_name`, `body`, `created`, … |
+| `record.reactions` | Reaction tallies: `{ emoji, count }` per emoji |
+| `record.poll` | The post's poll (present only if declared in front matter): `question` + `options` with `text` / `votes` |
+| `record.gallery` | Images from the post's [page bundle](/docs/content#page-bundles-galleries): each has a `url` |
+
+```html
+<ul>{% for r in record.reactions %}<li>{{ r.emoji }} {{ r.count }}</li>{% endfor %}</ul>
+<ol>{% for c in record.comments %}<li><b>{{ c.author_name }}</b>: {{ c.body }}</li>{% endfor %}</ol>
+{% for img in record.gallery %}<img src="{{ img.url }}" alt="">{% endfor %}
+```
+
+Both runtimes attach these at the same point, so they render identically.
 
 ## Control flow
 

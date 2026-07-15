@@ -21,14 +21,19 @@ types = ["posts", "comments", "reactions"]
 | Type | What it's for | In templates |
 |---|---|---|
 | **Posts** | Blog posts, pages, any authored content | `{{ collections.blog }}` |
-| **Comments** | Threaded comments on a post | `{{ post.comments }}` |
-| **Reactions** | Emoji reactions on posts or comments | `{{ post.reactions }}` |
-| **Channels** | Chat rooms, forums, feeds | `{{ channels }}` |
-| **Messages** | Messages within a channel | `{{ channel.messages }}` |
-| **Polls** | Polls attached to a post | `{{ post.poll }}` |
-| **Authors** | People who create content | `{{ authors }}` |
-| **Locations** | Geotag any record | `{{ post.location }}` |
-| **Files** | Media and uploads | `{{ post.files }}` |
+| **Comments** | Comments on a post | `{{ record.comments }}` (approved) or `<friendo-comments>` |
+| **Reactions** | Emoji reactions on posts or comments | `{{ record.reactions }}` or `<friendo-reactions>` |
+| **Channels** | Chat rooms, forums, feeds (realtime) | `<friendo-channel>` |
+| **Messages** | Messages within a channel | `<friendo-channel>` |
+| **Polls** | Polls attached to a post | `{{ record.poll }}` or `<friendo-poll>` |
+| **Authors** | People (personas) who create content | `{{ record.author_name }}` |
+| **Locations** | Geotag any record | `<friendo-map>` |
+| **Files** | Media and uploads (incl. galleries) | `{{ record.gallery }}` |
+
+Community relations (`record.comments` / `.reactions` / `.poll` / `.gallery`) render
+**server-side** on a post's page; the `<friendo-*>` components are the interactive,
+signed-in equivalents. See [Templates](/docs/templates#community-relations) and
+[Community features](/docs/community).
 
 ## Collections in templates
 
@@ -82,6 +87,31 @@ Your **markdown** body. Rendered with the `markdown` filter at template time.
 (hot reload); `friendo build` does it on demand; and `friendo push`/`deploy`
 compile before uploading. Importing upserts by `(collection, slug)`, so `content/`
 is the source of truth — this documentation site is authored exactly this way.
+
+### Page bundles & galleries
+
+A post can be a **folder** instead of a single file: put an `index.md` in
+`content/<collection>/<slug>/` and the folder name becomes the slug. Any images
+sitting next to it are imported as the post's **gallery** — no upload step:
+
+```
+content/blog/my-trip/
+  index.md          → blog / my-trip
+  01-sunrise.jpg    ┐  attached to the post as record.gallery
+  02-harbor.jpg     ┘  (served from /assets/, and synced on deploy)
+```
+
+Render them in the post template:
+
+```html
+{% for img in record.gallery %}
+  <img src="{{ img.url }}" alt="">
+{% endfor %}
+```
+
+The images are copied under `assets/galleries/…` (regenerated on every build, so
+`content/` stays the source of truth) and ride along on `friendo push --data` like
+any uploaded media. Supported: `.png`, `.jpg`, `.gif`, `.webp`, `.svg`.
 
 This site's sidebar, for instance, is generated from its docs collection sorted by
 each file's `weight`:

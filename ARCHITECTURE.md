@@ -74,6 +74,7 @@ the actor's *own* rows unless they hold the `.any` variant.
 | Area | Endpoints | Capability |
 |---|---|---|
 | Bootstrap | `GET /me`, `POST /auth/login`, `POST /auth/logout`, `GET/POST /setup`, `POST /migrate`, `POST /auth/request-code`, `POST /auth/verify-code` | public |
+| Personas | `GET/POST /me/personas`, `POST /me/personas/:id/default` — an account's author profiles + which one attribution uses | authenticated member (own personas) |
 | Content | `GET /collections`, CRUD under `/collections/:c/records` and `/records/:id`; `GET /records`, `PUT /records/:id/status` (review queue) | `content.create` (own); `content.edit.any` / `content.publish` for others' posts + publishing |
 | Community | `GET/POST /posts/:id/comments`, `PUT/DELETE /comments/:id` (moderation); `POST/DELETE /reactions`; `GET/POST /polls`, `POST /polls/:id/vote` | authenticated baseline (comment/react/vote); `comment.moderate.own/any` to moderate; `content.edit.any` to author a poll |
 | Channels (realtime) | `GET/POST /channels`, `DELETE /channels/:id`; `GET/POST /channels/:id/messages`, `DELETE /messages/:id`; `GET /channels/:id/stream` (SSE) | read/post = authenticated member; channel mgmt = `site.configure` |
@@ -82,6 +83,15 @@ the actor's *own* rows unless they hold the `.any` variant.
 | Users | `GET/POST /users`, `PUT/DELETE /users/:id` (role rules + last-owner guard) | `user.manage`; granting admin/owner needs `site.own` |
 | Settings | `GET/PUT /settings` (site name + `access.*` / `content.require_approval` policy) | `site.configure` |
 | Sync | `POST /push/{templates,assets,data,users,settings,files}`, `GET /pull/{data,users,settings,files}` | `site.configure` |
+
+**Community data renders two ways.** The `friendo.js` SDK components fetch these
+endpoints client-side (interactive, viewer-aware). For content that benefits from a
+no-JS read, both runtimes *also* attach the public relations to the focused record
+in the template context — `record.comments` (approved), `record.reactions`,
+`record.poll`, and `record.gallery` — so a post template can render them directly.
+Both engines attach them at the same point in the render path, so output is
+byte-identical (covered by the render-parity suite). Inherently interactive features
+(realtime chat, the `<friendo-map>` widget) stay client-side by design.
 
 ## Deploy, push, pull
 
@@ -207,10 +217,15 @@ and surfaced as one-click presets (Personal / Community / Blog) in the admin UI.
 The public render path shows only `published` posts. Full design in
 [design/auth-permissions.md](design/auth-permissions.md).
 
-**Accounts vs. profiles.** A `users` row is an *account* (the auth identity).
-Display **profiles** live in `authors`, linked by `authors.user_id` — one account
-can have several. All content (`posts`, `comments`, …) references a profile via
-`author_id` → `authors.id`; every account gets a default profile on creation.
+**Accounts vs. profiles (personas).** A `users` row is an *account* (the auth
+identity). Display **profiles** live in `authors`, linked by `authors.user_id` — one
+account can have several. All content (`posts`, `comments`, …) references a profile
+via `author_id` → `authors.id`; every account gets a default profile on creation. A
+member manages their profiles as **personas** (`/_/api/me/personas`) and picks which
+one attribution uses; the choice is a pointer, `users.default_author_id` (migration
+`0010`), honored by `DefaultAuthorID` — so switching persona re-attributes all their
+comments/messages with no per-write plumbing. The `<friendo-auth>` component exposes
+the switcher.
 
 **Members** are visitors who verify their email via a one-time code
 (`/auth/request-code` → `/auth/verify-code`, backed by `otp_codes`) to get a

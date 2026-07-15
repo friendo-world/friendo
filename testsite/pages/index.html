@@ -1,7 +1,9 @@
 {% extends "layouts/base.html" %}
 {% block content %}
 <h1>{{ site.name }}</h1>
-<p>A Friendo demo site. Open a post to try comments, reactions, and polls.</p>
+<p>A Friendo demo site. Open a post to try comments, reactions, polls, and a map —
+see the <a href="/blog/gallery-demo">page-bundle gallery</a>, or view every post on
+the <a href="/map">post map</a>.</p>
 
 {% for post in collections.blog %}
 <article>

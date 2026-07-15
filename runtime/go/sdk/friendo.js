@@ -631,11 +631,18 @@
     }
   }
 
-  // --- <friendo-map target-type target-id> -----------------------------------
-  // Renders a target's geo-tags (the locations API) as an interactive map with a
-  // marker per location. Public read — no sign-in needed. Uses Leaflet (open-source,
-  // BSD-2) with OpenStreetMap tiles (free, no API key), lazy-loaded from a CDN only
-  // on pages that actually use a <friendo-map>, so the rest of the SDK stays lean.
+  // --- <friendo-map target-type [target-id] [post-url-pattern]> --------------
+  // Renders geo-tags (the locations API) as an interactive map with a marker per
+  // location. Two modes:
+  //   • with target-id — one target's pins, e.g. <friendo-map target-type="post"
+  //     target-id="p1"> shows every location on post p1.
+  //   • without target-id — every published post's pin of that type on one map,
+  //     e.g. <friendo-map target-type="post">. Each marker links back to its post
+  //     using the URL the server resolves; post-url-pattern="/blog/{slug}" is an
+  //     override for hosts whose routes the server can't see.
+  // Public read — no sign-in needed. Uses Leaflet (open-source, BSD-2) with
+  // OpenStreetMap tiles (free, no API key), lazy-loaded from a CDN only on pages
+  // that actually use a <friendo-map>, so the rest of the SDK stays lean.
   var LEAFLET_VERSION = "1.9.4";
   var LEAFLET_JS = "https://unpkg.com/leaflet@" + LEAFLET_VERSION + "/dist/leaflet.js";
   var LEAFLET_CSS = "https://unpkg.com/leaflet@" + LEAFLET_VERSION + "/dist/leaflet.css";
@@ -673,11 +680,12 @@
 
       var targetType = this.getAttribute("target-type") || "";
       var targetId = this.getAttribute("target-id") || "";
+      // No target-id → aggregate mode: every published post of this type.
+      var q = "/locations?target_type=" + encodeURIComponent(targetType);
+      if (targetId) q += "&target_id=" + encodeURIComponent(targetId);
       var data;
       try {
-        data = await api(
-          "/locations?target_type=" + encodeURIComponent(targetType) + "&target_id=" + encodeURIComponent(targetId)
-        );
+        data = await api(q);
       } catch (e) {
         this.paint('<div part="error">' + esc(e.message) + "</div>");
         return;
@@ -710,10 +718,19 @@
       }).addTo(map);
 
       // A circle marker per point (SVG — no external icon images, so it renders
-      // reliably inside the shadow root); the label shows in a popup.
+      // reliably inside the shadow root). The popup links back to the post when a
+      // URL is known (server-resolved url, else post-url-pattern), otherwise it
+      // falls back to the plain label — never a broken link.
+      var pattern = this.getAttribute("post-url-pattern") || "";
       var pts = locations.map(function (l) {
         var m = L.circleMarker([l.lat, l.lng], { radius: 7, color: "#2b6cb0", fillColor: "#4299e1", fillOpacity: 0.9, weight: 2 }).addTo(map);
-        if (l.label) m.bindPopup(esc(l.label));
+        var href = l.url || (pattern && l.slug ? pattern.replace("{slug}", encodeURIComponent(l.slug)) : "");
+        var text = l.title || l.label;
+        if (href) {
+          m.bindPopup('<a href="' + esc(href) + '">' + esc(text || "View post") + "</a>");
+        } else if (text) {
+          m.bindPopup(esc(text));
+        }
         return [l.lat, l.lng];
       });
       if (pts.length === 1) {

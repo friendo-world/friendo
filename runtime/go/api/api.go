@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +27,7 @@ import (
 //
 // Public endpoints (me, auth) carry no auth so the SPA can bootstrap and log in.
 // Everything else requires site admin authentication (session cookie).
-func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*http.Request) *data.User) {
+func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*http.Request) *data.User, permalink data.PermalinkFunc) {
 	r.Route("/api", func(r chi.Router) {
 		// Public endpoints — used by the SPA to bootstrap and authenticate.
 		r.Get("/me", handleMe(authFunc))
@@ -62,8 +63,10 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/polls/{id}", handleGetPoll(db, authFunc))
 		r.Post("/polls/{id}/vote", handleVotePoll(db, authFunc))
 
-		// Locations (geo-tagging): public reads; editor+ attaches/removes.
-		r.Get("/locations", handleListLocations(db))
+		// Locations (geo-tagging): public reads; contributor+ attaches/removes
+		// (own posts) or editor+ (any). Ownership is enforced inside the handler,
+		// so the route gate is the lower content.edit.own capability.
+		r.Get("/locations", handleListLocations(db, permalink))
 
 		// Files (per-record media): public reads; contributor+ uploads/removes.
 		r.Get("/files", handleListFiles(db))
@@ -92,9 +95,11 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// Poll creation — editor+ (content.edit.any).
 		r.Post("/polls", capGate(authFunc, data.CapContentEditAny, handleCreatePoll(db)))
 
-		// Location tagging — editor+ (content.edit.any).
-		r.Post("/locations", capGate(authFunc, data.CapContentEditAny, handleCreateLocation(db)))
-		r.Delete("/locations/{id}", capGate(authFunc, data.CapContentEditAny, handleDeleteLocation(db)))
+		// Location tagging — contributor+ (content.edit.own). The gate admits
+		// contributors; the handler then requires the actor to own the target post
+		// unless they also hold content.edit.any (editor+), mirroring the record API.
+		r.Post("/locations", capGate(authFunc, data.CapContentEditOwn, handleCreateLocation(db, authFunc)))
+		r.Delete("/locations/{id}", capGate(authFunc, data.CapContentEditOwn, handleDeleteLocation(db, authFunc)))
 
 		// Media upload — contributor+ (content.create). Bytes land in assets/ and
 		// are served by the static /assets/* handler; the row links them to a record.
@@ -617,26 +622,72 @@ func handleToggleReaction(db *data.DB, authFunc func(*http.Request) *data.User) 
 
 // --- Locations (geo-tagging) ---
 
-// handleListLocations returns the locations attached to a target (public).
-func handleListLocations(db *data.DB) http.HandlerFunc {
+// handleListLocations returns locations (public). With target_id it returns one
+// target's pins (unchanged). Without target_id it returns every published post's
+// pin of that type — the aggregate "all posts on one map" query — optionally
+// bounded by a bbox=minLng,minLat,maxLng,maxLat viewport, and decorates each row
+// with the post's public "url" (via the permalink resolver) so markers can link
+// back. The aggregate path is published-only so it can't leak draft positions.
+func handleListLocations(db *data.DB, permalink data.PermalinkFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		targetType := r.URL.Query().Get("target_type")
 		targetID := r.URL.Query().Get("target_id")
-		if targetType == "" || targetID == "" {
-			jsonError(w, "target_type and target_id are required", http.StatusBadRequest)
+		if targetType == "" {
+			jsonError(w, "target_type is required", http.StatusBadRequest)
 			return
 		}
-		locations, err := db.ListLocations(targetType, targetID)
+		if targetID != "" {
+			locations, err := db.ListLocations(targetType, targetID)
+			if err != nil {
+				jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+				return
+			}
+			jsonResponse(w, map[string]any{"locations": locations})
+			return
+		}
+		locations, err := db.ListLocationsByType(targetType, parseBBox(r.URL.Query().Get("bbox")))
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
+		}
+		if permalink != nil {
+			for _, loc := range locations {
+				collection, _ := loc["collection"].(string)
+				slug, _ := loc["slug"].(string)
+				if collection != "" && slug != "" {
+					loc["url"] = permalink(collection, map[string]string{"slug": slug})
+				}
+			}
 		}
 		jsonResponse(w, map[string]any{"locations": locations})
 	}
 }
 
-// handleCreateLocation attaches a location to a target (editor+).
-func handleCreateLocation(db *data.DB) http.HandlerFunc {
+// parseBBox parses a "minLng,minLat,maxLng,maxLat" query value into a *data.BBox,
+// or nil if empty/malformed (treated as "no bound"). The order follows GeoJSON /
+// Leaflet's toBBoxString (west,south,east,north).
+func parseBBox(s string) *data.BBox {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	if len(parts) != 4 {
+		return nil
+	}
+	v := make([]float64, 4)
+	for i, p := range parts {
+		f, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			return nil
+		}
+		v[i] = f
+	}
+	return &data.BBox{MinLng: v[0], MinLat: v[1], MaxLng: v[2], MaxLat: v[3]}
+}
+
+// handleCreateLocation attaches a location to a target. Contributors may tag a
+// post they authored; editors+ (content.edit.any) may tag anything.
+func handleCreateLocation(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			TargetType string  `json:"target_type"`
@@ -657,6 +708,10 @@ func handleCreateLocation(db *data.DB) http.HandlerFunc {
 			jsonError(w, "lat/lng out of range", http.StatusBadRequest)
 			return
 		}
+		if !canTagTarget(db, authFunc(r), in.TargetType, in.TargetID) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		id, err := db.CreateLocation(in.TargetType, in.TargetID, in.Lat, in.Lng, in.Label)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
@@ -668,20 +723,45 @@ func handleCreateLocation(db *data.DB) http.HandlerFunc {
 	}
 }
 
-// handleDeleteLocation removes a location (editor+).
-func handleDeleteLocation(db *data.DB) http.HandlerFunc {
+// handleDeleteLocation removes a location. Same ownership rule as create: the
+// actor must own the location's target post, or hold content.edit.any.
+func handleDeleteLocation(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		err := db.DeleteLocation(chi.URLParam(r, "id"))
+		id := chi.URLParam(r, "id")
+		loc, err := db.GetLocation(id)
 		if err == sql.ErrNoRows {
 			jsonError(w, "location not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		tt, _ := loc["target_type"].(string)
+		tid, _ := loc["target_id"].(string)
+		if !canTagTarget(db, authFunc(r), tt, tid) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if err := db.DeleteLocation(id); err != nil {
 			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// canTagTarget reports whether the user may attach/remove a location on a target.
+// Editors+ (content.edit.any) may tag anything; a contributor may tag only a post
+// they authored. Non-post targets have no ownership model, so they need edit.any.
+func canTagTarget(db *data.DB, user *data.User, targetType, targetID string) bool {
+	if user == nil {
+		return false
+	}
+	if user.Can(data.CapContentEditAny) {
+		return true
+	}
+	return targetType == "post" && db.UserOwnsPost(user.ID, targetID)
 }
 
 // --- Files (per-record media) ---

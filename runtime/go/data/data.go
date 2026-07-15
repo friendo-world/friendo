@@ -865,6 +865,57 @@ func DeterministicFileID(recordID, name string) string {
 
 // --- Locations (geo-tagging) ---
 
+// BBox is a geographic bounding box (a map viewport). A nil *BBox means "no
+// bound" — return every point of the requested type.
+type BBox struct {
+	MinLat, MinLng, MaxLat, MaxLng float64
+}
+
+// PermalinkFunc maps a collection record to its public URL, derived from the
+// site's page routes. It returns "" when the collection has no public page.
+// The runtime builds this from its route table (see server.permalinkResolver);
+// the data layer never computes URLs itself.
+type PermalinkFunc func(collection string, fields map[string]string) string
+
+// ListLocationsByType returns published locations of a target type across all
+// posts — the "everything on one map" query behind an id-less <friendo-map>.
+// It joins posts so each marker can carry its post's slug/title/collection (for
+// a link back) and so unpublished posts stay hidden from the public map. A
+// non-nil bbox limits the result to a viewport. Only post targets are joined;
+// posts are the only geo-taggable type with a public URL.
+func (db *DB) ListLocationsByType(targetType string, bbox *BBox) ([]map[string]any, error) {
+	q := `SELECT l.id, l.target_type, l.target_id, l.lat, l.lng, l.label, l.created,
+	             p.collection, p.slug, p.title
+	      FROM locations l
+	      JOIN posts p ON p.id = l.target_id AND p.site_id = l.site_id
+	      WHERE l.site_id = ? AND l.target_type = ? AND p.status = 'published'`
+	args := []any{db.SiteID, targetType}
+	if bbox != nil {
+		q += ` AND l.lat BETWEEN ? AND ? AND l.lng BETWEEN ? AND ?`
+		args = append(args, bbox.MinLat, bbox.MaxLat, bbox.MinLng, bbox.MaxLng)
+	}
+	q += ` ORDER BY l.created`
+	rows, err := db.Conn.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id, tt, tid, label, created, collection, slug, title string
+		var lat, lng float64
+		if err := rows.Scan(&id, &tt, &tid, &lat, &lng, &label, &created, &collection, &slug, &title); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": id, "target_type": tt, "target_id": tid,
+			"lat": lat, "lng": lng, "label": label, "created": created,
+			"collection": collection, "slug": slug, "title": title,
+		})
+	}
+	return out, rows.Err()
+}
+
 // ListLocations returns the locations attached to a target (public).
 func (db *DB) ListLocations(targetType, targetID string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
@@ -889,6 +940,30 @@ func (db *DB) ListLocations(targetType, targetID string) ([]map[string]any, erro
 		})
 	}
 	return out, rows.Err()
+}
+
+// DeterministicLocationID derives a stable id for a post's content-declared
+// location (from front matter). Same post → same id across builds, so re-import
+// upserts the pin in place instead of duplicating it, and it never collides with
+// API-created pins (which use random ids).
+func DeterministicLocationID(recordID string) string {
+	sum := sha256.Sum256([]byte(recordID + "\nlocation"))
+	return hex.EncodeToString(sum[:])[:24]
+}
+
+// UpsertLocation inserts or updates a location by id — used by content import to
+// reconcile a post's front-matter location without duplicating on every build.
+func (db *DB) UpsertLocation(id, targetType, targetID string, lat, lng float64, label string) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	_, err := db.Conn.Exec(
+		`INSERT INTO locations (id, site_id, target_type, target_id, lat, lng, label, created)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   target_type=excluded.target_type, target_id=excluded.target_id,
+		   lat=excluded.lat, lng=excluded.lng, label=excluded.label`,
+		id, db.SiteID, targetType, targetID, lat, lng, label, now,
+	)
+	return err
 }
 
 // CreateLocation attaches a location to a target and returns its id.

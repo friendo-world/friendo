@@ -761,26 +761,64 @@
     "expect": { "status": 400 }
   },
   {
-    "name": "a contributor cannot attach a location",
+    "name": "the post's author (a contributor) logs in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "contrib@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "a contributor can geo-tag a post they authored",
+    "method": "POST", "path": "/locations",
+    "body": { "target_type": "post", "target_id": "${conPostId}", "lat": 51.5, "lng": -0.12, "label": "London" },
+    "expect": { "status": 201, "json": { "location.label": "London" } },
+    "capture": { "ownLocationId": "location.id" }
+  },
+  {
+    "name": "the aggregate map lists every published post's pin (orphan p1 excluded)",
+    "method": "GET", "path": "/locations?target_type=post",
+    "expect": { "status": 200, "length": { "locations": 1 }, "json": { "locations.0.target_id": "${conPostId}", "locations.0.label": "London" } }
+  },
+  {
+    "name": "a bbox around the pin includes it",
+    "method": "GET", "path": "/locations?target_type=post&bbox=-1,51,1,52",
+    "expect": { "status": 200, "length": { "locations": 1 } }
+  },
+  {
+    "name": "a bbox elsewhere excludes it",
+    "method": "GET", "path": "/locations?target_type=post&bbox=100,10,110,20",
+    "expect": { "status": 200, "length": { "locations": 0 } }
+  },
+  {
+    "name": "another contributor logs in",
     "method": "POST", "path": "/auth/login",
     "body": { "email": "contrib2@test.com", "password": "password12345" },
     "expect": { "status": 200 }
   },
   {
-    "name": "location tagging is editor+ only",
+    "name": "a contributor cannot geo-tag a post they don't own",
     "method": "POST", "path": "/locations",
-    "body": { "target_type": "post", "target_id": "p1", "lat": 0, "lng": 0 },
+    "body": { "target_type": "post", "target_id": "${conPostId}", "lat": 0, "lng": 0 },
     "expect": { "status": 403 }
   },
   {
-    "name": "admin logs back in after the location checks",
+    "name": "a contributor cannot delete a location on a post they don't own",
+    "method": "DELETE", "path": "/locations/${ownLocationId}",
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "the owner logs back in after the location checks",
     "method": "POST", "path": "/auth/login",
     "body": { "email": "owner@test.com", "password": "password12345" },
     "expect": { "status": 200 }
   },
   {
-    "name": "delete the location",
+    "name": "an editor+ (content.edit.any) deletes the orphan p1 location",
     "method": "DELETE", "path": "/locations/${locationId}",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "an editor+ deletes the contributor's location too",
+    "method": "DELETE", "path": "/locations/${ownLocationId}",
     "expect": { "status": 204 }
   },
   {

@@ -28,14 +28,14 @@ var openAdminMode bool
 //   - /_/*           the SPA app shell (client-side routing, incl. first-run setup)
 //
 // If openAdmin is true, the admin UI skips password authentication.
-func Mount(r chi.Router, db *data.DB, openAdmin bool, name, siteDir string) {
+func Mount(r chi.Router, db *data.DB, openAdmin bool, name, siteDir string, permalink data.PermalinkFunc) {
 	openAdminMode = openAdmin
 
 	authFunc := func(req *http.Request) *data.User { return GetSessionUser(req, db) }
 
 	r.Route("/_", func(r chi.Router) {
 		// REST + sync API.
-		api.Mount(r, db, siteDir, name, authFunc)
+		api.Mount(r, db, siteDir, name, authFunc, permalink)
 
 		// SPA bundle: built assets and the app shell.
 		r.Handle("/assets/*", http.StripPrefix("/_/", http.FileServer(http.FS(spaFS))))

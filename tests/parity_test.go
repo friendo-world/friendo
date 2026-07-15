@@ -57,7 +57,9 @@ func TestParity(t *testing.T) {
 	}
 	defer db.Close()
 	r := chi.NewRouter()
-	admin.Mount(r, db, false, "testsite", t.TempDir())
+	// nil permalink resolver: this harness mounts no page routes, so there are no
+	// public URLs to resolve (the aggregate locations endpoint simply omits them).
+	admin.Mount(r, db, false, "testsite", t.TempDir(), nil)
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 

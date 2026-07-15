@@ -22,6 +22,7 @@ then use the components anywhere:
 <friendo-reactions target-type="post" target-id="{{ record.id }}"></friendo-reactions>
 <friendo-poll poll-id="…"></friendo-poll>
 <friendo-comments post-id="{{ record.id }}"></friendo-comments>
+<friendo-map target-type="post" target-id="{{ record.id }}"></friendo-map>
 ```
 
 Inside a post template, `{{ record.id }}` is the post's stable id — use it as the
@@ -35,6 +36,56 @@ themselves, so nothing else is needed.
 | `<friendo-reactions>` | `target-type`, `target-id`, `emojis` (optional, comma-separated; default `👍,❤️,🎉`) | Emoji reactions with live counts; click toggles yours. |
 | `<friendo-poll>` | `poll-slug` (or `poll-id`) | Renders a poll; signed-in members vote once and see the tally. |
 | `<friendo-channel>` | `channel-id` | A **realtime** message feed; signed-in members post and delete their own, and new messages stream in live. |
+| `<friendo-map>` | `target-type`, `target-id` | An interactive [Leaflet](https://leafletjs.com/) map of a record's [locations](#tagging-a-location), one marker per pin. Public — no sign-in needed. |
+
+`<friendo-map>` loads Leaflet (open-source) and OpenStreetMap tiles from a CDN the
+first time a map appears on a page — no API key, and the rest of the SDK stays
+dependency-free.
+
+## Rendering without JavaScript
+
+The components above are interactive and load client-side. For content that should
+be readable **without JavaScript** — approved comments, reaction tallies, a poll's
+results — both runtimes also attach the public data straight to the post's `record`,
+so a template can render it inline:
+
+```html
+<h2>Reactions</h2>
+<ul>{% for r in record.reactions %}<li>{{ r.emoji }} {{ r.count }}</li>{% endfor %}</ul>
+
+{% if record.poll %}
+  <h3>{{ record.poll.question }}</h3>
+  <ul>{% for o in record.poll.options %}<li>{{ o.text }} — {{ o.votes }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h2>Comments</h2>
+<ol>{% for c in record.comments %}<li><b>{{ c.author_name }}</b>: {{ c.body }}</li>{% endfor %}</ol>
+```
+
+`record.comments` is the **approved** comments only; `record.poll` is present when
+the post declares one in front matter. These render the same bytes on both runtimes.
+The template form and the `<friendo-*>` component are two spellings of the same data
+— use whichever a page needs (often the server-rendered list for readers/SEO *and* a
+component for signing in and posting). See [Templates](/docs/templates#community-relations)
+for the full list of relations. Realtime chat and the map are interactive by nature,
+so they have no server-rendered form.
+
+## Personas
+
+An account can keep more than one **persona** (author profile) — say a real name and
+a pen name — and choose which one their comments and messages are attributed to.
+`<friendo-auth>`, when signed in, shows the current persona with a **personas**
+switcher: pick a different one, or add a new one inline.
+
+Under the hood a persona is an `authors` row; the account's chosen default is a
+pointer (`users.default_author_id`) that all attribution honors, so switching persona
+re-labels new posts everywhere at once. The API is member-facing:
+
+```
+GET  /_/api/me/personas                 # your personas (is_default flags the current one)
+POST /_/api/me/personas                 # { "name": "Pen Name" } → create one
+POST /_/api/me/personas/<id>/default    # make it your default
+```
 
 ## Members: passwordless visitors
 
@@ -82,10 +133,11 @@ Available parts:
 
 | Component | Parts |
 |---|---|
-| `friendo-auth` | `form`, `email`, `code`, `button`, `status`, `signed-in`, `name`, `logout` |
+| `friendo-auth` | `form`, `email`, `code`, `button`, `status`, `signed-in`, `name`, `logout`, `personas-toggle`, `personas`, `persona`, `new-persona`, `new-name`, `add` |
 | `friendo-comments` | `list`, `comment`, `author`, `badge`, `body`, `actions`, `approve`, `reject`, `delete`, `form`, `input`, `submit`, `status`, `empty`, `signed-out` |
 | `friendo-reactions` | `row`, `button`, `emoji`, `count` |
 | `friendo-poll` | `question`, `option`, `bar`, `result`, `total` |
+| `friendo-map` | `map`, `empty` |
 
 Reaction and poll buttons carry `aria-pressed="true"` when they reflect the
 member's own reaction / vote, so you can style the selected state.
@@ -190,6 +242,13 @@ curl -X POST https://yoursite.example/_/api/locations \
 
 Fetch them with `GET /_/api/locations?target_type=post&target_id=<id>` (public)
 and remove one with `DELETE /_/api/locations/<location id>`.
+
+To **show** the pins, drop in `<friendo-map>` — it reads the same endpoint and
+renders an interactive map:
+
+```html
+<friendo-map target-type="post" target-id="{{ record.id }}"></friendo-map>
+```
 
 ## Sending email
 

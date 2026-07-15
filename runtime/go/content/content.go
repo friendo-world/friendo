@@ -11,6 +11,7 @@
 package content
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -131,8 +133,13 @@ func Import(siteDir string, db *data.DB) (*Result, error) {
 		}
 		publishedAt := stringField(meta, "date")
 
+		// A `location` front-matter field geo-tags the post so it shows on maps
+		// (its own <friendo-map> and the aggregate one). Pulled out of `meta` so it
+		// becomes a real location row, not opaque `data` JSON.
+		lat, lng, label, hasLocation := parseLocation(meta, title)
+
 		// Everything not mapped to a column becomes the record's `data` JSON.
-		for _, k := range []string{"title", "slug", "status", "date"} {
+		for _, k := range []string{"title", "slug", "status", "date", "location"} {
 			delete(meta, k)
 		}
 		dataJSON := "{}"
@@ -149,6 +156,17 @@ func Import(siteDir string, db *data.DB) (*Result, error) {
 		}
 		res.Imported++
 		res.ByCollection[collection]++
+
+		// Reconcile the post's content-declared pin: upsert when present, clear when
+		// removed. Uses a deterministic id so API-created pins are never touched.
+		locID := data.DeterministicLocationID(recordID)
+		if hasLocation {
+			if err := db.UpsertLocation(locID, "post", recordID, lat, lng, label); err != nil {
+				res.warn("%s location: %v", rel, err)
+			}
+		} else if err := db.DeleteLocation(locID); err != nil && err != sql.ErrNoRows {
+			res.warn("%s location: %v", rel, err)
+		}
 
 		// Page bundle (content/<collection>/<slug>/index.md): sibling images become
 		// the post's gallery (record.gallery), attached as field="gallery" files.
@@ -290,6 +308,66 @@ func parseFrontmatter(raw []byte) (map[string]any, string) {
 		meta = map[string]any{}
 	}
 	return meta, strings.TrimLeft(body, "\n")
+}
+
+// parseLocation reads a post's `location` front-matter into lat/lng/label. Two
+// author-friendly forms are accepted:
+//
+//	location: "48.8584, 2.2945"           # a "lat, lng" string
+//	location: { lat: 48.8584, lng: 2.2945, label: "Eiffel Tower" }
+//
+// The label defaults to the post title. Returns ok=false when there's no usable
+// location (missing field, or coordinates that don't parse / are out of range).
+func parseLocation(meta map[string]any, title string) (lat, lng float64, label string, ok bool) {
+	v, present := meta["location"]
+	if !present {
+		return 0, 0, "", false
+	}
+	label = title
+	switch t := v.(type) {
+	case string:
+		parts := strings.Split(t, ",")
+		if len(parts) != 2 {
+			return 0, 0, "", false
+		}
+		var okLat, okLng bool
+		lat, okLat = toFloat(strings.TrimSpace(parts[0]))
+		lng, okLng = toFloat(strings.TrimSpace(parts[1]))
+		if !okLat || !okLng {
+			return 0, 0, "", false
+		}
+	case map[string]any:
+		var okLat, okLng bool
+		lat, okLat = toFloat(t["lat"])
+		lng, okLng = toFloat(t["lng"])
+		if !okLat || !okLng {
+			return 0, 0, "", false
+		}
+		if l, isStr := t["label"].(string); isStr && l != "" {
+			label = l
+		}
+	default:
+		return 0, 0, "", false
+	}
+	if lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		return 0, 0, "", false
+	}
+	return lat, lng, label, true
+}
+
+// toFloat coerces a YAML scalar (float64, int, or numeric string) to a float64.
+func toFloat(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case int:
+		return float64(t), true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
 
 // stringField coerces a front-matter value to a string (YAML may decode dates as

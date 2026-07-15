@@ -1,0 +1,16 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<h1>Post map</h1>
+<p>Every published post that declares a <code>location:</code> in its front matter,
+plotted on one map. Click a pin to open the post. This is a single
+<code>&lt;friendo-map target-type="post"&gt;</code> with no target id — the aggregate mode.</p>
+
+<friendo-map target-type="post"></friendo-map>
+
+<p style="margin-top:1.5rem"><a href="/">&larr; Back home</a></p>
+
+<style>
+    /* Give the aggregate map a bit more height than the per-post default. */
+    friendo-map::part(map) { height: 460px; }
+</style>
+{% endblock %}

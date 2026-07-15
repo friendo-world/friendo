@@ -1142,28 +1142,67 @@ app.delete("/_/api/files/:id", async (c) => {
 
 // --- Locations (geo-tagging) ---
 
-// Public: locations attached to a target.
+// Public: locations. With target_id, one target's pins. Without it, every
+// published post's pin of that type — the aggregate map — optionally bounded by
+// bbox=minLng,minLat,maxLng,maxLat, with each row decorated with its post's url.
 app.get("/_/api/locations", async (c) => {
   const siteId = getSiteId(c);
   const targetType = c.req.query("target_type") || "";
   const targetId = c.req.query("target_id") || "";
-  if (!targetType || !targetId) return c.json({ error: "target_type and target_id are required" }, 400);
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, target_type, target_id, lat, lng, label, created
-     FROM locations WHERE site_id = ? AND target_type = ? AND target_id = ? ORDER BY created`
-  ).bind(siteId, targetType, targetId).all();
-  return c.json({ locations: results || [] });
+  if (!targetType) return c.json({ error: "target_type is required" }, 400);
+
+  if (targetId) {
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, target_type, target_id, lat, lng, label, created
+       FROM locations WHERE site_id = ? AND target_type = ? AND target_id = ? ORDER BY created`
+    ).bind(siteId, targetType, targetId).all();
+    return c.json({ locations: results || [] });
+  }
+
+  // Aggregate: join posts so markers link back and unpublished posts stay hidden.
+  const bbox = parseBBox(c.req.query("bbox"));
+  let sql = `SELECT l.id, l.target_type, l.target_id, l.lat, l.lng, l.label, l.created,
+                    p.collection, p.slug, p.title
+             FROM locations l
+             JOIN posts p ON p.id = l.target_id AND p.site_id = l.site_id
+             WHERE l.site_id = ? AND l.target_type = ? AND p.status = 'published'`;
+  const args = [siteId, targetType];
+  if (bbox) {
+    sql += " AND l.lat BETWEEN ? AND ? AND l.lng BETWEEN ? AND ?";
+    args.push(bbox.minLat, bbox.maxLat, bbox.minLng, bbox.maxLng);
+  }
+  sql += " ORDER BY l.created";
+  const { results } = await c.env.DB.prepare(sql).bind(...args).all();
+  const locations = results || [];
+  for (const loc of locations) {
+    if (loc.collection && loc.slug) {
+      loc.url = await resolvePermalink(c.env, siteId, loc.collection, { slug: loc.slug });
+    }
+  }
+  return c.json({ locations });
 });
 
-// Editor+ (content.edit.any): attach a location to a target.
+// parseBBox parses "minLng,minLat,maxLng,maxLat" into a bbox, or null (no bound).
+function parseBBox(s) {
+  if (!s) return null;
+  const parts = s.split(",").map((p) => Number(p.trim()));
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return null;
+  return { minLng: parts[0], minLat: parts[1], maxLng: parts[2], maxLat: parts[3] };
+}
+
+// Contributor+ (content.edit.own): attach a location. The actor must own the
+// target post, or hold content.edit.any (editor+).
 app.post("/_/api/locations", async (c) => {
-  const { auth, deny } = await requireCapability(c, CAP.contentEditAny);
+  const { auth, deny } = await requireCapability(c, CAP.contentEditOwn);
   if (deny) return deny;
   let body;
   try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
   if (!body.target_type || !body.target_id) return c.json({ error: "target_type and target_id are required" }, 400);
   const lat = Number(body.lat), lng = Number(body.lng);
   if (!(lat >= -90 && lat <= 90) || !(lng >= -180 && lng <= 180)) return c.json({ error: "lat/lng out of range" }, 400);
+  if (!(await canTagTarget(c.env, auth.siteId, auth.user, body.target_type, body.target_id))) {
+    return c.json({ error: "forbidden" }, 403);
+  }
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   await c.env.DB.prepare(
     "INSERT INTO locations (id, site_id, target_type, target_id, lat, lng, label, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -1174,13 +1213,19 @@ app.post("/_/api/locations", async (c) => {
   return c.json({ location }, 201);
 });
 
-// Editor+: remove a location.
+// Contributor+: remove a location. Same ownership rule as create.
 app.delete("/_/api/locations/:id", async (c) => {
-  const { auth, deny } = await requireCapability(c, CAP.contentEditAny);
+  const { auth, deny } = await requireCapability(c, CAP.contentEditOwn);
   if (deny) return deny;
-  const res = await c.env.DB.prepare("DELETE FROM locations WHERE id = ? AND site_id = ?")
+  const loc = await c.env.DB.prepare(
+    "SELECT target_type, target_id FROM locations WHERE id = ? AND site_id = ?"
+  ).bind(c.req.param("id"), auth.siteId).first();
+  if (!loc) return c.json({ error: "location not found" }, 404);
+  if (!(await canTagTarget(c.env, auth.siteId, auth.user, loc.target_type, loc.target_id))) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  await c.env.DB.prepare("DELETE FROM locations WHERE id = ? AND site_id = ?")
     .bind(c.req.param("id"), auth.siteId).run();
-  if (!res.meta.changes) return c.json({ error: "location not found" }, 404);
   return c.body(null, 204);
 });
 
@@ -2038,15 +2083,39 @@ async function buildRoutes(env, siteId) {
         params.push(name);
         return `([^/]+)`;
       });
-      routes.push({ pattern: new RegExp(`^${regexPath}$`), r2Key: obj.key, params, collectionName });
+      routes.push({ pattern: new RegExp(`^${regexPath}$`), r2Key: obj.key, params, collectionName, urlPath });
     } else {
       routes.push({
         pattern: urlPath === "/" ? /^\/?$/ : new RegExp(`^${urlPath}$`),
-        r2Key: obj.key, params: [], collectionName: "",
+        r2Key: obj.key, params: [], collectionName: "", urlPath,
       });
     }
   }
   return routes;
+}
+
+// resolvePermalink maps a collection record to its public URL, the reverse of
+// buildRoutes — it finds the collection's dynamic page and substitutes the
+// record's field values into the URL template (e.g. blog + {slug} -> "/blog/x").
+// Returns "" when the collection has no public page. Mirrors the Go runtime's
+// server.permalinkResolver.
+async function resolvePermalink(env, siteId, collection, fields) {
+  const routes = await buildRoutes(env, siteId);
+  for (const r of routes) {
+    if (r.collectionName !== collection || !r.urlPath) continue;
+    let url = r.urlPath;
+    for (const p of r.params) url = url.replaceAll(`[${p}]`, fields[p]);
+    return url;
+  }
+  return "";
+}
+
+// canTagTarget reports whether a user may attach/remove a location on a target.
+// Editors+ (content.edit.any) may tag anything; a contributor may tag only a post
+// they authored. Mirrors the Go runtime's canTagTarget.
+async function canTagTarget(env, siteId, user, targetType, targetId) {
+  if (roleCan(user.role, CAP.contentEditAny)) return true;
+  return targetType === "post" && (await userOwnsPost(env, siteId, user.id, targetId));
 }
 
 // decodeRecordData parses a record's `data` JSON column into an object so
