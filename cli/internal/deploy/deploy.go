@@ -810,6 +810,23 @@ func siteURLForSubdomain(baseURL, subdomain string) string {
 	return fmt.Sprintf("https://%s.%s", subdomain, host)
 }
 
+// SiteURLForSubdomain builds a site's URL from a network base URL and a subdomain,
+// preserving the base URL's scheme and port (so it works for a local http network
+// as well as a production https one). Exported for the network deploy command.
+func SiteURLForSubdomain(baseURL, subdomain string) string {
+	scheme := "https"
+	host := baseURL
+	if strings.HasPrefix(baseURL, "http://") {
+		scheme, host = "http", strings.TrimPrefix(baseURL, "http://")
+	} else {
+		host = strings.TrimPrefix(baseURL, "https://")
+	}
+	if i := strings.IndexByte(host, '/'); i >= 0 {
+		host = host[:i]
+	}
+	return fmt.Sprintf("%s://%s.%s", scheme, subdomain, host)
+}
+
 // waitForSite polls a freshly provisioned site until it responds, tolerating the
 // window where its DNS record isn't resolvable yet. Returns nil once the site
 // answers (any HTTP status < 500), or an error after the timeout.

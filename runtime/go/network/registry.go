@@ -29,9 +29,9 @@ type Registry struct {
 
 // Site is one tenant on the network.
 type Site struct {
-	Subdomain string
-	Dir       string
-	Name      string // display name from friendo.toml (falls back to the subdomain)
+	Subdomain string `json:"subdomain"`
+	Dir       string `json:"-"` // server-side path; never exposed to API clients
+	Name      string `json:"name"` // display name from friendo.toml (falls back to the subdomain)
 }
 
 // NewRegistry opens (creating if needed) the network root directory.

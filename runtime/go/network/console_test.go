@@ -1,12 +1,99 @@
 package network
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 )
+
+// TestOperatorJSONAPI exercises the CLI-facing operator API: Bearer-token auth,
+// and create/list/destroy of sites — driven through the dispatcher so the
+// destroy path also evicts the live handler.
+func TestOperatorJSONAPI(t *testing.T) {
+	root := t.TempDir()
+	reg, err := NewRegistry(root)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	ops, err := OpenOperators(root)
+	if err != nil {
+		t.Fatalf("OpenOperators: %v", err)
+	}
+	defer ops.Close()
+	d := NewDispatcher(reg, "localhost", 0)
+	defer d.Close()
+	console := NewConsole(reg, ops, "localhost")
+	console.SetDestroyer(d.DestroySite)
+	d.HandleApex(console)
+
+	jreq := func(method, path, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "http://localhost"+path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Host = "localhost"
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		d.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Unauthenticated API call → 401.
+	if code := jreq("GET", "/api/sites", "", "").Code; code != http.StatusUnauthorized {
+		t.Fatalf("unauth /api/sites = %d, want 401", code)
+	}
+	// Bad login → 401.
+	if err := ops.Create("op@x.com", "supersecret"); err != nil {
+		t.Fatal(err)
+	}
+	if code := jreq("POST", "/api/login", "", `{"email":"op@x.com","password":"wrong"}`).Code; code != http.StatusUnauthorized {
+		t.Errorf("bad login = %d, want 401", code)
+	}
+	// Good login → token.
+	rec := jreq("POST", "/api/login", "", `{"email":"op@x.com","password":"supersecret"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login = %d, want 200", rec.Code)
+	}
+	var lr struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &lr); err != nil || lr.Token == "" {
+		t.Fatalf("login returned no token (err=%v)", err)
+	}
+	tok := lr.Token
+
+	if code := jreq("GET", "/api/whoami", tok, "").Code; code != http.StatusOK {
+		t.Errorf("whoami with token = %d, want 200", code)
+	}
+	// Create a site via the API.
+	if code := jreq("POST", "/api/sites", tok, `{"subdomain":"alpha","name":"Alpha"}`).Code; code != http.StatusCreated {
+		t.Fatalf("create = %d, want 201", code)
+	}
+	if _, ok := reg.Dir("alpha"); !ok {
+		t.Fatal("alpha not provisioned via API")
+	}
+	if body := jreq("GET", "/api/sites", tok, "").Body.String(); !strings.Contains(body, "alpha") {
+		t.Errorf("list missing alpha: %s", body)
+	}
+	// Cache the site, then destroy via API → evicted and gone.
+	if code := get(t, d, "alpha.localhost", "/").Code; code != http.StatusOK {
+		t.Fatalf("serve alpha = %d, want 200", code)
+	}
+	if code := jreq("DELETE", "/api/sites/alpha", tok, "").Code; code != http.StatusNoContent {
+		t.Fatalf("destroy = %d, want 204", code)
+	}
+	if _, ok := reg.Dir("alpha"); ok {
+		t.Error("alpha not removed via API")
+	}
+	if code := get(t, d, "alpha.localhost", "/").Code; code != http.StatusNotFound {
+		t.Errorf("alpha after API destroy = %d, want 404", code)
+	}
+}
 
 // do drives one request through the console, optionally form-encoded and/or
 // carrying an operator session cookie.

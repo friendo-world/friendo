@@ -9,16 +9,42 @@ import (
 
 // Config holds the deploy configuration stored in ~/.friendo/config.
 type Config struct {
-	Token   string              `json:"token"`           // Platform session token (Better Auth)
-	BaseURL string              `json:"base_url"`        // Platform API base URL
-	Sites   map[string]SiteAuth `json:"sites,omitempty"` // cached site sessions, keyed by site URL
-	path    string              // file path (not serialized)
+	Token    string                 `json:"token"`              // Platform session token (Better Auth)
+	BaseURL  string                 `json:"base_url"`           // Platform API base URL
+	Sites    map[string]SiteAuth    `json:"sites,omitempty"`    // cached site sessions, keyed by site URL
+	Networks map[string]NetworkAuth `json:"networks,omitempty"` // cached operator sessions, keyed by network URL
+	path     string                 // file path (not serialized)
 }
 
 // SiteAuth is a cached site admin session for a deployed site.
 type SiteAuth struct {
 	Email  string `json:"email"`
 	Cookie string `json:"cookie"` // friendo_session value
+}
+
+// NetworkAuth is a cached operator session for a friendo network (network mode).
+type NetworkAuth struct {
+	Email string `json:"email"`
+	Token string `json:"token"` // operator session token
+}
+
+// NetworkAuth returns the cached operator session for a network URL, if any.
+func (c *Config) NetworkAuth(url string) (NetworkAuth, bool) {
+	a, ok := c.Networks[url]
+	return a, ok
+}
+
+// SetNetworkAuth caches an operator session for a network URL.
+func (c *Config) SetNetworkAuth(url, email, token string) {
+	if c.Networks == nil {
+		c.Networks = map[string]NetworkAuth{}
+	}
+	c.Networks[url] = NetworkAuth{Email: email, Token: token}
+}
+
+// ClearNetworkAuth removes a cached operator session.
+func (c *Config) ClearNetworkAuth(url string) {
+	delete(c.Networks, url)
 }
 
 // SiteAuth returns the cached session for a site target, if any.
@@ -46,9 +72,10 @@ func Logout() error {
 	if err != nil {
 		return err
 	}
-	hadToken := cfg.Token != "" || len(cfg.Sites) > 0
+	hadToken := cfg.Token != "" || len(cfg.Sites) > 0 || len(cfg.Networks) > 0
 	cfg.Token = ""
 	cfg.Sites = nil
+	cfg.Networks = nil
 	if err := cfg.Save(); err != nil {
 		return err
 	}

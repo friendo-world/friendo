@@ -1,6 +1,7 @@
 package network
 
 import (
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"strings"
@@ -42,6 +43,14 @@ func NewConsole(reg *Registry, ops *Operators, baseDomain string) *Console {
 	m.HandleFunc("POST /sites", c.requireAuth(c.postCreateSite))
 	m.HandleFunc("POST /sites/{sub}/destroy", c.requireAuth(c.postDestroySite))
 	m.HandleFunc("GET /", c.requireAuth(c.getDashboard))
+
+	// JSON operator API (for the CLI). Bearer-token or cookie auth.
+	m.HandleFunc("POST /api/login", c.apiLogin)
+	m.HandleFunc("GET /api/whoami", c.requireAPIAuth(c.apiWhoami))
+	m.HandleFunc("GET /api/sites", c.requireAPIAuth(c.apiListSites))
+	m.HandleFunc("POST /api/sites", c.requireAPIAuth(c.apiCreateSite))
+	m.HandleFunc("DELETE /api/sites/{sub}", c.requireAPIAuth(c.apiDestroySite))
+
 	c.mux = m
 	return c
 }
@@ -199,6 +208,93 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Name: operatorCookie, Value: "", Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureRequest(r), MaxAge: -1,
 	})
+}
+
+// --- JSON operator API (for the CLI) ---
+
+// apiOperator resolves the operator from a Bearer token (CLI) or session cookie
+// (browser).
+func (c *Console) apiOperator(r *http.Request) (string, bool) {
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return c.ops.ValidateSession(strings.TrimSpace(strings.TrimPrefix(h, "Bearer ")))
+	}
+	return c.currentOperator(r)
+}
+
+func (c *Console) requireAPIAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := c.apiOperator(r); !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+// apiLogin exchanges operator credentials for a session token the CLI caches.
+func (c *Console) apiLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Email, Password string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	id, err := c.ops.Authenticate(body.Email, body.Password)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
+		return
+	}
+	token, err := c.ops.StartSession(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not start session"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+}
+
+// apiWhoami confirms a token is valid (used by the CLI to check its session).
+func (c *Console) apiWhoami(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"operator": true})
+}
+
+func (c *Console) apiListSites(w http.ResponseWriter, r *http.Request) {
+	sites, err := c.reg.Sites()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list sites"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sites": sites})
+}
+
+func (c *Console) apiCreateSite(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Subdomain, Name string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	site, err := c.reg.Provision(strings.ToLower(strings.TrimSpace(body.Subdomain)), body.Name)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"site": site})
+}
+
+func (c *Console) apiDestroySite(w http.ResponseWriter, r *http.Request) {
+	destroy := c.reg.Destroy
+	if c.destroy != nil {
+		destroy = c.destroy
+	}
+	if err := destroy(r.PathValue("sub")); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
 }
 
 // consoleTemplates holds the (deliberately minimal) operator console markup. A
