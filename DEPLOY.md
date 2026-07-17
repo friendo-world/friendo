@@ -2,7 +2,7 @@
 
 Network mode runs **one friendo container** that hosts many tenant sites by subdomain
 (`friendo network serve`). This guide deploys it on **Coolify** with **Cloudflare** in front
-and **Cloudflare R2** for media. Reference target: **Vultr Chicago**, but any Coolify host works.
+and **Cloudflare R2** for media. Reference target: **Hetzner (Ashburn, US)**, but any Coolify host works.
 
 > One binary, two modes: `friendo serve` (one site) vs `friendo network` (many sites, one
 > operator). friendo.world is just the reference network — the same image below.
@@ -16,10 +16,37 @@ and **Cloudflare R2** for media. Reference target: **Vultr Chicago**, but any Co
 
 ## 1. Server + Coolify
 
-1. On **Vultr**, deploy the **Coolify** one-click Marketplace app in **Chicago (ORD)** —
-   2 vCPU / 4 GB / 100 GB NVMe (~$24/mo). Turn on **automatic backups**.
-2. Firewall: expose only **80/443** publicly. Reach the Coolify dashboard (**:8000**) over an
-   SSH tunnel or restrict it to your IP.
+Reference host: **Hetzner Cloud, Ashburn VA (`ash`)** — Coolify's closest partner, cheapest, and
+central-most US option. Pick a **4 GB** type: **CPX21** (3 vCPU / 4 GB) to start, **CPX31**
+(4 vCPU / 8 GB) for headroom. (US = CPX/CCX only; the cheaper ARM `cax` types are EU-only.)
+
+Two topologies — **A is the least-friction and recommended.**
+
+### A. Coolify Cloud + Hetzner integration (recommended)
+Coolify hosts the dashboard (~$5/mo) and provisions/manages your box for you — no self-hosted
+control plane, no port-8000 firewalling, no SSH tunnel.
+1. Sign up for **Coolify Cloud** (coolify.io/cloud).
+2. Add your **Hetzner Cloud API token** (Hetzner console → Security → API Tokens, **Read & Write**).
+3. In Coolify, **provision a server**: Hetzner, **Ashburn (`ash`)**, **CPX21**, Ubuntu 24.04.
+   Coolify creates it, installs Docker + its agent, and connects it — no CLI, no SSH keys to wrangle.
+4. Enable **Backups** (Hetzner console) and add a **Hetzner Cloud Firewall** allowing **80/443**
+   (public) and **22** (Coolify manages SSH). There's **no port 8000** on your box in this model, so
+   nothing to tunnel to.
+
+Trade: Coolify holds your Hetzner token + SSH deploy-access — fine for a solo project; no lock-in
+(same software; self-host later). Then jump to §2.
+
+### B. Self-host Coolify on your own box (no monthly fee)
+You run + secure Coolify yourself.
+- **Automated:** [`scripts/provision-hetzner.sh`](scripts/provision-hetzner.sh) — `hcloud` CLI +
+  cloud-init that creates the server + firewall and installs Coolify (with a swap file for build
+  headroom). Edit the config block at the top, then run it.
+- **Manual:** create an Ashburn **CPX21** server with the **Coolify** one-click app (or Ubuntu 24.04
+  + `curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash`), add your SSH key **at creation**,
+  enable Backups.
+- **Firewall:** allow **22** and **8000** from **your IP**, **80/443** from anywhere; deny the rest.
+  ⚠️ Coolify's first-run setup is on **:8000** — if you block it entirely you can't reach setup, so
+  keep 8000 open to your IP (or SSH-tunnel: `ssh -L 8000:localhost:8000 -L 6001:localhost:6001 root@<ip>`).
 
 ## 2. Cloudflare (DNS + wildcard TLS)
 
@@ -93,7 +120,8 @@ Operators can also be managed from the box: `docker exec <container> friendo net
 
 ## 5. Backups
 
-- **Vultr auto-backups/snapshots** cover the whole `/data` volume (all tenant DBs) — turn them on.
+- **Hetzner Backups** (or your host's snapshots) cover the whole box incl. `/data` (all tenant
+  DBs) — turn them on.
 - Optionally schedule a `tar` of `/data` to R2 for an off-box copy.
 - SQLite runs in WAL mode on block/NVMe storage. **Do not** put `/data` on NFS — its `fsync`
   semantics can corrupt SQLite.
