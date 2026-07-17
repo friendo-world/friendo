@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -273,7 +274,13 @@ func (aa *AccountAuth) activatePost(w http.ResponseWriter, r *http.Request) {
 	// Step 2 — verify the code and approve the device.
 	accountID, err := aa.accounts.VerifyOTP(addr, otp)
 	if err != nil {
-		aa.render(w, activateData{Code: code, Email: addr, Sent: true, Error: "Invalid or expired code — try again."})
+		// The code may be fine but the account isn't allowed (invite-only) — say so
+		// rather than implying the code was wrong.
+		msg := "Invalid or expired code — try again."
+		if errors.Is(err, ErrSignupsInviteOnly) {
+			msg = "Your code was correct, but sign-ups are invite-only on this network — ask an operator to invite you."
+		}
+		aa.render(w, activateData{Code: code, Email: addr, Sent: true, Error: msg})
 		return
 	}
 	if err := aa.accounts.ApproveDevice(code, accountID); err != nil {

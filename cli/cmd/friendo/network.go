@@ -40,6 +40,16 @@ Manage a network you run on this box with --root, or a remote network with
 	cmd.PersistentFlags().StringVar(&root, "root", "./network", "Local network directory (on-box operation)")
 	cmd.PersistentFlags().StringVar(&netURL, "network", "", "Remote network URL (operate over the operator API)")
 
+	// So every on-box subcommand (signups, invite, operator, serve) points at the
+	// same directory Coolify runs the network from. An explicit --root still wins.
+	cmd.PersistentPreRun = func(c *cobra.Command, args []string) {
+		if !c.Flags().Changed("root") {
+			if v := os.Getenv("FRIENDO_NETWORK_ROOT"); v != "" {
+				root = v
+			}
+		}
+	}
+
 	openReg := func() *network.Registry {
 		reg, err := network.NewRegistry(root)
 		exitOnErr(err)
@@ -70,12 +80,8 @@ Manage a network you run on this box with --root, or a remote network with
 		Short: "Serve every site on the network by subdomain",
 		Run: func(cmd *cobra.Command, args []string) {
 			// Env fallbacks (so a container / Coolify can drive config without flags).
-			// An explicit flag always wins over the env var.
-			if !cmd.Flags().Changed("root") {
-				if v := os.Getenv("FRIENDO_NETWORK_ROOT"); v != "" {
-					root = v
-				}
-			}
+			// An explicit flag always wins over the env var. (root is resolved in the
+			// network command's PersistentPreRun, shared by every subcommand.)
 			if !cmd.Flags().Changed("base-domain") {
 				if v := os.Getenv("FRIENDO_BASE_DOMAIN"); v != "" {
 					baseDomain = v
@@ -98,7 +104,7 @@ Manage a network you run on this box with --root, or a remote network with
 			// The apex serves the operator console + the identity endpoints
 			// (device-auth for the CLI). Route deletes through the dispatcher so a
 			// destroyed site stops serving at once.
-			console := network.NewConsole(reg, ops, baseDomain)
+			console := network.NewConsole(reg, ops, accounts, baseDomain)
 			console.SetDestroyer(d.DestroySite)
 			d.HandleApex(network.ApexRouter(console, network.NewAccountAuth(accounts, reg, baseDomain)))
 

@@ -15,11 +15,12 @@ const operatorCookie = "friendo_operator"
 // sites. Per the power boundary it manages site lifecycle + resources only — it
 // never reaches into the content of a site.
 type Console struct {
-	reg  *Registry
-	ops  *Operators
-	base string
-	mux  *http.ServeMux
-	tpl  *template.Template
+	reg      *Registry
+	ops      *Operators
+	accounts *Accounts
+	base     string
+	mux      *http.ServeMux
+	tpl      *template.Template
 
 	// destroy removes a site. Defaults to the registry, but a running network
 	// sets it to the dispatcher's DestroySite so deletes also evict the live
@@ -27,13 +28,15 @@ type Console struct {
 	destroy func(string) error
 }
 
-// NewConsole builds the operator console over a registry + operator store.
-func NewConsole(reg *Registry, ops *Operators, baseDomain string) *Console {
+// NewConsole builds the operator console over a registry + operator store + the
+// accounts store (for signup policy, invites, and site ownership).
+func NewConsole(reg *Registry, ops *Operators, accounts *Accounts, baseDomain string) *Console {
 	c := &Console{
-		reg:  reg,
-		ops:  ops,
-		base: strings.ToLower(strings.TrimSpace(baseDomain)),
-		tpl:  template.Must(template.New("console").Parse(consoleTemplates)),
+		reg:      reg,
+		ops:      ops,
+		accounts: accounts,
+		base:     strings.ToLower(strings.TrimSpace(baseDomain)),
+		tpl:      template.Must(template.New("console").Parse(consoleTemplates)),
 	}
 	m := http.NewServeMux()
 	m.HandleFunc("GET /login", c.getLogin)
@@ -42,6 +45,8 @@ func NewConsole(reg *Registry, ops *Operators, baseDomain string) *Console {
 	m.HandleFunc("POST /logout", c.postLogout)
 	m.HandleFunc("POST /sites", c.requireAuth(c.postCreateSite))
 	m.HandleFunc("POST /sites/{sub}/destroy", c.requireAuth(c.postDestroySite))
+	m.HandleFunc("POST /signups", c.requireAuth(c.postSignups))
+	m.HandleFunc("POST /invite", c.requireAuth(c.postInvite))
 	m.HandleFunc("GET /", c.requireAuth(c.getDashboard))
 
 	// JSON operator API (for the CLI). Bearer-token or cookie auth.
@@ -167,13 +172,60 @@ func (c *Console) postDestroySite(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// postSignups switches the network's signup policy (open ↔ invite-only).
+func (c *Console) postSignups(w http.ResponseWriter, r *http.Request) {
+	if err := c.accounts.SetSignups(strings.ToLower(strings.TrimSpace(r.FormValue("policy")))); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// postInvite pre-creates an account so it can sign in even under invite-only,
+// optionally granting it the operator capability.
+func (c *Console) postInvite(w http.ResponseWriter, r *http.Request) {
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	if email == "" {
+		c.renderDashboard(w, "email is required to invite someone")
+		return
+	}
+	if _, err := c.accounts.EnsureAccount(email); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	if r.FormValue("operator") != "" {
+		if err := c.accounts.Grant(email, "operator"); err != nil {
+			c.renderDashboard(w, err.Error())
+			return
+		}
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 func (c *Console) renderDashboard(w http.ResponseWriter, errMsg string) {
 	sites, err := c.reg.Sites()
 	if err != nil {
 		http.Error(w, "network error", http.StatusInternalServerError)
 		return
 	}
-	c.render(w, "dashboard", pageData{Sites: sites, Base: c.base, Error: errMsg})
+	// Map each site to its owner's email for the sites table.
+	owners := make(map[string]string, len(sites))
+	for _, s := range sites {
+		if id, ok := c.accounts.SiteOwner(s.Subdomain); ok {
+			if acct, ok := c.accounts.Get(id); ok {
+				owners[s.Subdomain] = acct.Email
+			}
+		}
+	}
+	accounts, _ := c.accounts.List()
+	c.render(w, "dashboard", pageData{
+		Sites:    sites,
+		Base:     c.base,
+		Error:    errMsg,
+		Signups:  c.accounts.Signups(),
+		Accounts: accounts,
+		Owners:   owners,
+	})
 }
 
 func (c *Console) render(w http.ResponseWriter, name string, data pageData) {
@@ -184,9 +236,12 @@ func (c *Console) render(w http.ResponseWriter, name string, data pageData) {
 }
 
 type pageData struct {
-	Sites []Site
-	Base  string
-	Error string
+	Sites    []Site
+	Base     string
+	Error    string
+	Signups  string            // "open" | "invite"
+	Accounts []*Account        // network accounts (for the operator view)
+	Owners   map[string]string // subdomain → owner email
 }
 
 // --- cookies ---
@@ -330,15 +385,39 @@ table{border-collapse:collapse;width:100%;margin-top:1rem}td,th{text-align:left;
 <form method="post" action="/logout" style="float:right;margin:0"><button>Sign out</button></form>
 <h1>friendo network</h1><p class="muted">{{len .Sites}} site(s)</p>
 {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+
+<h2>Sites</h2>
 <form method="post" action="/sites" class="row">
 <input name="subdomain" placeholder="subdomain" required>
 <input name="name" placeholder="Display name (optional)">
 <button type="submit">Create site</button></form>
-<table><tr><th>Subdomain</th><th>Name</th><th></th></tr>
+<table><tr><th>Subdomain</th><th>Name</th><th>Owner</th><th></th></tr>
 {{range .Sites}}<tr>
 <td><a href="//{{.Subdomain}}.{{$.Base}}/">{{.Subdomain}}.{{$.Base}}</a></td>
 <td>{{.Name}}</td>
+<td class="muted">{{with index $.Owners .Subdomain}}{{.}}{{else}}—{{end}}</td>
 <td><form method="post" action="/sites/{{.Subdomain}}/destroy" style="margin:0" onsubmit="return confirm('Delete {{.Subdomain}} and all its data?')"><button class="danger">Delete</button></form></td>
 </tr>{{end}}
+</table>
+
+<h2>Who can join</h2>
+<p class="muted">
+{{if eq .Signups "open"}}<strong>Open</strong> — anyone can sign in and create a site.{{else}}<strong>Invite-only</strong> — only people you invite can sign in.{{end}}
+</p>
+<form method="post" action="/signups" style="margin:.25rem 0">
+{{if eq .Signups "open"}}<input type="hidden" name="policy" value="invite"><button>Switch to invite-only</button>
+{{else}}<input type="hidden" name="policy" value="open"><button>Switch to open</button>{{end}}
+</form>
+
+<h2>People</h2>
+<form method="post" action="/invite" class="row">
+<input name="email" type="email" placeholder="email to invite" required>
+<label class="muted"><input type="checkbox" name="operator" value="1"> operator</label>
+<button type="submit">Invite</button></form>
+<table><tr><th>Email</th><th>Role</th></tr>
+{{range .Accounts}}<tr>
+<td>{{.Email}}</td>
+<td class="muted">{{if .Has "operator"}}operator{{else}}member{{end}}</td>
+</tr>{{else}}<tr><td colspan="2" class="muted">No accounts yet.</td></tr>{{end}}
 </table>{{end}}
 `

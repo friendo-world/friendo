@@ -9,6 +9,17 @@ import (
 	"testing"
 )
 
+// mustAccounts opens an accounts store for a console test, cleaned up on exit.
+func mustAccounts(t *testing.T, root string) *Accounts {
+	t.Helper()
+	a, err := OpenAccounts(root)
+	if err != nil {
+		t.Fatalf("OpenAccounts: %v", err)
+	}
+	t.Cleanup(func() { a.Close() })
+	return a
+}
+
 // TestOperatorJSONAPI exercises the CLI-facing operator API: Bearer-token auth,
 // and create/list/destroy of sites — driven through the dispatcher so the
 // destroy path also evicts the live handler.
@@ -25,7 +36,7 @@ func TestOperatorJSONAPI(t *testing.T) {
 	defer ops.Close()
 	d := NewDispatcher(reg, "localhost", 0)
 	defer d.Close()
-	console := NewConsole(reg, ops, "localhost")
+	console := NewConsole(reg, ops, mustAccounts(t, root), "localhost")
 	console.SetDestroyer(d.DestroySite)
 	d.HandleApex(console)
 
@@ -142,7 +153,7 @@ func TestNetworkDestroyViaConsoleEvicts(t *testing.T) {
 
 	d := NewDispatcher(reg, "localhost", 0)
 	defer d.Close()
-	console := NewConsole(reg, ops, "localhost")
+	console := NewConsole(reg, ops, mustAccounts(t, root), "localhost")
 	console.SetDestroyer(d.DestroySite) // the wiring the CLI's `serve` performs
 	d.HandleApex(console)
 
@@ -191,7 +202,7 @@ func TestConsoleSetupAuthAndSiteLifecycle(t *testing.T) {
 		t.Fatalf("OpenOperators: %v", err)
 	}
 	defer ops.Close()
-	c := NewConsole(reg, ops, "localhost")
+	c := NewConsole(reg, ops, mustAccounts(t, root), "localhost")
 
 	// Unauthenticated dashboard → redirect to /login.
 	if rec := do(t, c, "GET", "http://localhost/", nil, nil); rec.Code != http.StatusSeeOther {
@@ -251,5 +262,66 @@ func TestConsoleSetupAuthAndSiteLifecycle(t *testing.T) {
 	}
 	if rec := do(t, c, "POST", "http://localhost/login", url.Values{"email": {"op@example.com"}, "password": {"wrong"}}, nil); !strings.Contains(strings.ToLower(rec.Body.String()), "invalid") {
 		t.Errorf("bad login did not surface an error; body:\n%s", rec.Body.String())
+	}
+}
+
+// TestConsoleSignupsAndInvite drives the operator UI for signup policy + invites.
+func TestConsoleSignupsAndInvite(t *testing.T) {
+	root := t.TempDir()
+	reg, err := NewRegistry(root)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	ops, err := OpenOperators(root)
+	if err != nil {
+		t.Fatalf("OpenOperators: %v", err)
+	}
+	defer ops.Close()
+	accounts := mustAccounts(t, root)
+	c := NewConsole(reg, ops, accounts, "localhost")
+
+	ck := sessionCookie(do(t, c, "POST", "http://localhost/setup",
+		url.Values{"email": {"op@example.com"}, "password": {"supersecret"}}, nil))
+	if ck == nil {
+		t.Fatal("setup did not set a session cookie")
+	}
+
+	// Default policy is invite-only, and the dashboard says so.
+	if body := do(t, c, "GET", "http://localhost/", nil, ck).Body.String(); !strings.Contains(body, "Invite-only") {
+		t.Errorf("dashboard should show invite-only by default:\n%s", body)
+	}
+
+	// Switch to open.
+	if rec := do(t, c, "POST", "http://localhost/signups", url.Values{"policy": {"open"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /signups = %d, want 303", rec.Code)
+	}
+	if got := accounts.Signups(); got != "open" {
+		t.Errorf("signups = %q, want open", got)
+	}
+
+	// Invite someone as an operator.
+	if rec := do(t, c, "POST", "http://localhost/invite",
+		url.Values{"email": {"friend@example.com"}, "operator": {"1"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /invite = %d, want 303", rec.Code)
+	}
+	acct, ok := accounts.GetByEmail("friend@example.com")
+	if !ok {
+		t.Fatal("invite did not create the account")
+	}
+	if !acct.Has("operator") {
+		t.Error("invited account should have the operator capability")
+	}
+
+	// Dashboard now lists the invited person and shows the open policy.
+	if body := do(t, c, "GET", "http://localhost/", nil, ck).Body.String(); !strings.Contains(body, "friend@example.com") || !strings.Contains(body, "Open") {
+		t.Errorf("dashboard missing invited account or open policy:\n%s", body)
+	}
+
+	// Unauthenticated policy change is rejected and changes nothing.
+	if rec := do(t, c, "POST", "http://localhost/signups", url.Values{"policy": {"invite"}}, nil); rec.Code != http.StatusSeeOther {
+		t.Errorf("unauth POST /signups = %d, want 303 redirect", rec.Code)
+	}
+	if got := accounts.Signups(); got != "open" {
+		t.Error("unauthenticated request changed the signup policy")
 	}
 }

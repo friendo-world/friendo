@@ -3,6 +3,7 @@ package network
 import (
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -13,6 +14,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
+
+// ErrSignupsInviteOnly is returned when a valid login code is entered for an
+// email that has no account while the network's signup policy is invite-only.
+// The code was correct — the account just isn't allowed to be created.
+var ErrSignupsInviteOnly = errors.New("sign-ups are invite-only on this network — ask an operator to invite you")
 
 // Accounts is the network-level identity store for the two-tier model: everyday
 // users who own sites and operators (an account with the "operator" capability).
@@ -171,6 +177,30 @@ func (a *Accounts) Count() (int, error) {
 	return n, err
 }
 
+// List returns every account, oldest first — for the operator console.
+func (a *Accounts) List() ([]*Account, error) {
+	rows, err := a.conn.Query(`SELECT id, email, capabilities FROM accounts ORDER BY created`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Account
+	for rows.Next() {
+		var id, email, caps string
+		if rows.Scan(&id, &email, &caps) != nil {
+			continue
+		}
+		acct := &Account{ID: id, Email: email}
+		for _, c := range strings.Split(caps, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				acct.Capabilities = append(acct.Capabilities, c)
+			}
+		}
+		out = append(out, acct)
+	}
+	return out, nil
+}
+
 // --- passwordless OTP (for in-browser account auth) ---
 
 // RequestOTP creates a fresh 6-digit login code for email (10-minute TTL) and
@@ -230,7 +260,7 @@ func (a *Accounts) VerifyOTP(email, code string) (string, error) {
 			// Signup gate: an unknown email can only create an account when signups
 			// are open (invite mode = an operator must pre-create/invite the account).
 			if _, exists := a.GetByEmail(email); !exists && a.Signups() == "invite" {
-				return "", fmt.Errorf("sign-ups are invite-only on this network — ask an operator to invite you")
+				return "", ErrSignupsInviteOnly
 			}
 			a.conn.Exec(`DELETE FROM account_otp WHERE email = ?`, email) // codes are single-use
 			return a.EnsureAccount(email)
