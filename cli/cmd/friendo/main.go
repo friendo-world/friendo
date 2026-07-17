@@ -234,19 +234,39 @@ Targets:
 	pullCmd.Flags().BoolVar(&pullUsers, "users", false, "Pull user accounts from the deployed site")
 	pullCmd.Flags().StringVar(&pullTarget, "target", "", "Override deploy target URL")
 
-	// --- whoami ---
-	var whoamiTarget string
-	var whoamiCmd = &cobra.Command{
-		Use:   "whoami",
-		Short: "Show which friendo.world account you're signed in as",
+	// --- login ---
+	var loginCmd = &cobra.Command{
+		Use:   "login [network-url]",
+		Short: "Sign in to a friendo network (browser device auth; default friendo.world)",
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := deploy.RunWhoami(whoamiTarget); err != nil {
+			url := ""
+			if len(args) > 0 {
+				url = args[0]
+			}
+			if err := deploy.RunLogin(url); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
 	}
-	whoamiCmd.Flags().StringVar(&whoamiTarget, "target", "", "Override platform API URL")
+
+	// --- whoami ---
+	var whoamiCmd = &cobra.Command{
+		Use:   "whoami [network-url]",
+		Short: "Show the account you're signed in as (default friendo.world)",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			url := ""
+			if len(args) > 0 {
+				url = args[0]
+			}
+			if err := deploy.RunAccountWhoami(url); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
 
 	// --- logout ---
 	var logoutCmd = &cobra.Command{
@@ -261,7 +281,7 @@ Targets:
 		},
 	}
 
-	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd, whoamiCmd, logoutCmd, newNetworkCommand())
+	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, redeployCmd, destroyCmd, pushCmd, pullCmd, loginCmd, whoamiCmd, logoutCmd, newNetworkCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

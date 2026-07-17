@@ -92,12 +92,22 @@ Manage a network you run on this box with --root, or a remote network with
 			reg := openReg()
 			ops, err := network.OpenOperators(root)
 			exitOnErr(err)
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
 			d := network.NewDispatcher(reg, baseDomain, 0)
-			// The apex (bare base domain) is the operator console. Route deletes
-			// through the dispatcher so a destroyed site stops serving at once.
+			// The apex serves the operator console + the identity endpoints
+			// (device-auth for the CLI). Route deletes through the dispatcher so a
+			// destroyed site stops serving at once.
 			console := network.NewConsole(reg, ops, baseDomain)
 			console.SetDestroyer(d.DestroySite)
-			d.HandleApex(console)
+			d.HandleApex(network.ApexRouter(console, network.NewAccountAuth(accounts, baseDomain)))
+
+			// Designate the operator account for device-auth login.
+			if email := os.Getenv("FRIENDO_OPERATOR_EMAIL"); email != "" {
+				if err := accounts.Grant(email, "operator"); err != nil {
+					fmt.Fprintf(os.Stderr, "Could not grant operator to %q: %v\n", email, err)
+				}
+			}
 			if n, _ := ops.Count(); n == 0 {
 				// Self-bootstrap the first operator from env (turnkey containers),
 				// else point the way to the console/CLI.
