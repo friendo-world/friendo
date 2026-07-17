@@ -20,8 +20,16 @@ func TestDeviceAuthFlow(t *testing.T) {
 	}
 	defer accounts.Close()
 
+	reg, err := NewRegistry(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	// This test exercises device-auth, not the signup policy — let new emails in.
+	if err := accounts.SetSignups("open"); err != nil {
+		t.Fatalf("SetSignups: %v", err)
+	}
 	m := http.NewServeMux()
-	NewAccountAuth(accounts, "localhost").register(m)
+	NewAccountAuth(accounts, reg, "localhost").register(m)
 
 	do := func(method, path, token, jsonBody string, form url.Values) *httptest.ResponseRecorder {
 		var req *http.Request

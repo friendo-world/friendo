@@ -131,25 +131,30 @@ func main() {
 	}
 
 	// --- deploy ---
-	var deployAPIURL string
+	var deployNetwork string
 	var deployCmd = &cobra.Command{
-		Use:   "deploy",
-		Short: "Provision and deploy your site to a hosting target",
-		Long: `Interactive setup that provisions a site on a hosting target,
-saves the target URL to friendo.toml, then pushes everything.
+		Use:   "deploy [subdomain]",
+		Short: "Publish this folder as a site on a friendo network",
+		Long: `Publishes the site in the current folder to a friendo network
+(friendo.world by default). It signs you in in your browser if needed,
+claims the subdomain, and pushes your content.
 
-Targets:
-  1. friendo.world (managed hosting)
-  2. Cloudflare Workers (your own account)
-  3. VPS / self-hosted`,
+  friendo deploy                 # subdomain from your site name
+  friendo deploy my-club         # pick the subdomain
+  friendo deploy --network https://sites.example.com`,
+		Args: cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := deploy.RunDeploy(deployAPIURL); err != nil {
+			subdomain := ""
+			if len(args) > 0 {
+				subdomain = args[0]
+			}
+			if err := deploy.RunNetworkDeploy(subdomain, deployNetwork); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
 	}
-	deployCmd.Flags().StringVar(&deployAPIURL, "api-url", "", "Override the platform base URL (default https://friendo.world)")
+	deployCmd.Flags().StringVar(&deployNetwork, "network", "", "Network URL to deploy to (default https://friendo.world)")
 
 	// --- redeploy ---
 	var redeployAPIURL string

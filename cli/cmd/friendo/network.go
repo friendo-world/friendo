@@ -100,7 +100,7 @@ Manage a network you run on this box with --root, or a remote network with
 			// destroyed site stops serving at once.
 			console := network.NewConsole(reg, ops, baseDomain)
 			console.SetDestroyer(d.DestroySite)
-			d.HandleApex(network.ApexRouter(console, network.NewAccountAuth(accounts, baseDomain)))
+			d.HandleApex(network.ApexRouter(console, network.NewAccountAuth(accounts, reg, baseDomain)))
 
 			// Designate the operator account for device-auth login.
 			if email := os.Getenv("FRIENDO_OPERATOR_EMAIL"); email != "" {
@@ -293,7 +293,38 @@ subdomain (as an operator) and then pushes your templates, assets, and content
 	opAdd.Flags().StringVar(&opPassword, "password", "", "Operator password (or set FRIENDO_OPERATOR_PASSWORD; prompts if unset)")
 	operator.AddCommand(opAdd)
 
-	cmd.AddCommand(serve, login, deployCmd, provision, sites, destroy, operator)
+	// friendo network signups <open|invite> — set who may create an account.
+	signups := &cobra.Command{
+		Use:   "signups <open|invite>",
+		Short: "Set the signup policy (open = anyone; invite = operator-invited only)",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			exitOnErr(accounts.SetSignups(args[0]))
+			fmt.Printf("Signups set to %q.\n", args[0])
+		},
+	}
+
+	// friendo network invite <email> — pre-create an account so they can sign in
+	// even when signups are invite-only.
+	invite := &cobra.Command{
+		Use:   "invite <email>",
+		Short: "Invite someone by pre-creating their account",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			if _, err := accounts.EnsureAccount(args[0]); err != nil {
+				exitOnErr(err)
+			}
+			fmt.Printf("Invited %q — they can now sign in with 'friendo login'.\n", args[0])
+		},
+	}
+
+	cmd.AddCommand(serve, login, deployCmd, provision, sites, destroy, operator, signups, invite)
 	return cmd
 }
 

@@ -2,37 +2,47 @@ package network
 
 import (
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/friendo-world/friendo/runtime/go/data"
 )
 
-// AccountAuth serves the network's identity surface: passwordless device-auth for
-// the CLI (a browser /activate page + OTP) and the account whoami endpoint.
-// See design/network-accounts.md.
+// AccountAuth serves the network's identity + self-service surface: passwordless
+// device-auth for the CLI (a browser /activate page + OTP), account whoami, and
+// account-owned site creation + the in-process SSO exchange that `friendo deploy`
+// uses. See design/network-accounts.md.
 type AccountAuth struct {
 	accounts *Accounts
+	reg      *Registry
 	base     string
 	tpl      *template.Template
 }
 
-// NewAccountAuth builds the identity handlers over an accounts store.
-func NewAccountAuth(accounts *Accounts, baseDomain string) *AccountAuth {
+// NewAccountAuth builds the identity + self-service handlers.
+func NewAccountAuth(accounts *Accounts, reg *Registry, baseDomain string) *AccountAuth {
 	return &AccountAuth{
 		accounts: accounts,
+		reg:      reg,
 		base:     strings.ToLower(strings.TrimSpace(baseDomain)),
 		tpl:      template.Must(template.New("activate").Parse(activateTemplates)),
 	}
 }
 
-// register mounts the identity routes on a mux.
+// register mounts the identity + self-service routes on a mux.
 func (aa *AccountAuth) register(m *http.ServeMux) {
 	m.HandleFunc("POST /api/auth/device/start", aa.deviceStart)
 	m.HandleFunc("POST /api/auth/device/poll", aa.devicePoll)
 	m.HandleFunc("GET /activate", aa.activateGet)
 	m.HandleFunc("POST /activate", aa.activatePost)
 	m.HandleFunc("GET /api/account", aa.whoami)
+	// Self-service (account Bearer auth): create/own sites and get a site session.
+	m.HandleFunc("POST /api/account/sites", aa.createSite)
+	m.HandleFunc("GET /api/account/sites", aa.listSites)
+	m.HandleFunc("POST /api/sso/exchange", aa.ssoExchange)
 }
 
 // ApexRouter combines the identity endpoints with the operator console into one
@@ -99,6 +109,136 @@ func (aa *AccountAuth) accountFromBearer(r *http.Request) (*Account, bool) {
 		return nil, false
 	}
 	return aa.accounts.ValidateSession(strings.TrimSpace(strings.TrimPrefix(h, "Bearer ")))
+}
+
+// --- self-service: account-owned sites + SSO ---
+
+// createSite creates (or verifies ownership of) a site the account owns. It also
+// ensures the site's owner user exists so an SSO session can be issued.
+func (aa *AccountAuth) createSite(w http.ResponseWriter, r *http.Request) {
+	acct, ok := aa.accountFromBearer(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var body struct{ Subdomain, Name string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	sub := strings.ToLower(strings.TrimSpace(body.Subdomain))
+	if !ValidSubdomain(sub) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid subdomain"})
+		return
+	}
+
+	if _, exists := aa.reg.Dir(sub); exists {
+		// Idempotent for a site you own; a conflict otherwise.
+		if owner, ok := aa.accounts.SiteOwner(sub); !ok || owner != acct.ID {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "that subdomain is taken"})
+			return
+		}
+		if err := aa.ensureOwnerUser(sub, acct.Email); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"site": map[string]string{"subdomain": sub, "name": body.Name}})
+		return
+	}
+
+	site, err := aa.reg.Provision(sub, body.Name)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := aa.accounts.SetSiteOwner(sub, acct.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := aa.ensureOwnerUser(sub, acct.Email); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"site": map[string]string{"subdomain": site.Subdomain, "name": site.Name}})
+}
+
+func (aa *AccountAuth) listSites(w http.ResponseWriter, r *http.Request) {
+	acct, ok := aa.accountFromBearer(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	subs, err := aa.accounts.SitesOwnedBy(acct.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list sites"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sites": subs})
+}
+
+// ssoExchange issues a site admin session (friendo_session) for a subdomain the
+// account owns. In network mode this is in-process: the network opens the site's
+// DB and mints a session for the site's owner user.
+func (aa *AccountAuth) ssoExchange(w http.ResponseWriter, r *http.Request) {
+	acct, ok := aa.accountFromBearer(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var body struct{ Subdomain string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	sub := strings.ToLower(strings.TrimSpace(body.Subdomain))
+	if owner, ok := aa.accounts.SiteOwner(sub); !ok || owner != acct.ID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you don't own that site"})
+		return
+	}
+	dir, ok := aa.reg.Dir(sub)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such site"})
+		return
+	}
+	db, err := data.Open(dir)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not open site"})
+		return
+	}
+	defer db.Conn.Close()
+	user, err := db.GetUserByEmail(acct.Email)
+	if err != nil {
+		user, err = db.CreateUser(acct.Email, "", newToken(24), "owner")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create owner"})
+			return
+		}
+	}
+	token, err := db.CreateSession(user.ID, "", "cli-sso")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not issue session"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"session": token})
+}
+
+// ensureOwnerUser makes sure the account's email is the site's owner user, so an
+// SSO session can be issued for it.
+func (aa *AccountAuth) ensureOwnerUser(subdomain, email string) error {
+	dir, ok := aa.reg.Dir(subdomain)
+	if !ok {
+		return fmt.Errorf("no such site")
+	}
+	db, err := data.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer db.Conn.Close()
+	if _, err := db.GetUserByEmail(email); err == nil {
+		return nil
+	}
+	_, err = db.CreateUser(email, "", newToken(24), "owner")
+	return err
 }
 
 // --- /activate (browser side: authenticate + approve the device) ---

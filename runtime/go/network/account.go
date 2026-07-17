@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS device_codes (
   approved    INTEGER NOT NULL DEFAULT 0,
   expires_at  TEXT NOT NULL,
   created     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS site_owners (
+  subdomain  TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  created    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS network_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );`
 
 // Account is a network account.
@@ -218,6 +227,11 @@ func (a *Accounts) VerifyOTP(email, code string) (string, error) {
 			continue
 		}
 		if bcrypt.CompareHashAndPassword([]byte(c.hash), []byte(code)) == nil {
+			// Signup gate: an unknown email can only create an account when signups
+			// are open (invite mode = an operator must pre-create/invite the account).
+			if _, exists := a.GetByEmail(email); !exists && a.Signups() == "invite" {
+				return "", fmt.Errorf("sign-ups are invite-only on this network — ask an operator to invite you")
+			}
 			a.conn.Exec(`DELETE FROM account_otp WHERE email = ?`, email) // codes are single-use
 			return a.EnsureAccount(email)
 		}
@@ -319,6 +333,72 @@ func (a *Accounts) PollDevice(deviceCode string) (token string, pending bool, er
 	}
 	a.conn.Exec(`DELETE FROM device_codes WHERE device_code = ?`, deviceCode)
 	return tok, false, nil
+}
+
+// --- site ownership ---
+
+// SetSiteOwner records (or reassigns) the owning account of a subdomain.
+func (a *Accounts) SetSiteOwner(subdomain, accountID string) error {
+	_, err := a.conn.Exec(
+		`INSERT INTO site_owners (subdomain, account_id, created) VALUES (?, ?, ?)
+		 ON CONFLICT(subdomain) DO UPDATE SET account_id = excluded.account_id`,
+		subdomain, accountID, nowRFC(),
+	)
+	return err
+}
+
+// SiteOwner returns the account id that owns a subdomain, if any.
+func (a *Accounts) SiteOwner(subdomain string) (string, bool) {
+	var id string
+	if err := a.conn.QueryRow(`SELECT account_id FROM site_owners WHERE subdomain = ?`, subdomain).Scan(&id); err != nil {
+		return "", false
+	}
+	return id, true
+}
+
+// SitesOwnedBy returns the subdomains an account owns.
+func (a *Accounts) SitesOwnedBy(accountID string) ([]string, error) {
+	rows, err := a.conn.Query(`SELECT subdomain FROM site_owners WHERE account_id = ? ORDER BY subdomain`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var subs []string
+	for rows.Next() {
+		var s string
+		if rows.Scan(&s) == nil {
+			subs = append(subs, s)
+		}
+	}
+	return subs, nil
+}
+
+// RemoveSiteOwner drops the ownership record for a subdomain (on destroy).
+func (a *Accounts) RemoveSiteOwner(subdomain string) {
+	a.conn.Exec(`DELETE FROM site_owners WHERE subdomain = ?`, subdomain)
+}
+
+// --- network settings ---
+
+// Signups reports the signup policy ("open" or "invite"); defaults to "invite".
+func (a *Accounts) Signups() string {
+	var v string
+	if err := a.conn.QueryRow(`SELECT value FROM network_settings WHERE key = 'signups'`).Scan(&v); err != nil || v == "" {
+		return "invite"
+	}
+	return v
+}
+
+// SetSignups sets the signup policy.
+func (a *Accounts) SetSignups(v string) error {
+	if v != "open" && v != "invite" {
+		return fmt.Errorf("signups must be 'open' or 'invite'")
+	}
+	_, err := a.conn.Exec(
+		`INSERT INTO network_settings (key, value) VALUES ('signups', ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, v,
+	)
+	return err
 }
 
 // numericCode returns an n-digit numeric string.
