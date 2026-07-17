@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/friendo-world/friendo/runtime/go/data"
+	"github.com/friendo-world/friendo/runtime/go/email"
 )
 
 // AccountAuth serves the network's identity + self-service surface: passwordless
@@ -249,19 +250,19 @@ func (aa *AccountAuth) activateGet(w http.ResponseWriter, r *http.Request) {
 
 func (aa *AccountAuth) activatePost(w http.ResponseWriter, r *http.Request) {
 	code := strings.ToUpper(strings.TrimSpace(r.FormValue("code")))
-	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	addr := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 	otp := strings.TrimSpace(r.FormValue("otp"))
 
 	if otp == "" {
 		// Step 1 — send a one-time code to the email.
-		devCode, err := aa.accounts.RequestOTP(email)
+		devCode, err := aa.accounts.RequestOTP(addr)
 		if err != nil {
-			aa.render(w, activateData{Code: code, Email: email, Error: err.Error()})
+			aa.render(w, activateData{Code: code, Email: addr, Error: err.Error()})
 			return
 		}
-		// TODO(email): deliver devCode via Resend in production. For now it's shown
-		// inline only when the dev OTP echo is on.
-		data := activateData{Code: code, Email: email, Sent: true}
+		// Deliver by email in production; the dev echo shows it inline locally.
+		email.SendLoginCode(addr, devCode)
+		data := activateData{Code: code, Email: addr, Sent: true}
 		if otpEcho() {
 			data.DevCode = devCode
 		}
@@ -270,16 +271,16 @@ func (aa *AccountAuth) activatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 2 — verify the code and approve the device.
-	accountID, err := aa.accounts.VerifyOTP(email, otp)
+	accountID, err := aa.accounts.VerifyOTP(addr, otp)
 	if err != nil {
-		aa.render(w, activateData{Code: code, Email: email, Sent: true, Error: "Invalid or expired code — try again."})
+		aa.render(w, activateData{Code: code, Email: addr, Sent: true, Error: "Invalid or expired code — try again."})
 		return
 	}
 	if err := aa.accounts.ApproveDevice(code, accountID); err != nil {
-		aa.render(w, activateData{Code: code, Email: email, Sent: true, Error: "That device code is invalid or expired."})
+		aa.render(w, activateData{Code: code, Email: addr, Sent: true, Error: "That device code is invalid or expired."})
 		return
 	}
-	aa.render(w, activateData{Done: true, Email: email})
+	aa.render(w, activateData{Done: true, Email: addr})
 }
 
 type activateData struct {

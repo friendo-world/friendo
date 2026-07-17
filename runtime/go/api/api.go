@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/friendo-world/friendo/runtime/go/data"
+	"github.com/friendo-world/friendo/runtime/go/email"
 	"github.com/friendo-world/friendo/runtime/go/storage"
 )
 
@@ -1929,7 +1930,7 @@ const otpResendWindow = 30 * time.Second
 // emailConfigured reports whether an email provider is wired up. When it is, the
 // code is delivered by email. Configure with RESEND_API_KEY + FRIENDO_EMAIL_FROM.
 func emailConfigured() bool {
-	return os.Getenv("RESEND_API_KEY") != "" && os.Getenv("FRIENDO_EMAIL_FROM") != ""
+	return email.Configured()
 }
 
 // otpEchoEnabled reports whether request-code may return the login code in its
@@ -1944,31 +1945,9 @@ func otpEchoEnabled() bool {
 	return false
 }
 
-// sendOTPEmail delivers a login code via Resend. Best-effort: a delivery error is
-// logged, not surfaced, so a provider hiccup never leaks whether an email exists.
-func sendOTPEmail(email, code string) {
-	if !emailConfigured() {
-		return
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"from":    os.Getenv("FRIENDO_EMAIL_FROM"),
-		"to":      []string{email},
-		"subject": "Your sign-in code",
-		"text":    fmt.Sprintf("Your code is %s. It expires in 10 minutes.", code),
-	})
-	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", strings.NewReader(string(payload)))
-	if err != nil {
-		log.Printf("otp email: build request: %v", err)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("RESEND_API_KEY"))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("otp email: send: %v", err)
-		return
-	}
-	resp.Body.Close()
+// sendOTPEmail delivers a login code via the shared email package (Resend).
+func sendOTPEmail(to, code string) {
+	email.SendLoginCode(to, code)
 }
 
 func generateOTP() string {
