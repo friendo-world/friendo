@@ -6,7 +6,7 @@ node_modules
 **/node_modules
 bin
 scratchpad
-**/data
+/data
 *.log
 .wrangler
 **/.wrangler

@@ -64,6 +64,9 @@ You run + secure Coolify yourself.
 
 Create an application from this repo (build pack: **Dockerfile**).
 
+- **Build context:** **Base Directory = `/`** and **Dockerfile Location = `/Dockerfile`** — the
+  [`Dockerfile`](Dockerfile) is at the repo root (single-app repo, no subfolder), so the base path
+  is just the root.
 - **Persistent storage:** mount a volume at **`/data`** (tenant folders + SQLite DBs live here;
   survives redeploys).
 - **Port:** the container listens on **3000**; let Coolify's Traefik route to it (don't publish
