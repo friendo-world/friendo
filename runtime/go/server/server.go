@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/friendo-world/friendo/runtime/go/data"
 	_ "github.com/friendo-world/friendo/runtime/go/renderer" // registers filters
 	"github.com/friendo-world/friendo/runtime/go/sdk"
+	"github.com/friendo-world/friendo/runtime/go/storage"
 )
 
 // siteConfig represents the friendo.toml file.
@@ -128,10 +130,18 @@ func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler
 
 	r := chi.NewRouter()
 
+	// Where uploaded media lives: nil = local disk (default); an S3/R2 backend
+	// when FRIENDO_S3_* is configured. Templates and static assets always stay on
+	// disk; only assets/uploads/* is offloaded.
+	store, err := storage.FromEnv(siteDir)
+	if err != nil {
+		return nil, fmt.Errorf("configuring media storage: %w", err)
+	}
+
 	// Admin UI + REST/sync API at /_/ (the admin package mounts the api package).
 	// The permalink resolver lets the locations API return each post's public URL
 	// so an aggregate <friendo-map> can link markers back to their posts.
-	admin.Mount(r, db, openAdmin, siteCfg.Site.Name, siteDir, permalinkResolver(routes))
+	admin.Mount(r, db, openAdmin, siteCfg.Site.Name, siteDir, permalinkResolver(routes), store)
 
 	// Live reload SSE endpoint.
 	r.Get("/_/reload", handleReloadSSE)
@@ -139,9 +149,12 @@ func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler
 	// The community SDK (Web Components) at /friendo.js — public.
 	r.Get("/friendo.js", sdk.Handler())
 
-	// Serve static files from assets/ at /assets/.
+	// Serve static files from assets/ at /assets/. With a media backend, uploads
+	// stream from object storage while static assets still come from disk.
 	assetsDir := filepath.Join(siteDir, "assets")
-	if _, err := os.Stat(assetsDir); err == nil {
+	if store != nil {
+		r.Handle("/assets/*", assetHandler(assetsDir, store))
+	} else if _, err := os.Stat(assetsDir); err == nil {
 		r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir))))
 	}
 
@@ -151,6 +164,29 @@ func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler
 	})
 
 	return r, nil
+}
+
+// assetHandler serves /assets/*: uploaded media (assets/uploads/*) streams from
+// the media backend, while static site assets come from the on-disk assets dir.
+func assetHandler(assetsDir string, store storage.Backend) http.Handler {
+	fileServer := http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir)))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(r.URL.Path, "/assets/")
+		if storage.IsUpload(rel) {
+			rc, ct, err := store.Open(r.Context(), "assets/"+rel)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			defer rc.Close()
+			if ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
+			io.Copy(w, rc)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 // --- Hot reload ---

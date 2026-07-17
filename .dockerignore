@@ -1,0 +1,17 @@
+# Keep the Docker build context small. The Go build only needs go.mod/go.sum and
+# the Go source (cli/, runtime/go/) with its committed embedded assets.
+.git
+.github
+node_modules
+**/node_modules
+bin
+scratchpad
+**/data
+*.log
+.wrangler
+**/.wrangler
+runtime/edge/dist
+design
+docs
+testsite
+.DS_Store

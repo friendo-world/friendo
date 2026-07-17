@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -68,6 +69,26 @@ Manage a network you run on this box with --root, or a remote network with
 		Use:   "serve",
 		Short: "Serve every site on the network by subdomain",
 		Run: func(cmd *cobra.Command, args []string) {
+			// Env fallbacks (so a container / Coolify can drive config without flags).
+			// An explicit flag always wins over the env var.
+			if !cmd.Flags().Changed("root") {
+				if v := os.Getenv("FRIENDO_NETWORK_ROOT"); v != "" {
+					root = v
+				}
+			}
+			if !cmd.Flags().Changed("base-domain") {
+				if v := os.Getenv("FRIENDO_BASE_DOMAIN"); v != "" {
+					baseDomain = v
+				}
+			}
+			if !cmd.Flags().Changed("port") {
+				if v := os.Getenv("FRIENDO_PORT"); v != "" {
+					if p, err := strconv.Atoi(v); err == nil {
+						port = p
+					}
+				}
+			}
+
 			reg := openReg()
 			ops, err := network.OpenOperators(root)
 			exitOnErr(err)
@@ -78,8 +99,19 @@ Manage a network you run on this box with --root, or a remote network with
 			console.SetDestroyer(d.DestroySite)
 			d.HandleApex(console)
 			if n, _ := ops.Count(); n == 0 {
-				fmt.Printf("No operators yet — open the apex to create the first one, "+
-					"or run: friendo network --root %s operator add <email>\n", root)
+				// Self-bootstrap the first operator from env (turnkey containers),
+				// else point the way to the console/CLI.
+				email, pw := os.Getenv("FRIENDO_OPERATOR_EMAIL"), os.Getenv("FRIENDO_OPERATOR_PASSWORD")
+				if email != "" && pw != "" {
+					if err := ops.Create(email, pw); err != nil {
+						fmt.Fprintf(os.Stderr, "Could not bootstrap operator %q: %v\n", email, err)
+					} else {
+						fmt.Printf("Bootstrapped first operator %q from FRIENDO_OPERATOR_* env.\n", email)
+					}
+				} else {
+					fmt.Printf("No operators yet — set FRIENDO_OPERATOR_EMAIL + FRIENDO_OPERATOR_PASSWORD, "+
+						"use the apex console setup, or run: friendo network --root %s operator add <email>\n", root)
+				}
 			}
 			exitOnErr(d.ListenAndServe(port))
 		},

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
@@ -20,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/friendo-world/friendo/runtime/go/data"
+	"github.com/friendo-world/friendo/runtime/go/storage"
 )
 
 // Mount registers the REST + sync API routes under /api on the given router,
@@ -27,7 +30,7 @@ import (
 //
 // Public endpoints (me, auth) carry no auth so the SPA can bootstrap and log in.
 // Everything else requires site admin authentication (session cookie).
-func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*http.Request) *data.User, permalink data.PermalinkFunc) {
+func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*http.Request) *data.User, permalink data.PermalinkFunc, store storage.Backend) {
 	r.Route("/api", func(r chi.Router) {
 		// Public endpoints — used by the SPA to bootstrap and authenticate.
 		r.Get("/me", handleMe(authFunc))
@@ -103,8 +106,8 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 
 		// Media upload — contributor+ (content.create). Bytes land in assets/ and
 		// are served by the static /assets/* handler; the row links them to a record.
-		r.Post("/files", capGate(authFunc, data.CapContentCreate, handleUploadFile(db, siteDir)))
-		r.Delete("/files/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteFile(db, siteDir)))
+		r.Post("/files", capGate(authFunc, data.CapContentCreate, handleUploadFile(db, siteDir, store)))
+		r.Delete("/files/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteFile(db, siteDir, store)))
 
 		// Channel management — admin+ (site.configure); posting is member-gated above.
 		r.Post("/channels", capGate(authFunc, data.CapSiteConfigure, handleCreateChannel(db)))
@@ -121,7 +124,7 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/settings", capGate(authFunc, data.CapSiteConfigure, handleSettings(db, siteName)))
 		r.Put("/settings", capGate(authFunc, data.CapSiteConfigure, handleUpdateSettings(db, siteName)))
 		r.Post("/push/templates", capGate(authFunc, data.CapSiteConfigure, handlePushTemplates(siteDir)))
-		r.Post("/push/assets", capGate(authFunc, data.CapSiteConfigure, handlePushAssets(siteDir)))
+		r.Post("/push/assets", capGate(authFunc, data.CapSiteConfigure, handlePushAssets(siteDir, store)))
 		r.Post("/push/data", capGate(authFunc, data.CapSiteConfigure, handlePushData(db)))
 		r.Post("/push/users", capGate(authFunc, data.CapSiteConfigure, handlePushUsers(db)))
 		r.Post("/push/settings", capGate(authFunc, data.CapSiteConfigure, handlePushSettings(db)))
@@ -806,7 +809,7 @@ func handleListFiles(db *data.DB) http.HandlerFunc {
 // handleUploadFile accepts a multipart image upload and links it to a record
 // (contributor+). The bytes land in the site's assets/ dir so the existing
 // /assets/* static handler serves them; the edge runtime stores the same key in R2.
-func handleUploadFile(db *data.DB, siteDir string) http.HandlerFunc {
+func handleUploadFile(db *data.DB, siteDir string, store storage.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
 			jsonError(w, "expected a multipart form upload", http.StatusBadRequest)
@@ -837,26 +840,14 @@ func handleUploadFile(db *data.DB, siteDir string) http.HandlerFunc {
 		id := data.GenerateID()
 		key := "assets/uploads/" + id + ext
 
-		fullPath := filepath.Join(siteDir, filepath.FromSlash(key))
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-			jsonError(w, fmt.Sprintf("storage error: %v", err), http.StatusInternalServerError)
-			return
-		}
-		dst, err := os.Create(fullPath)
+		size, err := writeAsset(r.Context(), siteDir, store, key, io.LimitReader(file, 10<<20), mime)
 		if err != nil {
-			jsonError(w, fmt.Sprintf("storage error: %v", err), http.StatusInternalServerError)
-			return
-		}
-		size, err := io.Copy(dst, io.LimitReader(file, 10<<20))
-		dst.Close()
-		if err != nil {
-			os.Remove(fullPath)
 			jsonError(w, fmt.Sprintf("storage error: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		if _, err := db.CreateFileWithID(id, recordType, recordID, r.FormValue("field"), key, mime, size); err != nil {
-			os.Remove(fullPath)
+			removeAsset(r.Context(), siteDir, store, key)
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -867,7 +858,7 @@ func handleUploadFile(db *data.DB, siteDir string) http.HandlerFunc {
 }
 
 // handleDeleteFile removes a file row and the stored object (contributor+).
-func handleDeleteFile(db *data.DB, siteDir string) http.HandlerFunc {
+func handleDeleteFile(db *data.DB, siteDir string, store storage.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key, err := db.DeleteFile(chi.URLParam(r, "id"))
 		if err == sql.ErrNoRows {
@@ -879,9 +870,48 @@ func handleDeleteFile(db *data.DB, siteDir string) http.HandlerFunc {
 			return
 		}
 		// Best-effort removal of the stored object; the DB row is the source of truth.
-		os.Remove(filepath.Join(siteDir, filepath.FromSlash(key)))
+		removeAsset(r.Context(), siteDir, store, key)
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// writeAsset stores an uploaded asset on local disk (store == nil) or in the media
+// backend, returning the byte count written.
+func writeAsset(ctx context.Context, siteDir string, store storage.Backend, key string, r io.Reader, contentType string) (int64, error) {
+	if store != nil {
+		buf, err := io.ReadAll(r)
+		if err != nil {
+			return 0, err
+		}
+		if err := store.Put(ctx, key, bytes.NewReader(buf), int64(len(buf)), contentType); err != nil {
+			return 0, err
+		}
+		return int64(len(buf)), nil
+	}
+	fullPath := filepath.Join(siteDir, filepath.FromSlash(key))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return 0, err
+	}
+	dst, err := os.Create(fullPath)
+	if err != nil {
+		return 0, err
+	}
+	size, err := io.Copy(dst, r)
+	dst.Close()
+	if err != nil {
+		os.Remove(fullPath)
+		return 0, err
+	}
+	return size, nil
+}
+
+// removeAsset deletes a stored asset from disk or the media backend (best-effort).
+func removeAsset(ctx context.Context, siteDir string, store storage.Backend, key string) {
+	if store != nil {
+		store.Delete(ctx, key)
+		return
+	}
+	os.Remove(filepath.Join(siteDir, filepath.FromSlash(key)))
 }
 
 // --- Channels & messages (community feed) ---
@@ -1451,7 +1481,7 @@ func handlePushTemplates(siteDir string) http.HandlerFunc {
 // which is how binary assets (images uploaded via the media API) round-trip
 // intact, since JSON strings can't carry raw bytes.
 // Body: {"files": [{"path": "assets/logo.png", "content": "...", "encoding": "base64"}]}
-func handlePushAssets(siteDir string) http.HandlerFunc {
+func handlePushAssets(siteDir string, store storage.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Files []struct {
@@ -1483,6 +1513,18 @@ func handlePushAssets(siteDir string) http.HandlerFunc {
 					continue
 				}
 				content = decoded
+			}
+
+			// Uploaded media goes to the media backend when configured; static
+			// assets always live on disk (Pongo2 and static serving read them there).
+			slashPath := filepath.ToSlash(cleanPath)
+			if store != nil && storage.IsUpload(strings.TrimPrefix(slashPath, "assets/")) {
+				if err := store.Put(r.Context(), slashPath, bytes.NewReader(content), int64(len(content)), ""); err != nil {
+					log.Printf("Error storing %s: %v", cleanPath, err)
+					continue
+				}
+				written++
+				continue
 			}
 
 			fullPath := filepath.Join(siteDir, cleanPath)
