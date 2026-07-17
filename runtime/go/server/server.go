@@ -130,9 +130,9 @@ func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler
 
 	r := chi.NewRouter()
 
-	// Where uploaded media lives: nil = local disk (default); an S3/R2 backend
+	// Where managed media lives: nil = local disk (default); an S3/R2 backend
 	// when FRIENDO_S3_* is configured. Templates and static assets always stay on
-	// disk; only assets/uploads/* is offloaded.
+	// disk; managed media (assets/uploads/* + assets/galleries/*) is offloaded.
 	store, err := storage.FromEnv(siteDir)
 	if err != nil {
 		return nil, fmt.Errorf("configuring media storage: %w", err)
@@ -166,13 +166,14 @@ func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler
 	return r, nil
 }
 
-// assetHandler serves /assets/*: uploaded media (assets/uploads/*) streams from
-// the media backend, while static site assets come from the on-disk assets dir.
+// assetHandler serves /assets/*: managed media (assets/uploads/* + galleries/*)
+// streams from the media backend, while static site assets come from the on-disk
+// assets dir.
 func assetHandler(assetsDir string, store storage.Backend) http.Handler {
 	fileServer := http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, "/assets/")
-		if storage.IsUpload(rel) {
+		if storage.IsManagedMedia(rel) {
 			rc, ct, err := store.Open(r.Context(), "assets/"+rel)
 			if err != nil {
 				http.NotFound(w, r)

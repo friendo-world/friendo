@@ -1516,10 +1516,11 @@ func handlePushAssets(siteDir string, store storage.Backend) http.HandlerFunc {
 				content = decoded
 			}
 
-			// Uploaded media goes to the media backend when configured; static
-			// assets always live on disk (Pongo2 and static serving read them there).
+			// Managed media (uploads + galleries) goes to the media backend when
+			// configured; static assets always live on disk (Pongo2 and static
+			// serving read them there).
 			slashPath := filepath.ToSlash(cleanPath)
-			if store != nil && storage.IsUpload(strings.TrimPrefix(slashPath, "assets/")) {
+			if store != nil && storage.IsManagedMedia(strings.TrimPrefix(slashPath, "assets/")) {
 				if err := store.Put(r.Context(), slashPath, bytes.NewReader(content), int64(len(content)), ""); err != nil {
 					log.Printf("Error storing %s: %v", cleanPath, err)
 					continue

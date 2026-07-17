@@ -143,8 +143,20 @@ func EnvStatus() string {
 	}
 }
 
-// IsUpload reports whether a URL-relative asset path (under /assets/) refers to
-// uploaded media (which may live in object storage) vs a static site asset.
-func IsUpload(relPath string) bool {
-	return strings.HasPrefix(relPath, "uploads/")
+// managedMediaDirs are the /assets subdirectories holding framework-managed media
+// — runtime user uploads and content-built galleries. Their contents offload to
+// object storage when a backend is configured; everything else under assets/
+// (themes, CSS, static images committed with the site) stays on local disk.
+var managedMediaDirs = []string{"uploads/", "galleries/"}
+
+// IsManagedMedia reports whether an asset path (relative to /assets/) is managed
+// media that lives in object storage when a backend is configured — as opposed to
+// a static site asset that always stays on disk.
+func IsManagedMedia(relPath string) bool {
+	for _, d := range managedMediaDirs {
+		if strings.HasPrefix(relPath, d) {
+			return true
+		}
+	}
+	return false
 }

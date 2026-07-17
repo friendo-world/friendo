@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -102,6 +103,62 @@ func TestMediaS3RoundTrip(t *testing.T) {
 	handler.ServeHTTP(grec2, get2)
 	if grec2.Code != http.StatusNotFound {
 		t.Errorf("serve after delete = %d, want 404", grec2.Code)
+	}
+}
+
+// TestPushGalleryMediaToS3 covers the deploy path the operator hit: content-built
+// gallery media (assets/galleries/*) pushed via /_/api/push/assets must land in
+// object storage and serve from it, while a static asset (assets/style.css) stays
+// on local disk.
+func TestPushGalleryMediaToS3(t *testing.T) {
+	endpoint, bucket, access, secret := setupS3(t)
+	ensureBucket(t, endpoint, bucket, access, secret)
+
+	siteDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(siteDir, "pages"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := data.Open(siteDir)
+	if err != nil {
+		t.Fatalf("data.Open: %v", err)
+	}
+	defer db.Conn.Close()
+	handler, err := BuildSiteHandler(siteDir, db, true)
+	if err != nil {
+		t.Fatalf("BuildSiteHandler: %v", err)
+	}
+
+	galleryBytes := []byte("\x89PNG\r\n\x1a\n-gallery-image-bytes-")
+	cssBytes := []byte("body{color:red}")
+	payload, _ := json.Marshal(map[string]any{"files": []map[string]string{
+		{"path": "assets/galleries/blog/demo/photo.png", "content": base64.StdEncoding.EncodeToString(galleryBytes), "encoding": "base64"},
+		{"path": "assets/style.css", "content": base64.StdEncoding.EncodeToString(cssBytes), "encoding": "base64"},
+	}})
+	push := httptest.NewRequest(http.MethodPost, "/_/api/push/assets", bytes.NewReader(payload))
+	push.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, push)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("push assets = %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	// Gallery media must be offloaded (NOT on disk); static css must stay on disk.
+	if _, err := os.Stat(filepath.Join(siteDir, "assets", "galleries", "blog", "demo", "photo.png")); !os.IsNotExist(err) {
+		t.Error("gallery media unexpectedly present on disk (should be in object storage)")
+	}
+	if _, err := os.Stat(filepath.Join(siteDir, "assets", "style.css")); err != nil {
+		t.Errorf("static css should be on disk: %v", err)
+	}
+
+	// Gallery media serves, streamed from object storage.
+	get := httptest.NewRequest(http.MethodGet, "/assets/galleries/blog/demo/photo.png", nil)
+	grec := httptest.NewRecorder()
+	handler.ServeHTTP(grec, get)
+	if grec.Code != http.StatusOK {
+		t.Fatalf("gallery serve = %d, want 200", grec.Code)
+	}
+	if !bytes.Equal(grec.Body.Bytes(), galleryBytes) {
+		t.Error("served gallery bytes differ from pushed bytes")
 	}
 }
 
