@@ -12,6 +12,7 @@ import (
 
 	"github.com/friendo-world/friendo/cli/internal/deploy"
 	"github.com/friendo-world/friendo/runtime/go/network"
+	"github.com/friendo-world/friendo/runtime/go/storage"
 )
 
 // newNetworkCommand builds the `friendo network` command group — operator mode.
@@ -129,6 +130,8 @@ Manage a network you run on this box with --root, or a remote network with
 						"use the apex console setup, or run: friendo network --root %s operator add <email>\n", root)
 				}
 			}
+			fmt.Println(storage.EnvStatus())
+			fmt.Printf("friendo network listening on :%d — sites at <subdomain>.%s\n", port, baseDomain)
 			exitOnErr(d.ListenAndServe(port))
 		},
 	}

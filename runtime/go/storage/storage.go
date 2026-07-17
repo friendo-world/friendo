@@ -121,6 +121,28 @@ func FromEnv(siteDir string) (Backend, error) {
 	return NewS3(cfg, filepath.Base(siteDir))
 }
 
+// EnvStatus summarizes how media storage is configured from the environment, for
+// a startup log line. It makes the disk-vs-R2 choice visible — and, crucially,
+// warns on a partial FRIENDO_S3_* config that would otherwise silently fall back
+// to local disk (media never reaching object storage, with no error).
+func EnvStatus() string {
+	keys := []string{"FRIENDO_S3_ENDPOINT", "FRIENDO_S3_BUCKET", "FRIENDO_S3_ACCESS_KEY", "FRIENDO_S3_SECRET_KEY"}
+	var missing []string
+	for _, k := range keys {
+		if os.Getenv(k) == "" {
+			missing = append(missing, k)
+		}
+	}
+	switch len(missing) {
+	case 0:
+		return fmt.Sprintf("media: object storage → bucket=%q endpoint=%q", os.Getenv("FRIENDO_S3_BUCKET"), os.Getenv("FRIENDO_S3_ENDPOINT"))
+	case len(keys):
+		return "media: local disk (set FRIENDO_S3_* to use object storage)"
+	default:
+		return "media: WARNING incomplete FRIENDO_S3_* config — missing " + strings.Join(missing, ", ") + "; media is staying on local disk"
+	}
+}
+
 // IsUpload reports whether a URL-relative asset path (under /assets/) refers to
 // uploaded media (which may live in object storage) vs a static site asset.
 func IsUpload(relPath string) bool {
