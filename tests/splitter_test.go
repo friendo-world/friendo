@@ -1,8 +1,7 @@
-// SQL-splitter parity: the schema/migration statement splitter runs in both
-// runtimes (Go data.SplitStatements, edge sql-split.js splitStatements) and they
-// must split identically — a divergence would mean one runtime silently drops or
-// mangles a statement at provisioning time. The same splitter-cases.json runs here
-// and in edge-parity.mjs. Guards the historical comment-led-file bug from returning.
+// SQL-splitter regression: the schema/migration statement splitter
+// (data.SplitStatements) must split each splitter-cases.json case exactly — a
+// mistake would silently drop or mangle a statement at provisioning time. Guards
+// the historical comment-led-file bug from returning.
 package tests
 
 import (

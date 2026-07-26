@@ -75,14 +75,19 @@ Because password hashes are portable, `friendo push --users` carries accounts to
 deployed site unchanged — the same password works everywhere. `friendo pull
 --users` brings them back.
 
-## Site auth vs. platform auth
+## Site auth vs. network account auth
 
-If you host on **friendo.world**, there are two independent auth systems:
+If you host on a **network** like friendo.world, there are two independent auth
+systems:
 
 - **Site auth** — the accounts *in* your site (above), for your site's owner,
-  staff, and members.
-- **Platform auth** — your friendo.world account, used to manage and provision
-  sites. Platform collaborators open a site's admin as an **owner**.
+  staff, and members. The site owner still sets an email and password at first run.
+- **Network account auth** — your account *on* the network, used to claim
+  subdomains and manage sites. It's **passwordless**: sign in with a one-time code
+  emailed to you (`friendo login` runs the same flow from your browser). Running a
+  network is an account **capability** called **operator** — it governs site
+  lifecycle (provision, destroy), separate from any per-site role.
 
-They're separate: signing into friendo.world doesn't sign you into any site's
-admin, and vice versa.
+They stay separate — signing into a network doesn't sign you into a site's admin.
+`friendo deploy` bridges them once, minting your site's admin session from your
+network sign-in so you don't log in twice.

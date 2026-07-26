@@ -1,8 +1,10 @@
 # Auth & permissions — 0.2 design
 
-Status: **proposal for review** (not yet implemented). Refines Friendo's
-site-level identity and permission model for 0.2. It does not change the platform
-(friendo.world) auth system except where the two meet.
+Status: **shipped** — the site-level role/capability model below is implemented. It
+refines Friendo's site-level identity and permission model. Note: the network
+(friendo.world) account layer this doc calls "platform auth" is now **passwordless
+email OTP + device-auth** with an `operator` **capability** (no operator password) —
+see [network-accounts.md](network-accounts.md). The site-level model here is unchanged.
 
 ## Why
 

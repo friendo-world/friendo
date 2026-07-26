@@ -21,21 +21,21 @@ my-site/
 There's no build artifact and no hidden state. What you see in the folder is the
 whole site.
 
-## One site, two runtimes
+## One runtime, everywhere
 
-The thing that *runs* a site is a **runtime**. Friendo has two, and they behave
-identically:
+The thing that *runs* a site is the **runtime** — a single Go binary. There's
+just one, and it runs the same everywhere: on your laptop, on a server you own,
+and on friendo.world. Nothing to port between environments.
 
-| | Go runtime | Edge runtime |
-|---|---|---|
-| Runs as | a single binary (`friendo serve`), e.g. on a VPS | a Cloudflare Worker |
-| Data | SQLite | D1 |
-| Assets | `assets/` on disk | R2 |
-| Templates | Pongo2 (Jinja2) | a Jinja2-compatible engine |
+- **Runs as** one binary — `friendo serve` for a single site, or
+  `friendo network serve` to host many sites by subdomain.
+- **Data** lives in SQLite; **assets** in `assets/` on disk (or S3-compatible
+  storage like Cloudflare R2 once you offload media).
+- **Templates** are Pongo2 (Jinja2-compatible).
 
-Both expose the same interface — your site at `/`, the admin UI at `/_/`, and a
-REST/sync API at `/_/api/*` — so a site behaves the same whether it's on your
-laptop, your own Cloudflare account, or friendo.world.
+It exposes the same interface everywhere — your site at `/`, the admin UI at
+`/_/`, and a REST/sync API at `/_/api/*` — so a site behaves the same whether
+it's on your laptop, your own `friendo network`, or friendo.world.
 
 ## Portability first
 

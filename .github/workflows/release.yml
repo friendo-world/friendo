@@ -1,8 +1,8 @@
 name: release
 
 # Cut a release with:  npm run release -- v0.2.0
-#   (guards the tree, refreshes + checks bundles, runs both parity suites,
-#    publishes the edge runtime to R2, then tags + pushes — see scripts/release.mjs)
+#   (guards the tree, refreshes + checks bundles, runs the test suite, then tags +
+#    pushes — see scripts/release.mjs)
 # Or by hand:  git tag v0.2.0 && git push origin v0.2.0
 #
 # The admin SPA is embedded via go:embed from runtime/go/admin/spa, so the

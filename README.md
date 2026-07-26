@@ -41,11 +41,9 @@ Check your version with `friendo --version`.
 ```
 friendo/
 ├── cli/                # The friendo command (init, serve, push, pull, deploy, export)
-├── admin/              # Shared admin UI — one Preact SPA, served by both runtimes
+├── admin/              # Shared admin UI — one Preact SPA, served by the runtime
 ├── runtime/
-│   ├── go/             # Go site runtime (local dev, self-hosted VPS)
-│   └── edge/           # JS site runtime (Cloudflare Workers, self-hostable)
-├── platform/           # friendo.world (managed hosting, wraps runtime/edge/)
+│   └── go/             # The Go runtime — local dev, self-host, and network mode (friendo.world)
 └── testsite/           # Example site for development and testing
 ```
 
@@ -59,42 +57,32 @@ friendo/
 
 ### `friendo` — the CLI
 
-The command-line tool. Init a site, serve it locally, push it to the internet, pull it back down. Thin wrapper around the runtimes — it knows how to talk to any running Friendo site via its sync API.
+The command-line tool. Init a site, serve it locally, push it to the internet, pull it back down. Thin wrapper around the runtime — it knows how to talk to any running Friendo site via its sync API.
 
 ```bash
 friendo init my-site        # scaffold a new site
 friendo serve               # start the local dev server
 friendo build               # compile content/ markdown into the site database
-friendo deploy              # first-time deploy (interactive)
+friendo deploy [subdomain]  # publish this folder to a network (friendo.world by default)
 friendo push                # push updates to your deployed site
 friendo pull --data          # pull remote data into local
-friendo redeploy            # re-push the managed-hosting runtime to your site
-friendo destroy             # tear the deployed site down
 friendo export              # export to static HTML
 ```
 
 ### `runtime/go/` — the Go runtime
 
-The core of the project. A single Go binary that bundles a web server, SQLite database, Pongo2 template engine, admin UI, and sync API. This is what runs when you type `friendo serve`, and it's what you'd run on a VPS for self-hosting.
+The core of the project — the one runtime behind everything. A single Go binary that bundles a web server, SQLite database, Pongo2 template engine, admin UI, and sync API. It runs when you type `friendo serve` (one site) and when you self-host; in `friendo network serve` mode the same binary hosts many sites by subdomain — that's how friendo.world runs.
 
 Every Friendo site — local or deployed — exposes the same interface:
 - `/` — your site (templates + data)
 - `/_/` — admin UI (user management, content editing)
 - `/_/api/*` — sync API (push/pull endpoint for templates, data, users)
 
-### `runtime/edge/` — the JS runtime
+### `network mode` — friendo.world
 
-The same site runtime, built for Cloudflare Workers. A single-site Hono app with a lightweight Jinja2-compatible template engine (no `eval()`, Workers-safe), D1 for data, R2 for assets. Same admin UI, same sync API, same auth.
+friendo.world runs **network mode**: the *same* Go binary in `friendo network serve`, hosting many sites by subdomain in one process, on **Coolify + Hetzner**, with **Cloudflare** as dumb infrastructure (wildcard DNS + TLS/CDN) and **Cloudflare R2** for media. Any self-hoster can run their own network the same way. See [DEPLOY.md](DEPLOY.md).
 
-This is what self-hosters deploy to their own Cloudflare account.
-
-### `platform/` — friendo.world
-
-The managed hosting layer, built on [Cloudflare Workers for Platforms](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/). A dispatch Worker that routes by subdomain, serves the platform UI (landing page, dashboard), handles platform auth, and provisions new sites.
-
-Each site on friendo.world runs as its own isolated user Worker — the exact same `runtime/edge/` code that self-hosters deploy — with its own D1 database and R2 bucket. The platform provisions these resources automatically when you run `friendo deploy`.
-
-The platform is optional. Everything it does, the runtimes can do on their own.
+> friendo previously shipped a Cloudflare Workers ("edge") runtime and a Workers-for-Platforms hosting layer. Both were removed when the project unified on the Go runtime.
 
 ---
 
@@ -126,7 +114,7 @@ fields, and `friendo serve`/`build`/`push` compile it into the DB.
 
 ## Content types
 
-Friendo ships with built-in content types that work identically on your machine and in the cloud.
+Friendo ships with built-in content types — enable the ones your site needs.
 
 | Type | What it's for | Template access |
 |---|---|---|
@@ -163,24 +151,22 @@ Every Friendo site — local or deployed — has the same auth model:
 - **Sessions:** Bcrypt passwords, token-based sessions stored in the database.
 - **Sync:** `friendo push --users` syncs accounts to the deployed site. Bcrypt hashes are portable — same password works everywhere.
 
-The friendo.world platform has its own separate auth for managing your platform account and deployed sites. Site auth and platform auth are independent.
+Publishing to a network (friendo.world or your own) uses a separate **network account** — passwordless sign-in by email code, with browser device-auth for the CLI (`friendo login`). Hosting sites for others is just the **operator capability** on that account, not a separate password. Network accounts and per-site auth are independent.
 
 ---
 
 ## Deploy, push, and pull
 
-**`friendo deploy`** — First-time setup. Interactive wizard that provisions your site on a hosting target.
+**`friendo deploy [subdomain]`** — Publish this folder to a network. Defaults to friendo.world; use `--network URL` for your own.
 
 ```
-$ friendo deploy
-
-Where do you want to deploy?
-  1. friendo.world (managed hosting)
-  2. Cloudflare Workers (your own account)
-  3. VPS / self-hosted server
+$ friendo deploy my-club
+  → opens your browser to sign in (first time only)
+  → claims my-club.friendo.world
+  → pushes your templates, assets, and data
 ```
 
-Saves the target URL in `friendo.toml`. You only run this once.
+Run your own network with `friendo network serve` (see [DEPLOY.md](DEPLOY.md)), or self-host a single site with `friendo serve`.
 
 **`friendo push`** — Push local changes to your deployed site.
 
@@ -197,7 +183,7 @@ friendo pull --data         # pull records
 friendo pull --users        # pull user accounts
 ```
 
-All sync goes through the site's own `/_/api/*` endpoints, authenticated with site admin credentials. The same API works whether your site is on friendo.world, your own Cloudflare account, or a VPS.
+All sync goes through the site's own `/_/api/*` endpoints, authenticated with site admin credentials. The same API works whether your site is on friendo.world, on your own `friendo network`, or self-hosted with `friendo serve`.
 
 ---
 
@@ -227,9 +213,9 @@ All sync goes through the site's own `/_/api/*` endpoints, authenticated with si
 | Phase | Scope | Status |
 |---|---|---|
 | **Phase 1** | CLI + Go runtime + friendo.world foundation | Complete |
-| **Phase 1.5** | Auth, shared admin SPA + REST API, codebase refactor, Workers for Platforms, working deploy | Complete |
+| **Phase 1.5** | Auth, shared admin SPA + REST API, codebase refactor, working deploy | Complete |
 | **Phase 3** | Community features — visitor comments/reactions/polls, realtime channels, locations, media, the `friendo.js` SDK | Complete |
-| **v0.2 / v0.3** | Public-safe hardening + parity, then consolidation toward 1.0: server-side community rendering, page-bundle galleries, render/CLI/SDK test coverage, `<friendo-map>`, persona switcher | Complete |
+| **v0.2 / v0.3** | Public-safe hardening, then consolidation onto one Go runtime + network mode: server-side community rendering, page-bundle galleries, render/CLI/SDK test coverage, `<friendo-map>`, persona switcher | Complete |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned (0.4+) |
 
 See [ROADMAP.md](ROADMAP.md) for details and known gaps.
@@ -246,7 +232,7 @@ See [ROADMAP.md](ROADMAP.md) for details and known gaps.
 
 **Simple deployment.** One command to publish. The cloud exists to make that easy — not to create dependency.
 
-**Self-hostable.** friendo.world is convenient, not required. The runtimes are yours to deploy anywhere.
+**Self-hostable.** friendo.world is convenient, not required. The runtime is yours to deploy anywhere.
 
 ---
 

@@ -1,6 +1,6 @@
 // Package sdk embeds and serves friendo.js — the community Web Components client.
-// The file is generated from sdk/friendo.js by sdk/scripts/bundle.mjs (npm run
-// sdk); the edge runtime ships the byte-identical copy via runtime/edge/sdk-bundle.js.
+// The file is generated from sdk/friendo.js by sdk/scripts/bundle.mjs (npm run sdk)
+// and embedded via go:embed.
 package sdk
 
 import (

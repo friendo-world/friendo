@@ -74,7 +74,7 @@ type migrationDef struct {
 }
 
 // allMigrations returns the ordered migration list: the baseline schema (id 1)
-// followed by migrations/NNNN_*.sql. Mirrors runtime/edge/migrations.js.
+// followed by migrations/NNNN_*.sql.
 func allMigrations() []migrationDef {
 	defs := []migrationDef{{id: 1, name: "baseline", sql: schemaSQL}}
 
@@ -144,9 +144,8 @@ func runMigrations(conn *sql.DB) error {
 
 // splitStatements drops full-line comments and splits SQL into statements.
 // SplitStatements drops full-line comments and splits a multi-statement SQL string
-// (schema / migration) into individual statements. Mirrors runtime/edge/sql-split.js
-// splitStatements — the two must split identically (enforced by
-// tests/splitter-cases.json). Filtering full-line comments before splitting on ";"
+// (schema / migration) into individual statements. Its behavior is pinned by
+// tests/splitter-cases.json. Filtering full-line comments before splitting on ";"
 // keeps a comment-led file (schema.sql opens with a comment) from folding its
 // leading comment into — and dropping — the first real statement.
 func SplitStatements(sqlText string) []string {

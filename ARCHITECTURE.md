@@ -12,13 +12,18 @@ provides managed hosting**:
 | Piece | What it is | Where |
 |---|---|---|
 | **CLI** | The `friendo` command — init, serve, deploy, push, pull, export. A thin client that talks to any running site over its REST API. | `cli/` |
-| **Runtimes** | The thing that actually runs a site: serves pages, stores data, hosts the admin UI and API. Two implementations (Go and edge), same behavior. | `runtime/go/`, `runtime/edge/` |
-| **Platform** | friendo.world managed hosting. Optional — everything it does, the runtimes can do on their own. | `platform/` |
+| **Runtime** | The thing that actually runs a site: serves pages, stores data, hosts the admin UI and API. One implementation — the Go runtime. | `runtime/go/` |
+| **Network mode** | friendo.world managed hosting: the same Go binary in `friendo network serve`, dispatching many sites by subdomain. Optional — a single site never needs it. | `runtime/go/network/` |
 
 A **site is a folder**: `friendo.toml`, `layouts/`, `pages/`, `assets/`, and a
 `data/` database. It's portable, checkable into git, and outlives any single tool.
 
-## Two runtimes, one site
+> friendo previously shipped a second runtime — a Cloudflare Worker ("edge") build
+> — plus a Workers-for-Platforms hosting layer, kept in lockstep by a parity harness.
+> Both were removed when the project unified on the Go runtime; the sections below
+> describe the one runtime that remains.
+
+## One runtime, one site
 
 Every Friendo site — wherever it runs — exposes the same interface:
 
@@ -26,44 +31,44 @@ Every Friendo site — wherever it runs — exposes the same interface:
 - `/_/` — the admin UI
 - `/_/api/*` — the REST + sync API
 
-There are two runtimes that implement it:
+One runtime implements it — the **Go runtime** (`runtime/go/`):
 
-| | Go runtime (`runtime/go/`) | Edge runtime (`runtime/edge/`) |
-|---|---|---|
-| Runs as | A single Go binary (`friendo serve`), e.g. on a VPS | A Cloudflare Worker (Hono app) |
-| Data | SQLite (`modernc.org/sqlite`, no CGO) | D1 |
-| Assets | `assets/` on disk (uploads land in `assets/uploads/`) | R2 (same key layout) |
-| Templates | [Pongo2](https://github.com/flosch/pongo2) (Jinja2) | a custom Jinja2-compatible engine (no `eval`, Workers-safe) |
-| Realtime | in-process message hub (SSE) | a `ChannelStream` Durable Object (SSE) |
+| | Go runtime (`runtime/go/`) |
+|---|---|
+| Runs as | A single Go binary (`friendo serve`), e.g. on a VPS |
+| Data | SQLite (`modernc.org/sqlite`, no CGO) |
+| Assets | `assets/` on disk (uploads land in `assets/uploads/`); media can offload to S3/R2 via `FRIENDO_S3_*` (`runtime/go/storage`) |
+| Templates | [Pongo2](https://github.com/flosch/pongo2) (Jinja2) |
+| Realtime | in-process message hub (SSE) |
 
-The client transport is identical either way — `<friendo-channel>` opens one
+The client transport is the same everywhere — `<friendo-channel>` opens one
 `EventSource` on `/channels/:id/stream` and new messages stream in live.
 
-**Common schema.** Both use identical table definitions (`posts`, `comments`,
+**One schema.** The runtime defines its tables once (`posts`, `comments`,
 `reactions`, `channels`, `messages`, `polls`, `poll_votes`, `authors`,
-`locations`, `files`, `users`, `sessions`). Identical schema everywhere is what
+`locations`, `files`, `users`, `sessions`). One schema across every site is what
 makes data sync a copy, not a migration.
 
-**Parity is the rule.** Self-hosters deploy the exact `runtime/edge/` code that
-friendo.world runs as a per-site Worker — zero divergence between managed and
-self-hosted.
+**Same binary from laptop to production.** Local dev, self-host, and
+friendo.world all run this one binary — `friendo serve` for a single site,
+`friendo network serve` for many (see *Managed hosting* below). There's no
+managed/self-hosted divergence because there's nothing else to run.
 
-## The admin UI: one SPA, both runtimes
+## The admin UI: one embedded SPA
 
 The admin UI is a single Preact + TypeScript app in `admin/`, built once and
-served **byte-for-byte identically** by both runtimes, so it can never drift:
+embedded into the runtime, so what ships is always what you built:
 
 ```
-admin/  ──vite build──▶  runtime/go/admin/spa/      (embedded via go:embed)
-                    └──▶  runtime/edge/spa-bundle.js  (generated, imported by the Worker)
+admin/  ──vite build──▶  runtime/go/admin/spa/   (embedded via go:embed)
 ```
 
-The SPA is pure client-side; it talks only to the runtime-agnostic REST API. The
-runtimes differ in their handlers, never in the interface.
+The SPA is pure client-side; it talks only to the REST API, so one build serves
+every site.
 
 ## REST + sync API (`/_/api/*`)
 
-Both runtimes implement the same endpoints. Most require site admin auth (a
+The runtime implements these endpoints. Most require site admin auth (a
 `friendo_session` cookie); the bootstrap endpoints are public so the SPA and CLI
 can start cold.
 
@@ -86,20 +91,21 @@ the actor's *own* rows unless they hold the `.any` variant.
 
 **Community data renders two ways.** The `friendo.js` SDK components fetch these
 endpoints client-side (interactive, viewer-aware). For content that benefits from a
-no-JS read, both runtimes *also* attach the public relations to the focused record
+no-JS read, the runtime *also* attaches the public relations to the focused record
 in the template context — `record.comments` (approved), `record.reactions`,
 `record.poll`, and `record.gallery` — so a post template can render them directly.
-Both engines attach them at the same point in the render path, so output is
-byte-identical (covered by the render-parity suite). Inherently interactive features
-(realtime chat, the `<friendo-map>` widget) stay client-side by design.
+Inherently interactive features (realtime chat, the `<friendo-map>` widget) stay
+client-side by design.
 
 ## Deploy, push, pull
 
-The CLI talks to a site's own `/_/api/*` — no platform involvement, whatever the
-host (friendo.world, your Cloudflare account, or a VPS).
+The CLI talks to a site's own `/_/api/*` — whatever the host (friendo.world, your
+own network, or a single self-hosted site).
 
-- **`friendo deploy`** — one-time interactive setup. Provisions the site on a
-  chosen target, writes `[deploy] target = …` to `friendo.toml`, then pushes.
+- **`friendo deploy [subdomain] [--network URL]`** — publish the current folder to
+  a network (friendo.world by default). It signs you in in the browser (device-auth)
+  if needed, claims a subdomain your account owns, exchanges an in-process SSO
+  session for the site, and pushes. See *Managed hosting* below.
 - **`friendo push`** — upload templates + assets (`--data` / `--users` to include
   records and accounts). Assets are base64-encoded so binary files (uploaded
   images in `assets/uploads/`) round-trip intact, and `--data` also carries
@@ -108,16 +114,18 @@ host (friendo.world, your Cloudflare account, or a VPS).
   the local database.
 
 **Auth + first-run bootstrap.** `push`/`pull` authenticate via `authenticateSite()`:
-reuse a cached session from `~/.friendo/config`, else log in. If the target has
-**no admin yet** (a freshly provisioned site), `GET /_/api/setup` reports it and
-the CLI walks the user through creating the first admin via `POST /_/api/setup` —
-so the deploy wizard's final push bootstraps the site owner automatically.
+reuse a cached session from `~/.friendo/config`, else log in. On a network,
+`friendo deploy` seeds that session from the network's SSO exchange (your account
+becomes the site owner). For a self-hosted site with **no admin yet**,
+`GET /_/api/setup` reports it and the CLI walks the user through creating the first
+admin via `POST /_/api/setup`.
 
 ## File-based content (`content/`)
 
 Content normally lives in the DB (edited via the admin UI or API). A site can
 *also* be authored as **files** — a Hugo-style `content/` folder that compiles
-into that same DB, so the runtimes are untouched and parity holds.
+into that same DB, so the runtime is untouched: `content/` is just another way to
+fill the same tables.
 
 - `content/<collection>/<slug>.md` → a record in `<collection>` with that slug;
   YAML front matter supplies `title`/`slug`/`status`/`date`, and **any other keys
@@ -132,79 +140,67 @@ into that same DB, so the runtimes are untouched and parity holds.
 This documentation site is authored this way (`docs/content/docs/*.md`), with its
 sidebar generated from the docs collection via `collections.docs|sort_by:"data.weight"`.
 
-## Managed hosting: Workers for Platforms
+## Managed hosting: network mode
 
-friendo.world runs each site as its own isolated Worker via
-[Cloudflare Workers for Platforms](https://developers.cloudflare.com/cloudflare-for-platforms/workers-for-platforms/):
+friendo.world is just the reference **friendo network** — the same Go binary in
+`friendo network serve`, dispatching many sites by subdomain in one process. Any
+self-hoster can run their own network the same way; there's no separate platform
+codebase.
 
 ```
 testsite.friendo.world
-  → dispatch Worker (platform/worker.js)       — extracts "testsite" from the hostname
-    → env.DISPATCHER.get("testsite")
-  → user Worker (runtime/edge/index.js)         — renders the site from its own D1 + R2
+  → one friendo binary (friendo network serve)
+    → dispatcher reads the Host header, resolves "testsite"
+  → BuildSiteHandler(testsite)   — serves the site from its folder + SQLite DB
 ```
 
 | Component | Role |
 |---|---|
-| **Dispatch Worker** (`platform/worker.js`) | Subdomain routing, platform landing/dashboard, platform auth (Better Auth), provisioning. No rendering. |
-| **User Worker** (`runtime/edge/index.js`) | A per-site instance of the edge runtime — rendering, admin UI, API. Its own D1 + R2. |
-| **Dispatch namespace** | A Cloudflare namespace holding all site Workers (`dev` for development, `production` for live). |
+| **Dispatcher** (`runtime/go/network`) | Reads `r.Host`, resolves the site, serves its cached handler from `BuildSiteHandler`. Opens each site's DB on demand; LRU-caches handlers and closes idle ones. Per-request panic recovery isolates one tenant's failure from the rest. |
+| **Registry** | A small SQLite DB mapping `subdomain → site folder + display name + owner account`. |
+| **Operator console + API** (apex) | The web console + `/api/*` an operator uses to create / list / destroy sites and manage accounts, invites, and the signup policy. |
+| **Accounts store** | Network accounts + sessions + device-auth + OTP; `operator` is a capability. |
 
-**Two levels of D1:**
+**One process, many tenants.** A tenant is "a folder + a SQLite file opened on
+demand," so an idle site costs about a file handle and cold start is near-zero.
+Because it's one binary, a hot or abusive tenant can be moved to its own container
+running the same binary — density *or* isolation, chosen per site.
 
-| Database | Owned by | Contains |
-|---|---|---|
-| Platform D1 | Dispatch Worker | `sites` registry + platform accounts (Better Auth) |
-| Site D1 (one per site) | User Worker | All site content + users + sessions |
+**Substrate.** friendo.world runs this binary on **Coolify + Hetzner** with a
+persistent volume for the site folders + SQLite DBs. **Cloudflare** is dumb infra:
+one proxied `*.friendo.world` wildcard DNS record (so every subdomain resolves
+instantly) plus TLS/CDN, with a Cloudflare Origin cert on the box (SSL Full-strict).
+**Cloudflare R2** holds media (`FRIENDO_S3_*`; see the runtime's storage layer
+above). Full runbook in [DEPLOY.md](DEPLOY.md).
 
-True isolation: each site has its own D1 and R2 — no `site_id` partitioning, no
-shared hotspot, no noisy neighbors.
+**Provisioning is a folder op.** Creating a site scaffolds its folder, opens its DB
+(auto-migrates), inserts the registry row, and creates the owner user linked to the
+deploying account. Teardown reverses it. There is no per-site Worker, no per-site
+DNS, and no runtime bundle to publish — deploying the network updates every site at
+once (bulk rollout is automatic).
 
-**Runtime artifacts.** The provisioner deploys a *bundled* edge runtime, not the
-source tree. `npm run runtime:bundle` esbuild-bundles `runtime/edge/index.js`
-(hono + bcryptjs + marked inlined, `.sql` files loaded as text) into
-`runtime/edge/dist/edge-runtime.js`; `npm run runtime:publish` uploads it to the
-`friendo-runtime` R2 bucket (`RUNTIME_BUCKET`). Re-run these whenever
-`runtime/edge/` changes so new sites get the current runtime. (No schema artifact
-is shipped — the schema is embedded in the bundle and self-applies; see below.)
-
-**Tenant DNS is one wildcard.** A single proxied `*.friendo.world` DNS record
-(created once) means every subdomain resolves instantly to Cloudflare's edge,
-where the `*.friendo.world/*` route hands it to the dispatch Worker. So
-provisioning creates **no per-site DNS** — a brand-new subdomain is reachable the
-moment its Worker is live, with no propagation wait. Universal SSL covers
-`*.friendo.world`, so HTTPS is automatic.
-
-**Provisioning** (`friendo deploy` → friendo.world): the CLI authenticates with
-the platform (device-auth flow), then `POST /api/sites` creates a **D1 database +
-R2 bucket + user Worker** (the bundled runtime from `RUNTIME_BUCKET`, bound as
-`DB`, `ASSETS`, `SITE_ID`, `SITE_NAME`) and records the resource IDs in the
-platform registry — no DNS, no schema pre-apply (the site's D1 self-initializes
-from the embedded baseline on its first request). It's ~3 seconds. Any partial
-failure rolls back the resources it created. The CLI then pushes (and bootstraps
-the admin) over the new site's `/_/api/*`. Re-running `friendo deploy` for an
-existing site (or `POST /api/sites/:id/redeploy`) re-pushes the current bundle to
-its user Worker with the same bindings, so runtime updates reach live sites
-without touching their data. `DELETE /api/sites/:id` deprovisions a site — tearing
-down its user Worker, D1, and R2 bucket (emptying it first) — then removes the
-registry row.
+**Accounts & deploy.** `friendo login` runs a browser device-auth against the
+network and caches an account token. `friendo deploy [subdomain]` claims a subdomain
+your account owns, exchanges an in-process SSO session for the site, and pushes.
+Operators (accounts with the `operator` capability) manage the fleet via
+`friendo network *` and the apex console; the first console sign-in claims operator
+when none exists, and `FRIENDO_OPERATOR_EMAIL` designates the bootstrap operator.
+Full design in [design/network-accounts.md](design/network-accounts.md).
 
 ## Schema migrations
 
-Both runtimes share a migration mechanism: an ordered list whose baseline (id 1)
-is the schema itself, tracked in a `schema_migrations` table. The Go runtime
-applies pending migrations in `data.Open`; the edge runtime applies them once per
-isolate on the first request (guarded by `ensureMigrated`). A freshly provisioned
-database self-initializes from the baseline. Add a migration by dropping the same
-`NNNN_*.sql` file in **both** runtime trees (`runtime/go/data/migrations/` and
-`runtime/edge/migrations/`) — the schema stays identical across SQLite and D1.
+The runtime uses an ordered migration list whose baseline (id 1) is the schema
+itself, tracked in a `schema_migrations` table. Migrations apply in `data.Open`; a
+freshly provisioned database self-initializes from the baseline. Add a migration by
+dropping a new `NNNN_*.sql` file in `runtime/go/data/migrations/` — one schema, one
+place.
 
 ## Auth model
 
 | Scope | What | Where |
 |---|---|---|
-| **Site** | Per-site **accounts** (`users`) with roles (owner > admin > editor > contributor > member), bcrypt passwords, DB-stored sessions. Identical model in both runtimes. | site D1 / SQLite |
-| **Platform** | friendo.world account auth (Better Auth) for managing your account and provisioning sites — independent of site auth. | platform D1 |
+| **Site** | Per-site **accounts** (`users`) with roles (owner > admin > editor > contributor > member), bcrypt passwords, DB-stored sessions. | site SQLite |
+| **Network** | **Network accounts** (`runtime/go/network`) for signing in to a friendo network and provisioning sites — passwordless email OTP + browser device-auth. `operator` is a capability (no operator password), separate from per-site roles. | network accounts DB |
 
 **Capabilities, not just ranks.** Authorization is capability-based: roles are
 named bundles of capabilities (`content.create`, `content.edit.own` vs

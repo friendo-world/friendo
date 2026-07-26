@@ -1,24 +1,20 @@
-// One command to cut a friendo release: verify, build, publish the edge runtime,
-// then tag. Usage:
+// One command to cut a friendo release: verify, build, then tag. Usage:
 //
 //   npm run release -- v0.2.0            # full release, with a confirm prompt
-//   npm run release -- v0.2.0 --dry-run  # run every check + build, stop before publish/tag
+//   npm run release -- v0.2.0 --dry-run  # run every check + build, stop before tag
 //   npm run release -- v0.2.0 --yes      # skip the confirm prompt (CI / you're sure)
-//   npm run release -- v0.2.0 --skip-runtime   # tag only (don't touch R2)
-//   npm run release -- v0.2.0 --skip-tag       # publish the edge runtime only
+//   npm run release -- v0.2.0 --skip-tag # run the checks only (don't tag)
 //
 // What it does, in order:
-//   1. Guards      — on `main`, clean tree, valid version, tag not already used.
-//   2. Bundles     — rebuild the committed SPA/SDK. If that changes anything, it
-//                    STOPS and asks you to commit (this script never commits for
-//                    you) so GoReleaser releases from a clean tree.
-//   3. Tests       — go + edge parity must pass.
-//   4. Edge runtime — rebuild dist/edge-runtime.js and publish it to the
-//                    `friendo-runtime` R2 bucket (what new/redeployed sites pull).
-//   5. Tag         — annotated tag + push, which triggers the GoReleaser workflow.
+//   1. Guards   — on `main`, clean tree, valid version, tag not already used.
+//   2. Bundles  — rebuild the committed SPA/SDK. If that changes anything, it STOPS
+//                 and asks you to commit (this script never commits for you) so
+//                 GoReleaser releases from a clean tree.
+//   3. Tests    — go test must pass.
+//   4. Tag      — annotated tag + push, which triggers the GoReleaser workflow.
 //
-// Steps 4 and 5 are the only irreversible/outward ones; everything before them is
-// local and safe, and a confirm prompt gates them (unless --yes / --dry-run).
+// The tag is the only irreversible/outward step; everything before it is local and
+// safe, and a confirm prompt gates it (unless --yes / --dry-run).
 
 import { execSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
@@ -31,9 +27,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // the release builds from stale/dirty state. (Matches the CI bundles-current check.)
 const COMMITTED_BUNDLES = [
   "runtime/go/admin/spa",
-  "runtime/edge/spa-bundle.js",
   "runtime/go/sdk",
-  "runtime/edge/sdk-bundle.js",
 ];
 
 // --- tiny cli / shell helpers ---
@@ -43,7 +37,6 @@ const flags = new Set(args.filter((a) => a.startsWith("--")));
 const version = args.find((a) => !a.startsWith("--"));
 const dryRun = flags.has("--dry-run");
 const assumeYes = flags.has("--yes");
-const skipRuntime = flags.has("--skip-runtime");
 const skipTag = flags.has("--skip-tag");
 
 const sh = (cmd) => execSync(cmd, { cwd: repoRoot, stdio: "inherit" });
@@ -106,48 +99,34 @@ ok("SPA + SDK bundles are current");
 
 // --- 3. tests ---
 
-step("Running the parity suites (go + edge)");
+step("Running the test suite");
 sh("npm run test:go");
-sh("npm run test:edge");
-ok("both runtimes pass");
+ok("tests pass");
 
 // --- summary + gate ---
 
-const willPublish = !skipRuntime;
 const willTag = !skipTag;
 
 console.log("\n──────────────────────────────────────────────");
 console.log(`Release ${version} plan:`);
-console.log(`  ${willPublish ? "•" : "–"} publish edge runtime → friendo-runtime R2 bucket`);
 console.log(`  ${willTag ? "•" : "–"} tag ${version} + push origin (triggers GoReleaser)`);
 console.log("──────────────────────────────────────────────");
 
 if (dryRun) {
-  console.log("\n--dry-run: everything above passed. Stopping before publish/tag.");
+  console.log("\n--dry-run: everything above passed. Stopping before tag.");
   process.exit(0);
 }
 
-if (!(willPublish || willTag)) {
-  die("Nothing to do — both --skip-runtime and --skip-tag were passed.");
+if (!willTag) {
+  die("Nothing to do — --skip-tag was passed.");
 }
 
-if (!(await confirm("Publish and tag now? This is irreversible. (y/N)"))) {
-  console.log("\nAborted — nothing was published or tagged.");
+if (!(await confirm("Tag and push now? This triggers the release build. (y/N)"))) {
+  console.log("\nAborted — nothing was tagged.");
   process.exit(0);
 }
 
-// --- 4. edge runtime ---
-
-if (willPublish) {
-  step("Building + publishing the edge runtime");
-  sh("npm run runtime:bundle");
-  sh("npm run runtime:publish");
-  ok("edge-runtime.js published (new/redeployed sites will pull it)");
-} else {
-  ok("skipped edge runtime publish (--skip-runtime)");
-}
-
-// --- 5. tag ---
+// --- 4. tag ---
 
 if (willTag) {
   step(`Tagging ${version} and pushing`);

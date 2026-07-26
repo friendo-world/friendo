@@ -3,7 +3,7 @@
 
 export type Role = "owner" | "admin" | "editor" | "contributor" | "member";
 
-// Capability model mirrored from the runtimes (runtime/go/data, runtime/edge).
+// Capability model mirrored from the runtime (runtime/go/data).
 // Used to gate the admin UI; the server enforces the real checks.
 export type Capability =
   | "content.create"

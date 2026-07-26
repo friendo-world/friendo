@@ -105,13 +105,13 @@ one process, so it collapses:
   account + policy; operator endpoints by capability.
 - On provision, create the site's owner user linked to the account (so SSO can issue sessions).
 
-## Reuse / head-start
+## Reuse / head-start (as-built)
 
-- **CLI client:** `cli/internal/deploy/` already has the device-auth + SSO client (`platformClient`,
-  `SSOCode`, `PlatformLogin`, the device flow) — mostly reusable, just repointed to the network URL.
-- **Server logic to port:** `platform/worker.js` has the old device-auth + SSO + account logic in
-  JS — port the shapes into Go (this is one of the last useful things in `platform/` before it's deleted).
-- **OTP:** the runtime already has passwordless OTP (`/_/api/auth/request-code|verify-code`) — reuse it.
+- **CLI client:** the device-auth + SSO client now lives in `cli/internal/deploy/account.go`
+  (device flow + `/api/sso/exchange`); the old Cloudflare `platformClient`/`SSOCode` path has been removed.
+- **Server logic:** the device-auth + SSO + account shapes that `platform/worker.js` prototyped in
+  JS were ported into Go (`runtime/go/network`); `platform/` has since been deleted.
+- **OTP:** reuses the runtime's passwordless OTP (`/_/api/auth/request-code|verify-code`).
 - **Operator half:** the current `network.Operators` + console + operator `/api/*` are the seed to
   generalize into accounts.
 

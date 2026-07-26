@@ -1,10 +1,7 @@
-// Render-layer parity: the REST scenarios (parity_test.go / edge-parity.mjs) prove
-// the API behaves identically; this proves the *template engines* do. The same
-// render-scenarios.json fixtures run here (Go) and in edge-parity.mjs (edge); each
-// fixture's rendered output must equal its golden `expect`, so if both match the
-// golden they match each other. Fixtures are fragments (no </body>) so the Go serve
-// path's dev-only live-reload injection stays a no-op, keeping the two runtimes
-// byte-comparable.
+// Render-layer regression: parity_test.go proves the REST API behaves correctly;
+// this proves the *template engine* does. Each render-scenarios.json fixture's
+// rendered output must equal its golden `expect`. Fixtures are fragments (no
+// </body>) so the serve path's dev-only live-reload injection stays a no-op.
 package tests
 
 import (

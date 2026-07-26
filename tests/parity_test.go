@@ -1,6 +1,7 @@
-// Package tests runs the shared scenarios.json against the Go runtime's REST API
-// and asserts the responses. The same scenarios run against the edge runtime via
-// edge-parity.mjs — together they prove both runtimes behave identically.
+// Package tests runs scenarios.json against the runtime's REST API and asserts the
+// responses — a regression suite over the API's behavior. (These fixtures were once
+// a Go/edge parity harness; the edge runtime is gone, so they now pin the one
+// runtime.)
 package tests
 
 import (

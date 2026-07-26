@@ -8,9 +8,6 @@ bin
 scratchpad
 /data
 *.log
-.wrangler
-**/.wrangler
-runtime/edge/dist
 design
 docs
 testsite

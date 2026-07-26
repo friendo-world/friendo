@@ -38,9 +38,10 @@ Export the site as static output.
 
 ## Deploying & syncing
 
-### `friendo deploy`
-Interactive first-time setup — provisions a site on a hosting target, saves the
-target to `friendo.toml`, and pushes. `--api-url` targets a non-default platform.
+### `friendo deploy [subdomain]`
+Publish the current folder to a network (friendo.world by default), saving the
+target to `friendo.toml`. Signs you in in the browser if needed, claims the
+subdomain for your account, and pushes. `--network <url>` targets another network.
 
 ### `friendo push`
 Push local state to your deployed site.
@@ -56,16 +57,39 @@ Push local state to your deployed site.
 Pull remote state into your local database. Use `--data` for records and/or
 `--users` for accounts (`--target` to override).
 
-### `friendo redeploy`
-Re-push the current managed-hosting runtime to your site's Worker. Your data is
-untouched.
+## Accounts & networks
 
-### `friendo destroy`
-Deprovision the deployed site — deletes its Worker, database, and assets. Prompts
-for confirmation; `--yes` skips it.
+Publishing goes to a **network** (friendo.world by default). You sign in to a
+network with a passwordless browser flow — no platform password.
+
+### `friendo login [network-url]`
+Sign in to a network (default friendo.world) via browser device auth, so `deploy`
+doesn't have to prompt.
+
+### `friendo whoami [network-url]`
+Show the account you're signed in as.
+
+### `friendo logout`
+Sign out — clear the cached network token and site sessions.
+
+### `friendo network …`
+Operator commands for running a network yourself — one host serving many sites by
+subdomain. These need the **operator** capability on your account.
+
+| Command | What |
+|---|---|
+| `friendo network serve` | Serve every site on the network by subdomain |
+| `friendo network sites` | List the sites on the network |
+| `friendo network provision <sub>` | Create a new site |
+| `friendo network deploy <sub>` | Provision + push the current folder in one step |
+| `friendo network destroy <sub>` | Delete a site and all its data (`--yes` to confirm) |
+| `friendo network invite <email>` | Pre-create an account so it can sign in |
+| `friendo network signups <open\|invite>` | Set who may create an account |
+| `friendo network operator grant <email>` | Grant an account the operator capability |
 
 ## Config & auth
 
 Deploy credentials are cached in `~/.friendo/config`. Site sync authenticates with
-your **site admin** login (cached per site); provisioning on friendo.world uses
-your **platform** login. See [Auth & users](/docs/auth) for the distinction.
+your **site admin** login (cached per site); signing in to a network is
+passwordless — `friendo login` runs a browser device-auth flow, no platform
+password. See [Auth & users](/docs/auth) for the distinction.

@@ -8,24 +8,21 @@ weight: 3
 When your site is ready, one command puts it on the internet.
 
 ```bash
-friendo deploy
+friendo deploy            # subdomain from your site's name
+friendo deploy my-club    # or pick the subdomain
 ```
 
-It's an interactive wizard that asks where to host:
-
-```
-Where do you want to deploy?
-  1. friendo.world (managed hosting)
-  2. Cloudflare Workers (your own account)
-  3. VPS / self-hosted
-```
+`deploy` publishes the current folder to a **network** — friendo.world by
+default. If you're not signed in it opens your browser to sign you in (a one-time
+device code, no password), then claims the subdomain for your account and pushes
+your templates and assets. Point it at any other network with
+`--network https://sites.example.com`.
 
 ## friendo.world (managed)
 
-Choosing **friendo.world** signs you in through your browser, then provisions a
-site on a subdomain — `your-site.friendo.world` — with its own database and
-asset storage, and pushes your templates and assets. You only run `deploy` once;
-it saves the target in `friendo.toml`.
+By default `deploy` targets **friendo.world**, which hosts your site on a
+subdomain — `your-site.friendo.world` — with its own database and asset storage.
+You only run `deploy` once; it saves the target in `friendo.toml`.
 
 ```bash
 friendo deploy          # first time — provisions + pushes
@@ -37,24 +34,27 @@ friendo push --users    # also push user accounts
 friendo.world is convenient, not required — everything it does, you can do
 yourself on your own infrastructure.
 
-## Your own Cloudflare / a VPS
+## Self-host it yourself
 
-The same site runs unchanged on Cloudflare Workers (with D1 + R2) or on any
-server via the `friendo` binary. `friendo deploy` prints the steps for each, and
-`friendo push --target https://your-site.example.com` syncs to it afterward.
+friendo.world runs the same `friendo` binary you already have. Serve one site
+directly with `friendo serve`, or run your own **network** — one host serving
+many sites by subdomain — with `friendo network serve`, then
+`friendo deploy my-club --network https://sites.example.com` to publish to it.
+`friendo push --target https://your-site.example.com` syncs to any site
+afterward.
 
 ## Keeping in sync
 
-All sync goes through your site's own API, authenticated with your site admin
-login — so these work the same wherever the site is hosted:
+All sync goes through your site's own API. `deploy` signs you into the network
+and mints the site's admin session for you (device auth + in-process SSO); for a
+self-hosted or custom-domain site you sign in with its admin email and password.
+Either way these work the same wherever the site is hosted:
 
 | Command | What |
 |---|---|
 | `friendo push` | Upload templates + assets (`--data`, `--users` to include those) |
 | `friendo pull --data` | Pull remote records back into your local database |
 | `friendo pull --users` | Pull user accounts back down |
-| `friendo redeploy` | Re-push the managed-hosting runtime to your site |
-| `friendo destroy` | Tear the deployed site down completely |
 
 ## Export instead
 
