@@ -1,7 +1,6 @@
 package network
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,23 +19,52 @@ func mustAccounts(t *testing.T, root string) *Accounts {
 	return a
 }
 
-// TestOperatorJSONAPI exercises the CLI-facing operator API: Bearer-token auth,
-// and create/list/destroy of sites — driven through the dispatcher so the
-// destroy path also evicts the live handler.
-func TestOperatorJSONAPI(t *testing.T) {
+// sessionFor mints an account session token for email (no capabilities).
+func sessionFor(t *testing.T, accounts *Accounts, email string) string {
+	t.Helper()
+	id, err := accounts.EnsureAccount(email)
+	if err != nil {
+		t.Fatalf("EnsureAccount: %v", err)
+	}
+	tok, err := accounts.StartSession(id)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	return tok
+}
+
+// operatorToken mints a session token for email after granting it operator.
+func operatorToken(t *testing.T, accounts *Accounts, email string) string {
+	t.Helper()
+	if err := accounts.Grant(email, "operator"); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	acct, _ := accounts.GetByEmail(email)
+	tok, err := accounts.StartSession(acct.ID)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	return tok
+}
+
+// operatorCookieFor returns an operator session cookie for email.
+func operatorCookieFor(t *testing.T, accounts *Accounts, email string) *http.Cookie {
+	return &http.Cookie{Name: operatorCookie, Value: operatorToken(t, accounts, email)}
+}
+
+// TestOperatorAPIAuth exercises the CLI-facing operator API: account Bearer token
+// gated on the operator capability, and create/list/destroy of sites — driven
+// through the dispatcher so the destroy path also evicts the live handler.
+func TestOperatorAPIAuth(t *testing.T) {
 	root := t.TempDir()
 	reg, err := NewRegistry(root)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	ops, err := OpenOperators(root)
-	if err != nil {
-		t.Fatalf("OpenOperators: %v", err)
-	}
-	defer ops.Close()
+	accounts := mustAccounts(t, root)
 	d := NewDispatcher(reg, "localhost", 0)
 	defer d.Close()
-	console := NewConsole(reg, ops, mustAccounts(t, root), "localhost")
+	console := NewConsole(reg, accounts, "localhost")
 	console.SetDestroyer(d.DestroySite)
 	d.HandleApex(console)
 
@@ -54,32 +82,18 @@ func TestOperatorJSONAPI(t *testing.T) {
 		return rec
 	}
 
-	// Unauthenticated API call → 401.
+	// Unauthenticated → 401.
 	if code := jreq("GET", "/api/sites", "", "").Code; code != http.StatusUnauthorized {
 		t.Fatalf("unauth /api/sites = %d, want 401", code)
 	}
-	// Bad login → 401.
-	if err := ops.Create("op@x.com", "supersecret"); err != nil {
-		t.Fatal(err)
+	// A signed-in but non-operator account → 403.
+	if code := jreq("GET", "/api/sites", sessionFor(t, accounts, "member@x.com"), "").Code; code != http.StatusForbidden {
+		t.Fatalf("non-operator /api/sites = %d, want 403", code)
 	}
-	if code := jreq("POST", "/api/login", "", `{"email":"op@x.com","password":"wrong"}`).Code; code != http.StatusUnauthorized {
-		t.Errorf("bad login = %d, want 401", code)
-	}
-	// Good login → token.
-	rec := jreq("POST", "/api/login", "", `{"email":"op@x.com","password":"supersecret"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login = %d, want 200", rec.Code)
-	}
-	var lr struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &lr); err != nil || lr.Token == "" {
-		t.Fatalf("login returned no token (err=%v)", err)
-	}
-	tok := lr.Token
 
+	tok := operatorToken(t, accounts, "op@x.com")
 	if code := jreq("GET", "/api/whoami", tok, "").Code; code != http.StatusOK {
-		t.Errorf("whoami with token = %d, want 200", code)
+		t.Errorf("whoami with operator token = %d, want 200", code)
 	}
 	// Create a site via the API.
 	if code := jreq("POST", "/api/sites", tok, `{"subdomain":"alpha","name":"Alpha"}`).Code; code != http.StatusCreated {
@@ -110,11 +124,9 @@ func TestOperatorJSONAPI(t *testing.T) {
 // carrying an operator session cookie.
 func do(t *testing.T, c *Console, method, target string, form url.Values, cookie *http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
-	var body *strings.Reader
 	req := httptest.NewRequest(method, target, strings.NewReader(""))
 	if form != nil {
-		body = strings.NewReader(form.Encode())
-		req = httptest.NewRequest(method, target, body)
+		req = httptest.NewRequest(method, target, strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	if cookie != nil {
@@ -134,95 +146,76 @@ func sessionCookie(rec *httptest.ResponseRecorder) *http.Cookie {
 	return nil
 }
 
-// TestNetworkDestroyViaConsoleEvicts drives the full wired path — dispatcher +
-// console + SetDestroyer(d.DestroySite) — to prove that destroying a *cached*
-// site through the console stops it serving and removes its files. This is the
-// integration the unit tests split apart, and the scenario the live curl walk-
-// through couldn't verify cleanly (cookie/host quirk).
-func TestNetworkDestroyViaConsoleEvicts(t *testing.T) {
+// TestConsoleOTPLogin covers the passwordless operator sign-in: the first verified
+// email claims operator (bootstrap), and once operators exist a non-operator
+// account is refused.
+func TestConsoleOTPLogin(t *testing.T) {
 	root := t.TempDir()
 	reg, err := NewRegistry(root)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	ops, err := OpenOperators(root)
+	accounts := mustAccounts(t, root)
+	c := NewConsole(reg, accounts, "localhost")
+
+	// The sign-in page asks for an email (passwordless).
+	if body := do(t, c, "GET", "http://localhost/login", nil, nil).Body.String(); !strings.Contains(body, "Operator sign in") {
+		t.Fatalf("login page not shown:\n%s", body)
+	}
+
+	// First-run bootstrap: no operators yet, so the first verified email claims it.
+	// (Drive step 2 directly with a code from RequestOTP; step 1 just emails it.)
+	code, err := accounts.RequestOTP("boss@x.com")
 	if err != nil {
-		t.Fatalf("OpenOperators: %v", err)
+		t.Fatalf("RequestOTP: %v", err)
 	}
-	defer ops.Close()
-
-	d := NewDispatcher(reg, "localhost", 0)
-	defer d.Close()
-	console := NewConsole(reg, ops, mustAccounts(t, root), "localhost")
-	console.SetDestroyer(d.DestroySite) // the wiring the CLI's `serve` performs
-	d.HandleApex(console)
-
-	drive := func(method, host, path string, form url.Values, cookie *http.Cookie) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, "http://"+host+path, strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Host = host
-		if cookie != nil {
-			req.AddCookie(cookie)
-		}
-		rec := httptest.NewRecorder()
-		d.ServeHTTP(rec, req) // everything goes through the dispatcher
-		return rec
+	rec := do(t, c, "POST", "http://localhost/login", url.Values{"email": {"boss@x.com"}, "code": {code}}, nil)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("bootstrap login = %d, want 303; body:\n%s", rec.Code, rec.Body.String())
 	}
-
-	ck := sessionCookie(drive("POST", "localhost", "/setup", url.Values{"email": {"op@x.com"}, "password": {"supersecret"}}, nil))
+	ck := sessionCookie(rec)
 	if ck == nil {
-		t.Fatal("no session cookie from setup")
+		t.Fatal("bootstrap login set no session cookie")
 	}
-	drive("POST", "localhost", "/sites", url.Values{"subdomain": {"zeta"}}, ck)
+	if acct, ok := accounts.GetByEmail("boss@x.com"); !ok || !acct.Has("operator") {
+		t.Error("first sign-in did not claim operator")
+	}
+	// The session works on the dashboard.
+	if code := do(t, c, "GET", "http://localhost/", nil, ck).Code; code != http.StatusOK {
+		t.Errorf("authed dashboard = %d, want 200", code)
+	}
 
-	// Serve once to cache the handler + open the DB.
-	if code := drive("GET", "zeta.localhost", "/", url.Values{}, nil).Code; code != http.StatusOK {
-		t.Fatalf("zeta pre-destroy = %d, want 200", code)
+	// Now that an operator exists, an existing non-operator account is refused.
+	if _, err := accounts.EnsureAccount("member@x.com"); err != nil {
+		t.Fatalf("EnsureAccount: %v", err)
 	}
-	// Destroy through the console (which routes to the dispatcher).
-	if code := drive("POST", "localhost", "/sites/zeta/destroy", url.Values{}, ck).Code; code != http.StatusSeeOther {
-		t.Fatalf("console destroy = %d, want 303", code)
+	code2, _ := accounts.RequestOTP("member@x.com")
+	rec2 := do(t, c, "POST", "http://localhost/login", url.Values{"email": {"member@x.com"}, "code": {code2}}, nil)
+	if sessionCookie(rec2) != nil {
+		t.Error("a non-operator account should not get a session")
 	}
-	if _, ok := reg.Dir("zeta"); ok {
-		t.Error("folder still present after console destroy")
-	}
-	if code := drive("GET", "zeta.localhost", "/", url.Values{}, nil).Code; code != http.StatusNotFound {
-		t.Errorf("zeta after console destroy = %d, want 404", code)
+	if !strings.Contains(rec2.Body.String(), "an operator of this network") {
+		t.Errorf("expected 'not an operator' message; got:\n%s", rec2.Body.String())
 	}
 }
 
-func TestConsoleSetupAuthAndSiteLifecycle(t *testing.T) {
+// TestConsoleAuthAndSiteLifecycle covers auth gating + create/list/destroy through
+// the browser console with an operator session cookie.
+func TestConsoleAuthAndSiteLifecycle(t *testing.T) {
 	root := t.TempDir()
 	reg, err := NewRegistry(root)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	ops, err := OpenOperators(root)
-	if err != nil {
-		t.Fatalf("OpenOperators: %v", err)
-	}
-	defer ops.Close()
-	c := NewConsole(reg, ops, mustAccounts(t, root), "localhost")
+	accounts := mustAccounts(t, root)
+	c := NewConsole(reg, accounts, "localhost")
 
 	// Unauthenticated dashboard → redirect to /login.
 	if rec := do(t, c, "GET", "http://localhost/", nil, nil); rec.Code != http.StatusSeeOther {
 		t.Fatalf("unauth GET / = %d, want 303", rec.Code)
 	}
 
-	// With no operators, /login shows first-run setup.
-	if rec := do(t, c, "GET", "http://localhost/login", nil, nil); !strings.Contains(rec.Body.String(), "Create the first operator") {
-		t.Fatalf("expected setup form; got:\n%s", rec.Body.String())
-	}
-
-	// First-run setup creates the operator and signs in.
-	setup := do(t, c, "POST", "http://localhost/setup", url.Values{"email": {"op@example.com"}, "password": {"supersecret"}}, nil)
-	if setup.Code != http.StatusSeeOther {
-		t.Fatalf("POST /setup = %d, want 303", setup.Code)
-	}
-	ck := sessionCookie(setup)
-	if ck == nil {
-		t.Fatal("setup did not set a session cookie")
-	}
+	ck := operatorCookieFor(t, accounts, "op@example.com")
 
 	// Authenticated dashboard renders.
 	if rec := do(t, c, "GET", "http://localhost/", nil, ck); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "site(s)") {
@@ -255,13 +248,52 @@ func TestConsoleSetupAuthAndSiteLifecycle(t *testing.T) {
 	if _, ok := reg.Dir("alice"); ok {
 		t.Error("site alice was not destroyed")
 	}
+}
 
-	// With an operator present, /login now shows sign-in (not setup); bad creds error.
-	if rec := do(t, c, "GET", "http://localhost/login", nil, nil); !strings.Contains(rec.Body.String(), "Operator sign in") {
-		t.Error("expected sign-in form once an operator exists")
+// TestNetworkDestroyViaConsoleEvicts drives the full wired path — dispatcher +
+// console + SetDestroyer(d.DestroySite) — to prove that destroying a *cached* site
+// through the console stops it serving and removes its files.
+func TestNetworkDestroyViaConsoleEvicts(t *testing.T) {
+	root := t.TempDir()
+	reg, err := NewRegistry(root)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
 	}
-	if rec := do(t, c, "POST", "http://localhost/login", url.Values{"email": {"op@example.com"}, "password": {"wrong"}}, nil); !strings.Contains(strings.ToLower(rec.Body.String()), "invalid") {
-		t.Errorf("bad login did not surface an error; body:\n%s", rec.Body.String())
+	accounts := mustAccounts(t, root)
+	d := NewDispatcher(reg, "localhost", 0)
+	defer d.Close()
+	console := NewConsole(reg, accounts, "localhost")
+	console.SetDestroyer(d.DestroySite) // the wiring the CLI's `serve` performs
+	d.HandleApex(console)
+
+	ck := operatorCookieFor(t, accounts, "op@x.com")
+	drive := func(method, host, path string, form url.Values, cookie *http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "http://"+host+path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Host = host
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		d.ServeHTTP(rec, req) // everything goes through the dispatcher
+		return rec
+	}
+
+	drive("POST", "localhost", "/sites", url.Values{"subdomain": {"zeta"}}, ck)
+
+	// Serve once to cache the handler + open the DB.
+	if code := drive("GET", "zeta.localhost", "/", url.Values{}, nil).Code; code != http.StatusOK {
+		t.Fatalf("zeta pre-destroy = %d, want 200", code)
+	}
+	// Destroy through the console (which routes to the dispatcher).
+	if code := drive("POST", "localhost", "/sites/zeta/destroy", url.Values{}, ck).Code; code != http.StatusSeeOther {
+		t.Fatalf("console destroy = %d, want 303", code)
+	}
+	if _, ok := reg.Dir("zeta"); ok {
+		t.Error("folder still present after console destroy")
+	}
+	if code := drive("GET", "zeta.localhost", "/", url.Values{}, nil).Code; code != http.StatusNotFound {
+		t.Errorf("zeta after console destroy = %d, want 404", code)
 	}
 }
 
@@ -272,19 +304,9 @@ func TestConsoleSignupsAndInvite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	ops, err := OpenOperators(root)
-	if err != nil {
-		t.Fatalf("OpenOperators: %v", err)
-	}
-	defer ops.Close()
 	accounts := mustAccounts(t, root)
-	c := NewConsole(reg, ops, accounts, "localhost")
-
-	ck := sessionCookie(do(t, c, "POST", "http://localhost/setup",
-		url.Values{"email": {"op@example.com"}, "password": {"supersecret"}}, nil))
-	if ck == nil {
-		t.Fatal("setup did not set a session cookie")
-	}
+	c := NewConsole(reg, accounts, "localhost")
+	ck := operatorCookieFor(t, accounts, "op@example.com")
 
 	// Default policy is invite-only, and the dashboard says so.
 	if body := do(t, c, "GET", "http://localhost/", nil, ck).Body.String(); !strings.Contains(body, "Invite-only") {

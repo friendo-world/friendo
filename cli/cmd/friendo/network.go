@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"github.com/friendo-world/friendo/cli/internal/deploy"
 	"github.com/friendo-world/friendo/runtime/go/network"
@@ -68,7 +66,7 @@ Manage a network you run on this box with --root, or a remote network with
 		exitOnErr(err)
 		auth, ok := cfg.NetworkAuth(url)
 		if !ok || auth.Token == "" {
-			exitOnErr(fmt.Errorf("not signed in to %s — run: friendo network login %s", url, url))
+			exitOnErr(fmt.Errorf("not signed in to %s — run: friendo login %s", url, url))
 		}
 		return deploy.NewOperatorClient(url, auth.Token), true
 	}
@@ -97,38 +95,27 @@ Manage a network you run on this box with --root, or a remote network with
 			}
 
 			reg := openReg()
-			ops, err := network.OpenOperators(root)
-			exitOnErr(err)
 			accounts, err := network.OpenAccounts(root)
 			exitOnErr(err)
 			d := network.NewDispatcher(reg, baseDomain, 0)
 			// The apex serves the operator console + the identity endpoints
 			// (device-auth for the CLI). Route deletes through the dispatcher so a
 			// destroyed site stops serving at once.
-			console := network.NewConsole(reg, ops, accounts, baseDomain)
+			console := network.NewConsole(reg, accounts, baseDomain)
 			console.SetDestroyer(d.DestroySite)
 			d.HandleApex(network.ApexRouter(console, network.NewAccountAuth(accounts, reg, baseDomain)))
 
-			// Designate the operator account for device-auth login.
+			// Designate the first operator from env (turnkey containers). Otherwise
+			// the first person to sign in at the apex console claims operator.
 			if email := os.Getenv("FRIENDO_OPERATOR_EMAIL"); email != "" {
 				if err := accounts.Grant(email, "operator"); err != nil {
 					fmt.Fprintf(os.Stderr, "Could not grant operator to %q: %v\n", email, err)
-				}
-			}
-			if n, _ := ops.Count(); n == 0 {
-				// Self-bootstrap the first operator from env (turnkey containers),
-				// else point the way to the console/CLI.
-				email, pw := os.Getenv("FRIENDO_OPERATOR_EMAIL"), os.Getenv("FRIENDO_OPERATOR_PASSWORD")
-				if email != "" && pw != "" {
-					if err := ops.Create(email, pw); err != nil {
-						fmt.Fprintf(os.Stderr, "Could not bootstrap operator %q: %v\n", email, err)
-					} else {
-						fmt.Printf("Bootstrapped first operator %q from FRIENDO_OPERATOR_* env.\n", email)
-					}
 				} else {
-					fmt.Printf("No operators yet — set FRIENDO_OPERATOR_EMAIL + FRIENDO_OPERATOR_PASSWORD, "+
-						"use the apex console setup, or run: friendo network --root %s operator add <email>\n", root)
+					fmt.Printf("Operator: %s (from FRIENDO_OPERATOR_EMAIL)\n", email)
 				}
+			} else if any, _ := accounts.AnyOperator(); !any {
+				fmt.Println("No operators yet — the first sign-in at the apex console will claim operator " +
+					"(or set FRIENDO_OPERATOR_EMAIL).")
 			}
 			fmt.Println(storage.EnvStatus())
 			fmt.Printf("friendo network listening on :%d — sites at <subdomain>.%s\n", port, baseDomain)
@@ -137,34 +124,6 @@ Manage a network you run on this box with --root, or a remote network with
 	}
 	serve.Flags().IntVarP(&port, "port", "p", 3000, "Port to listen on")
 	serve.Flags().StringVar(&baseDomain, "base-domain", "localhost", "Base domain; sites are served at <subdomain>.<base-domain>")
-
-	// friendo network login [url]
-	login := &cobra.Command{
-		Use:   "login [network-url]",
-		Short: "Sign in to a remote network as an operator",
-		Args:  cobra.MaximumNArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			url := netURL
-			if len(args) > 0 {
-				url = args[0]
-			}
-			if url == "" {
-				exitOnErr(fmt.Errorf("provide the network URL: friendo network login <url>"))
-			}
-			url = strings.TrimRight(url, "/")
-
-			email, password, err := promptOperatorCreds()
-			exitOnErr(err)
-			client := deploy.NewOperatorClient(url, "")
-			exitOnErr(client.Login(email, password))
-
-			cfg, err := deploy.LoadConfig()
-			exitOnErr(err)
-			cfg.SetNetworkAuth(url, email, client.Token())
-			exitOnErr(cfg.Save())
-			fmt.Printf("Signed in to %s as %s.\n", url, email)
-		},
-	}
 
 	// friendo network deploy <subdomain> — provision + push this folder, one shot.
 	var deployName string
@@ -271,36 +230,25 @@ subdomain (as an operator) and then pushes your templates, assets, and content
 	}
 	destroy.Flags().BoolVar(&yes, "yes", false, "Skip the confirmation prompt")
 
-	// friendo network operator add <email> (local, on-box)
+	// friendo network operator grant <email> (local, on-box) — make an account an
+	// operator (creating it if needed). They sign in passwordless with 'friendo login'.
 	operator := &cobra.Command{
 		Use:   "operator",
-		Short: "Manage operator accounts (on-box; who runs the network)",
+		Short: "Manage operators (on-box; who runs the network)",
 	}
-	var opPassword string
-	opAdd := &cobra.Command{
-		Use:   "add <email>",
-		Short: "Create an operator account",
+	opGrant := &cobra.Command{
+		Use:   "grant <email>",
+		Short: "Grant an account the operator capability",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			ops, err := network.OpenOperators(root)
+			accounts, err := network.OpenAccounts(root)
 			exitOnErr(err)
-			defer ops.Close()
-
-			pw := opPassword
-			if pw == "" {
-				pw = os.Getenv("FRIENDO_OPERATOR_PASSWORD")
-			}
-			if pw == "" {
-				fmt.Print("Password (8+ chars): ")
-				line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-				pw = strings.TrimSpace(line)
-			}
-			exitOnErr(ops.Create(args[0], pw))
-			fmt.Printf("Created operator %q.\n", args[0])
+			defer accounts.Close()
+			exitOnErr(accounts.Grant(args[0], "operator"))
+			fmt.Printf("Granted operator to %q — they sign in with 'friendo login'.\n", args[0])
 		},
 	}
-	opAdd.Flags().StringVar(&opPassword, "password", "", "Operator password (or set FRIENDO_OPERATOR_PASSWORD; prompts if unset)")
-	operator.AddCommand(opAdd)
+	operator.AddCommand(opGrant)
 
 	// friendo network signups <open|invite> — set who may create an account.
 	signups := &cobra.Command{
@@ -333,37 +281,8 @@ subdomain (as an operator) and then pushes your templates, assets, and content
 		},
 	}
 
-	cmd.AddCommand(serve, login, deployCmd, provision, sites, destroy, operator, signups, invite)
+	cmd.AddCommand(serve, deployCmd, provision, sites, destroy, operator, signups, invite)
 	return cmd
-}
-
-// promptOperatorCreds reads an operator email and password from stdin, hiding the
-// password on an interactive terminal (and falling back to a plain read when
-// stdin is piped).
-func promptOperatorCreds() (string, string, error) {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Operator email: ")
-	email, err := reader.ReadString('\n')
-	if err != nil {
-		return "", "", fmt.Errorf("reading email: %w", err)
-	}
-	email = strings.TrimSpace(email)
-
-	fmt.Print("Password: ")
-	fd := int(os.Stdin.Fd())
-	if term.IsTerminal(fd) {
-		b, err := term.ReadPassword(fd)
-		fmt.Println()
-		if err != nil {
-			return "", "", fmt.Errorf("reading password: %w", err)
-		}
-		return email, strings.TrimSpace(string(b)), nil
-	}
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return "", "", fmt.Errorf("reading password: %w", err)
-	}
-	return email, strings.TrimSpace(line), nil
 }
 
 // exitOnErr prints err and exits non-zero. Shared by the network subcommands.

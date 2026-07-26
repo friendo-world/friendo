@@ -1,21 +1,14 @@
 package deploy
 
 import (
-	"bufio"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -50,123 +43,6 @@ type PullOptions struct {
 	Data   bool
 	Users  bool
 	Target string
-}
-
-// RunDeploy is the interactive deploy wizard. apiURL overrides the platform base
-// URL for this run (empty = the configured default, https://friendo.world).
-func RunDeploy(apiURL string) error {
-	siteDir, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	siteCfg, err := loadSiteConfig(siteDir)
-	if err != nil {
-		return err
-	}
-
-	// Prefer an explicit deploy target's subdomain (e.g. friendo.toml already
-	// declares docs.friendo.world) over deriving one from the display name.
-	subdomain := ""
-	if siteCfg.Deploy.Target != "" {
-		subdomain = subdomainFromTarget(siteCfg.Deploy.Target)
-	}
-	if subdomain == "" {
-		subdomain = sanitizeSubdomain(siteCfg.Site.Name)
-	}
-	if subdomain == "" {
-		subdomain = filepath.Base(siteDir)
-	}
-
-	fmt.Println("Where do you want to deploy?")
-	fmt.Println("  1. friendo.world (managed hosting)")
-	fmt.Println("  2. Cloudflare Workers (your own account)")
-	fmt.Println("  3. VPS / self-hosted")
-	fmt.Println()
-
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("> ")
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
-
-	switch choice {
-	case "1":
-		return deployFriendoWorld(siteDir, siteCfg, subdomain, apiURL)
-	case "2":
-		fmt.Println()
-		fmt.Println("Cloudflare Workers deploy:")
-		fmt.Println("  1. Copy runtime/edge/ to your project")
-		fmt.Println("  2. Configure wrangler.toml with your D1 and R2 bindings")
-		fmt.Println("  3. Run: npx wrangler deploy")
-		fmt.Println("  4. Then push your site: friendo push --target https://yoursite.com")
-		return nil
-	case "3":
-		fmt.Println()
-		fmt.Println("VPS / self-hosted deploy:")
-		fmt.Println("  1. Install the friendo binary on your server")
-		fmt.Println("  2. Copy your site directory to the server")
-		fmt.Println("  3. Run: friendo serve --port 3000")
-		fmt.Println("  4. Then push updates: friendo push --target https://yoursite.com")
-		return nil
-	default:
-		return fmt.Errorf("invalid choice %q — enter 1, 2, or 3", choice)
-	}
-}
-
-func deployFriendoWorld(siteDir string, siteCfg *SiteConfig, subdomain, apiURL string) error {
-	fmt.Printf("\nSite name: %s\n", subdomain)
-
-	// Authenticate with the platform (device auth if we have no token yet).
-	platform, base, err := platformClient(apiURL)
-	if err != nil {
-		return err
-	}
-
-	// Provision site on the platform (creates D1 + R2 + user Worker).
-	target := siteURLForSubdomain(base, subdomain)
-	fmt.Printf("Creating %s...", strings.TrimPrefix(target, "https://"))
-	if err := platform.CreateSite(siteCfg.Site.Name, subdomain); err != nil {
-		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "expired") {
-			clearPlatformToken()
-			return fmt.Errorf("session expired — run `friendo deploy` again to re-authenticate")
-		}
-		return err
-	}
-	fmt.Println(" done")
-
-	// Save target to friendo.toml.
-	if err := saveDeployTarget(siteDir, target); err != nil {
-		fmt.Printf("Warning: could not save target to friendo.toml: %v\n", err)
-	}
-
-	// Wait for the just-deployed Worker to go live (the subdomain already resolves
-	// via the platform wildcard).
-	fmt.Print("Waiting for site to come online..")
-	if err := waitForSite(target); err != nil {
-		fmt.Println(" not reachable yet")
-		fmt.Printf("\n%s is provisioned. If it isn't reachable from here yet, wait a moment and finish with `friendo push --data`.\n", target)
-		return fmt.Errorf("timed out waiting for %s", target)
-	}
-	fmt.Println(" ready")
-
-	// Push everything to the site's sync API. The freshly provisioned site has
-	// no admin yet, so RunPush -> authenticateSite walks the user through
-	// creating the first admin account before uploading. Include content records
-	// by default (Data) so a content/-authored site isn't deployed empty; users
-	// stay opt-in via `friendo push --users`.
-	fmt.Println()
-	pushOpts := PushOptions{Target: target, Data: true}
-	if err := RunPush(pushOpts); err != nil {
-		return fmt.Errorf("push failed: %w", err)
-	}
-
-	fmt.Println()
-	url := target
-	if siteCfg.Deploy.Domain != "" {
-		url = fmt.Sprintf("https://%s", siteCfg.Deploy.Domain)
-	}
-	fmt.Printf("Live at %s\n", url)
-	return nil
 }
 
 // RunPush pushes local state to the deployed site via its /_/api/* endpoints.
@@ -569,55 +445,7 @@ func readFilesAsJSON(siteDir string, dirs ...string) ([]map[string]string, error
 	return files, nil
 }
 
-// --- Auth ---
-
-func deviceAuth(baseURL string) (string, error) {
-	codeBytes := make([]byte, 16)
-	rand.Read(codeBytes)
-	code := hex.EncodeToString(codeBytes)
-
-	authURL := fmt.Sprintf("%s/cli/auth?code=%s", baseURL, code)
-	fmt.Printf("If your browser doesn't open, visit:\n  %s\n\n", authURL)
-	openBrowser(authURL)
-
-	fmt.Print("Waiting for browser sign-in...")
-	pollURL := fmt.Sprintf("%s/api/cli/poll?code=%s", baseURL, code)
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	for i := 0; i < 120; i++ {
-		time.Sleep(3 * time.Second)
-
-		resp, err := client.Get(pollURL)
-		if err != nil {
-			continue
-		}
-
-		var result struct {
-			Status string `json:"status"`
-			Token  string `json:"token"`
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		json.Unmarshal(body, &result)
-
-		switch result.Status {
-		case "complete":
-			fmt.Println()
-			return result.Token, nil
-		case "expired":
-			fmt.Println()
-			return "", fmt.Errorf("device code expired — try again")
-		case "not_found":
-			fmt.Println()
-			return "", fmt.Errorf("device code not found — try again")
-		case "pending":
-			fmt.Print(".")
-		}
-	}
-
-	fmt.Println()
-	return "", fmt.Errorf("timed out waiting for browser authentication")
-}
+// --- Browser ---
 
 func openBrowser(url string) {
 	var cmd *exec.Cmd
@@ -632,182 +460,6 @@ func openBrowser(url string) {
 	if cmd != nil {
 		cmd.Start()
 	}
-}
-
-// --- Platform commands (redeploy / destroy) ---
-
-// RedeployOptions controls redeploy behavior.
-type RedeployOptions struct {
-	APIURL string
-}
-
-// DestroyOptions controls destroy behavior.
-type DestroyOptions struct {
-	APIURL string
-	Yes    bool
-}
-
-// RunRedeploy re-pushes the current runtime bundle to the site's user Worker.
-func RunRedeploy(opts RedeployOptions) error {
-	siteDir, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	siteCfg, err := loadSiteConfig(siteDir)
-	if err != nil {
-		return err
-	}
-	subdomain := subdomainForSite(siteCfg, siteDir)
-
-	platform, _, err := platformClient(opts.APIURL)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Redeploying %s...", subdomain)
-	if err := platform.Redeploy(subdomain); err != nil {
-		fmt.Println()
-		return handlePlatformErr(err, "run the command again to re-authenticate")
-	}
-	fmt.Println(" done")
-	return nil
-}
-
-// RunDestroy deprovisions the site (tears down its Worker, D1, and R2 bucket).
-func RunDestroy(opts DestroyOptions) error {
-	siteDir, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	siteCfg, err := loadSiteConfig(siteDir)
-	if err != nil {
-		return err
-	}
-	subdomain := subdomainForSite(siteCfg, siteDir)
-
-	if !opts.Yes {
-		fmt.Printf("This permanently deletes %q and all its data (D1 + R2). This cannot be undone.\n", subdomain)
-		reader := bufio.NewReader(os.Stdin)
-		answer, _ := readLine(reader, fmt.Sprintf("Type the site name %q to confirm: ", subdomain))
-		if answer != subdomain {
-			return fmt.Errorf("aborted")
-		}
-	}
-
-	platform, _, err := platformClient(opts.APIURL)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Destroying %s...", subdomain)
-	if err := platform.Destroy(subdomain); err != nil {
-		fmt.Println()
-		return handlePlatformErr(err, "run the command again to re-authenticate")
-	}
-	fmt.Println(" done")
-	return nil
-}
-
-// RunWhoami prints which friendo.world account the CLI is signed in as. Unlike
-// the provisioning commands, it never triggers the device-auth browser flow —
-// it only reports the state of the saved session token.
-func RunWhoami(apiURL string) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return err
-	}
-	base := cfg.BaseURL
-	if apiURL != "" {
-		base = apiURL
-	}
-	if cfg.Token == "" {
-		fmt.Println("Not signed in. Run `friendo deploy` to sign in.")
-		return nil
-	}
-
-	acct, err := NewPlatformClient(base, cfg.Token).Whoami()
-	if err != nil {
-		if errors.Is(err, ErrNotAuthenticated) {
-			fmt.Println("Your saved session has expired. Run `friendo deploy` to sign in again.")
-			return nil
-		}
-		return err
-	}
-
-	fmt.Printf("Signed in as %s <%s>\n", acct.Name, acct.Email)
-	fmt.Printf("Platform: %s\n", base)
-	return nil
-}
-
-// platformClient returns an authenticated platform API client. apiURL overrides
-// the configured base URL for this run (without persisting it); if no token is
-// cached yet it walks the user through device auth and saves the token.
-func platformClient(apiURL string) (*PlatformClient, string, error) {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return nil, "", err
-	}
-	base := cfg.BaseURL
-	if apiURL != "" {
-		base = apiURL
-	}
-
-	if cfg.Token == "" {
-		fmt.Println("You need to sign in. Opening your browser...")
-		token, err := deviceAuth(base)
-		if err != nil {
-			return nil, "", fmt.Errorf("authentication failed: %w", err)
-		}
-		cfg.Token = token
-		if err := cfg.Save(); err != nil {
-			return nil, "", fmt.Errorf("saving config: %w", err)
-		}
-		fmt.Println("Authenticated successfully.")
-	}
-
-	return NewPlatformClient(base, cfg.Token), base, nil
-}
-
-// clearPlatformToken drops the cached platform session token.
-func clearPlatformToken() {
-	if cfg, err := LoadConfig(); err == nil {
-		cfg.Token = ""
-		cfg.Save()
-	}
-}
-
-// handlePlatformErr maps expired-session errors to a clear re-auth message and
-// clears the stale token; other errors pass through.
-func handlePlatformErr(err error, reauthHint string) error {
-	if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "expired") {
-		clearPlatformToken()
-		return fmt.Errorf("session expired — %s", reauthHint)
-	}
-	return err
-}
-
-// subdomainForSite resolves the site's subdomain from its deploy target if set,
-// else from the (sanitized) site name, else the directory name.
-func subdomainForSite(siteCfg *SiteConfig, siteDir string) string {
-	if siteCfg.Deploy.Target != "" {
-		return subdomainFromTarget(siteCfg.Deploy.Target)
-	}
-	s := sanitizeSubdomain(siteCfg.Site.Name)
-	if s == "" {
-		s = filepath.Base(siteDir)
-	}
-	return s
-}
-
-// siteURLForSubdomain derives a site's URL from the platform base URL's host, so
-// a site on https://friendo.world lives at https://<sub>.friendo.world and one
-// on https://local.friendo.world at https://<sub>.local.friendo.world.
-func siteURLForSubdomain(baseURL, subdomain string) string {
-	host := strings.TrimPrefix(strings.TrimPrefix(baseURL, "https://"), "http://")
-	if i := strings.IndexByte(host, '/'); i >= 0 {
-		host = host[:i]
-	}
-	return fmt.Sprintf("https://%s.%s", subdomain, host)
 }
 
 // SiteURLForSubdomain builds a site's URL from a network base URL and a subdomain,
@@ -825,28 +477,6 @@ func SiteURLForSubdomain(baseURL, subdomain string) string {
 		host = host[:i]
 	}
 	return fmt.Sprintf("%s://%s.%s", scheme, subdomain, host)
-}
-
-// waitForSite polls a freshly provisioned site until it responds, tolerating the
-// window where its DNS record isn't resolvable yet. Returns nil once the site
-// answers (any HTTP status < 500), or an error after the timeout.
-func waitForSite(target string) error {
-	client := &http.Client{Timeout: 10 * time.Second}
-	// The subdomain resolves immediately via the platform's `*` wildcard, so this
-	// only waits for the just-deployed Worker to go live (a few seconds).
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(target + "/_/api/setup")
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode < 500 {
-				return nil
-			}
-		}
-		fmt.Print(".")
-		time.Sleep(3 * time.Second)
-	}
-	return fmt.Errorf("timed out waiting for %s to come online", target)
 }
 
 // --- Site config ---

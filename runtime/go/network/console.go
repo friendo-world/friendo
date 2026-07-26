@@ -5,6 +5,8 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+
+	"github.com/friendo-world/friendo/runtime/go/email"
 )
 
 // operatorCookie is the operator session cookie, scoped to the apex host only.
@@ -16,7 +18,6 @@ const operatorCookie = "friendo_operator"
 // never reaches into the content of a site.
 type Console struct {
 	reg      *Registry
-	ops      *Operators
 	accounts *Accounts
 	base     string
 	mux      *http.ServeMux
@@ -28,12 +29,12 @@ type Console struct {
 	destroy func(string) error
 }
 
-// NewConsole builds the operator console over a registry + operator store + the
-// accounts store (for signup policy, invites, and site ownership).
-func NewConsole(reg *Registry, ops *Operators, accounts *Accounts, baseDomain string) *Console {
+// NewConsole builds the operator console over a registry + the accounts store.
+// Access requires an account with the operator capability; sign-in is passwordless
+// (email OTP). The first sign-in claims operator when none exists yet.
+func NewConsole(reg *Registry, accounts *Accounts, baseDomain string) *Console {
 	c := &Console{
 		reg:      reg,
-		ops:      ops,
 		accounts: accounts,
 		base:     strings.ToLower(strings.TrimSpace(baseDomain)),
 		tpl:      template.Must(template.New("console").Parse(consoleTemplates)),
@@ -41,7 +42,6 @@ func NewConsole(reg *Registry, ops *Operators, accounts *Accounts, baseDomain st
 	m := http.NewServeMux()
 	m.HandleFunc("GET /login", c.getLogin)
 	m.HandleFunc("POST /login", c.postLogin)
-	m.HandleFunc("POST /setup", c.postSetup)
 	m.HandleFunc("POST /logout", c.postLogout)
 	m.HandleFunc("POST /sites", c.requireAuth(c.postCreateSite))
 	m.HandleFunc("POST /sites/{sub}/destroy", c.requireAuth(c.postDestroySite))
@@ -49,8 +49,7 @@ func NewConsole(reg *Registry, ops *Operators, accounts *Accounts, baseDomain st
 	m.HandleFunc("POST /invite", c.requireAuth(c.postInvite))
 	m.HandleFunc("GET /", c.requireAuth(c.getDashboard))
 
-	// JSON operator API (for the CLI). Bearer-token or cookie auth.
-	m.HandleFunc("POST /api/login", c.apiLogin)
+	// JSON operator API (for the CLI). Account Bearer token + operator capability.
 	m.HandleFunc("GET /api/whoami", c.requireAPIAuth(c.apiWhoami))
 	m.HandleFunc("GET /api/sites", c.requireAPIAuth(c.apiListSites))
 	m.HandleFunc("POST /api/sites", c.requireAPIAuth(c.apiCreateSite))
@@ -69,16 +68,22 @@ func (c *Console) SetDestroyer(fn func(string) error) { c.destroy = fn }
 
 // --- auth ---
 
-func (c *Console) currentOperator(r *http.Request) (string, bool) {
+// currentOperator resolves the signed-in operator from the session cookie: a
+// valid account session that also holds the operator capability.
+func (c *Console) currentOperator(r *http.Request) (*Account, bool) {
 	ck, err := r.Cookie(operatorCookie)
 	if err != nil {
-		return "", false
+		return nil, false
 	}
-	return c.ops.ValidateSession(ck.Value)
+	acct, ok := c.accounts.ValidateSession(ck.Value)
+	if !ok || !acct.Has("operator") {
+		return nil, false
+	}
+	return acct, true
 }
 
-// requireAuth gates a page/action behind a valid operator session. Unauthenticated
-// requests are redirected to /login (or the first-run setup it renders).
+// requireAuth gates a page/action behind a valid operator session; otherwise it
+// redirects to the passwordless sign-in.
 func (c *Console) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := c.currentOperator(r); !ok {
@@ -89,48 +94,61 @@ func (c *Console) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (c *Console) needsSetup() bool {
-	n, err := c.ops.Count()
-	return err == nil && n == 0
-}
-
 // --- handlers ---
 
 func (c *Console) getLogin(w http.ResponseWriter, r *http.Request) {
-	if c.needsSetup() {
-		c.render(w, "setup", pageData{})
-		return
-	}
 	c.render(w, "login", pageData{})
 }
 
-func (c *Console) postSetup(w http.ResponseWriter, r *http.Request) {
-	// First-run only: refuse once an operator exists.
-	if !c.needsSetup() {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	email, password := r.FormValue("email"), r.FormValue("password")
-	if err := c.ops.Create(email, password); err != nil {
-		c.render(w, "setup", pageData{Error: err.Error()})
-		return
-	}
-	c.signIn(w, r, email, password)
-}
-
+// postLogin runs the two-step passwordless sign-in: step 1 emails a code, step 2
+// verifies it and (if the account is an operator, or is claiming the first
+// operator slot) starts the session.
 func (c *Console) postLogin(w http.ResponseWriter, r *http.Request) {
-	c.signIn(w, r, r.FormValue("email"), r.FormValue("password"))
-}
+	addr := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	code := strings.TrimSpace(r.FormValue("code"))
 
-// signIn authenticates and, on success, sets the session cookie and redirects to
-// the dashboard; on failure it re-renders the login form with an error.
-func (c *Console) signIn(w http.ResponseWriter, r *http.Request, email, password string) {
-	id, err := c.ops.Authenticate(email, password)
-	if err != nil {
-		c.render(w, "login", pageData{Error: err.Error()})
+	if code == "" {
+		// Step 1 — send a one-time code.
+		devCode, err := c.accounts.RequestOTP(addr)
+		if err != nil {
+			c.render(w, "login", pageData{Error: err.Error()})
+			return
+		}
+		email.SendLoginCode(addr, devCode)
+		data := pageData{Email: addr, Sent: true}
+		if otpEcho() {
+			data.DevCode = devCode
+		}
+		c.render(w, "login", data)
 		return
 	}
-	token, err := c.ops.StartSession(id)
+
+	// Step 2 — verify. First-operator bootstrap: if no operator exists yet, let the
+	// first verified email claim it. Pre-ensuring the account also lets it past the
+	// invite-only signup gate, which otherwise blocks a brand-new email.
+	firstRun := false
+	if any, _ := c.accounts.AnyOperator(); !any {
+		firstRun = true
+		c.accounts.EnsureAccount(addr)
+	}
+	id, err := c.accounts.VerifyOTP(addr, code)
+	if err != nil {
+		c.render(w, "login", pageData{Email: addr, Sent: true, Error: "Invalid or expired code — try again."})
+		return
+	}
+	acct, _ := c.accounts.Get(id)
+	if acct == nil || !acct.Has("operator") {
+		if firstRun {
+			if err := c.accounts.Grant(addr, "operator"); err != nil {
+				c.render(w, "login", pageData{Email: addr, Sent: true, Error: err.Error()})
+				return
+			}
+		} else {
+			c.render(w, "login", pageData{Error: "That account isn't an operator of this network."})
+			return
+		}
+	}
+	token, err := c.accounts.StartSession(id)
 	if err != nil {
 		c.render(w, "login", pageData{Error: "could not start session"})
 		return
@@ -141,7 +159,7 @@ func (c *Console) signIn(w http.ResponseWriter, r *http.Request, email, password
 
 func (c *Console) postLogout(w http.ResponseWriter, r *http.Request) {
 	if ck, err := r.Cookie(operatorCookie); err == nil {
-		c.ops.EndSession(ck.Value)
+		c.accounts.EndSession(ck.Value)
 	}
 	clearSessionCookie(w, r)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -242,6 +260,10 @@ type pageData struct {
 	Signups  string            // "open" | "invite"
 	Accounts []*Account        // network accounts (for the operator view)
 	Owners   map[string]string // subdomain → owner email
+	// Sign-in (passwordless OTP).
+	Email   string // the email a code was sent to
+	Sent    bool   // a code has been sent (show the code field)
+	DevCode string // dev-only echo of the code
 }
 
 // --- cookies ---
@@ -267,43 +289,34 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 
 // --- JSON operator API (for the CLI) ---
 
-// apiOperator resolves the operator from a Bearer token (CLI) or session cookie
-// (browser).
-func (c *Console) apiOperator(r *http.Request) (string, bool) {
+// apiAccount resolves a valid account from a Bearer token (CLI) or session cookie
+// (browser), without checking capabilities.
+func (c *Console) apiAccount(r *http.Request) (*Account, bool) {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		return c.ops.ValidateSession(strings.TrimSpace(strings.TrimPrefix(h, "Bearer ")))
+		return c.accounts.ValidateSession(strings.TrimSpace(strings.TrimPrefix(h, "Bearer ")))
 	}
-	return c.currentOperator(r)
+	if ck, err := r.Cookie(operatorCookie); err == nil {
+		return c.accounts.ValidateSession(ck.Value)
+	}
+	return nil, false
 }
 
+// requireAPIAuth gates the operator API on a signed-in account that holds the
+// operator capability, distinguishing "not signed in" (401) from "signed in but
+// not an operator" (403) so the CLI can guide the user.
 func (c *Console) requireAPIAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := c.apiOperator(r); !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		acct, ok := c.apiAccount(r)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not signed in — run: friendo login <network-url>"})
+			return
+		}
+		if !acct.Has("operator") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "your account isn't an operator of this network"})
 			return
 		}
 		next(w, r)
 	}
-}
-
-// apiLogin exchanges operator credentials for a session token the CLI caches.
-func (c *Console) apiLogin(w http.ResponseWriter, r *http.Request) {
-	var body struct{ Email, Password string }
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
-		return
-	}
-	id, err := c.ops.Authenticate(body.Email, body.Password)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
-		return
-	}
-	token, err := c.ops.StartSession(id)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not start session"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 // apiWhoami confirms a token is valid (used by the CLI to check its session).
@@ -369,17 +382,15 @@ table{border-collapse:collapse;width:100%;margin-top:1rem}td,th{text-align:left;
 <h1>friendo network</h1><p class="muted">Operator sign in</p>
 {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
 <form method="post" action="/login" class="row">
-<input name="email" type="email" placeholder="Email" required>
-<input name="password" type="password" placeholder="Password" required>
-<button type="submit">Sign in</button></form>{{end}}
-
-{{define "setup"}}<!doctype html><meta charset="utf-8"><title>Set up · friendo network</title>{{template "styles"}}
-<h1>friendo network</h1><p class="muted">Create the first operator</p>
-{{if .Error}}<p class="err">{{.Error}}</p>{{end}}
-<form method="post" action="/setup" class="row">
-<input name="email" type="email" placeholder="Email" required>
-<input name="password" type="password" placeholder="Password (8+ chars)" required>
-<button type="submit">Create operator</button></form>{{end}}
+<input name="email" type="email" placeholder="Email" value="{{.Email}}" required {{if not .Sent}}autofocus{{end}}>
+{{if .Sent}}
+<p class="muted" style="width:100%;margin:.25rem 0">We sent a one-time code to {{.Email}}.{{if .DevCode}} <span class="muted">(dev: <code>{{.DevCode}}</code>)</span>{{end}}</p>
+<input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="One-time code" required autofocus>
+<button type="submit">Verify &amp; sign in</button>
+{{else}}
+<button type="submit">Send code</button>
+{{end}}
+</form>{{end}}
 
 {{define "dashboard"}}<!doctype html><meta charset="utf-8"><title>friendo network</title>{{template "styles"}}
 <form method="post" action="/logout" style="float:right;margin:0"><button>Sign out</button></form>

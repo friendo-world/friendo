@@ -3,7 +3,6 @@ package deploy
 import (
 	"bufio"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 
@@ -12,11 +11,11 @@ import (
 
 // authenticateSite returns a SiteClient with a valid admin session for target.
 //
-// It reuses a cached session when possible. For friendo.world sites the deploying
-// account is the superadmin, so it signs in via platform SSO (no site password).
-// For self-hosted / custom-domain sites it walks the user through creating the
-// first admin via /_/api/setup, or prompts for email + password if one exists.
-// The resulting session is cached in ~/.friendo/config.
+// It reuses a cached session when possible (e.g. the one `friendo deploy` mints
+// via the network's SSO exchange). For self-hosted / custom-domain sites it walks
+// the user through creating the first admin via /_/api/setup, or prompts for
+// email + password if one exists. The resulting session is cached in
+// ~/.friendo/config.
 func authenticateSite(target string) (*SiteClient, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -31,12 +30,6 @@ func authenticateSite(target string) (*SiteClient, error) {
 		}
 		fmt.Println("Your saved session has expired — signing in again.")
 		cfg.ClearSiteAuth(target)
-	}
-
-	// friendo.world-hosted sites: hand the platform owner a superadmin session
-	// via SSO, so deploy needs no separate site password.
-	if isPlatformTarget(target, cfg.BaseURL) {
-		return authenticateSiteViaSSO(target)
 	}
 
 	client := NewSiteClient(target, "")
@@ -59,58 +52,6 @@ func authenticateSite(target string) (*SiteClient, error) {
 	cfg.SetSiteAuth(target, email, client.Cookie())
 	if err := cfg.Save(); err != nil {
 		fmt.Printf("Warning: could not cache session: %v\n", err)
-	}
-	return client, nil
-}
-
-// isPlatformTarget reports whether target is a site hosted on the friendo.world
-// platform, i.e. a subdomain of the platform base host (friendo.world or the dev
-// local.friendo.world). Custom-domain and VPS targets are not.
-func isPlatformTarget(target, baseURL string) bool {
-	if baseURL == "" {
-		baseURL = DefaultBaseURL
-	}
-	b, err := url.Parse(baseURL)
-	if err != nil {
-		return false
-	}
-	t, err := url.Parse(target)
-	if err != nil {
-		return false
-	}
-	return strings.HasSuffix(t.Hostname(), "."+b.Hostname())
-}
-
-// authenticateSiteViaSSO signs into a friendo.world site as the platform owner:
-// it obtains a platform session (device-auth if needed), mints a one-time SSO
-// code, and redeems it for a superadmin friendo_session on the site.
-func authenticateSiteViaSSO(target string) (*SiteClient, error) {
-	pc, _, err := platformClient("")
-	if err != nil {
-		return nil, err
-	}
-
-	subdomain := subdomainFromTarget(target)
-	code, err := pc.SSOCode(subdomain)
-	if err != nil {
-		return nil, handlePlatformErr(err, "run `friendo deploy` to sign in again")
-	}
-
-	client := NewSiteClient(target, "")
-	if err := client.PlatformLogin(code); err != nil {
-		return nil, err
-	}
-
-	// Cache the session, tagged with the platform account for display.
-	email := ""
-	if acct, err := pc.Whoami(); err == nil {
-		email = acct.Email
-	}
-	if cfg, err := LoadConfig(); err == nil {
-		cfg.SetSiteAuth(target, email, client.Cookie())
-		if err := cfg.Save(); err != nil {
-			fmt.Printf("Warning: could not cache session: %v\n", err)
-		}
 	}
 	return client, nil
 }

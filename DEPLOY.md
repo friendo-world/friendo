@@ -95,31 +95,39 @@ FRIENDO_S3_ACCESS_KEY=...
 FRIENDO_S3_SECRET_KEY=...
 FRIENDO_S3_REGION=auto
 
-# First operator — auto-created on first boot (turnkey). Remove after first deploy if you like.
+# First operator — this email is granted the operator capability on boot. Sign-in is
+# passwordless (email OTP), so no password here. (If you omit this, the first person to
+# sign in at the apex console claims operator.)
 FRIENDO_OPERATOR_EMAIL=you@example.com
-FRIENDO_OPERATOR_PASSWORD=<a strong password>
 
-# Optional: real email for passwordless (OTP) member login
+# Email delivery — REQUIRED for sign-in (operators + members receive their OTP by email).
 RESEND_API_KEY=...
 FRIENDO_EMAIL_FROM=friendo <noreply@example.com>
 ```
+
+> Sign-in is passwordless everywhere: the operator console, `friendo login`, and member
+> login all deliver a one-time code by email — so `RESEND_API_KEY` + `FRIENDO_EMAIL_FROM`
+> are required on a live network (without them, no one can receive a code).
 
 Deploy.
 
 ## 4. Verify
 
-1. Visit **`https://example.com`** → the operator console (sign in with the bootstrap operator).
+1. Visit **`https://example.com`** → the operator console. Sign in with your operator email;
+   it emails you a one-time code (no password). The `FRIENDO_OPERATOR_EMAIL` account is already
+   an operator; if you didn't set one, the first sign-in claims it.
 2. Create a site `demo` in the console → **`https://demo.example.com`** serves it.
-3. From your laptop, deploy a real local site in one command:
+3. From your laptop, publish a real local site:
    ```sh
-   friendo network login  https://example.com          # once
-   cd my-site && friendo network deploy demo --network https://example.com
+   friendo login https://example.com               # once — browser sign-in (device auth)
+   cd my-site && friendo deploy demo --network https://example.com
    ```
 4. Upload an image in the site's admin and confirm the object appears in your **R2 bucket**
    (first real R2 smoke). Confirm the admin SPA loads and the site serves over HTTPS.
 
-Operators can also be managed from the box: `docker exec <container> friendo network --root
-/data/network operator add someone@example.com`.
+Add another operator from the box: `docker exec <container> friendo network --root
+/data/network operator grant someone@example.com` — they then sign in passwordless with
+`friendo login`.
 
 ## 5. Backups
 

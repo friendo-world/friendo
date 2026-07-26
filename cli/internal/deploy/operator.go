@@ -12,7 +12,9 @@ import (
 
 // OperatorClient talks to a friendo network's operator API (the apex `/api/*`
 // endpoints) as an authenticated operator. It's the CLI counterpart to the
-// operator console — for managing a network's sites from your laptop.
+// operator console — for managing a network's sites from your laptop. It carries
+// an account session token (from `friendo login`); the network gates the operator
+// API on the account's operator capability.
 type OperatorClient struct {
 	baseURL string
 	token   string
@@ -25,32 +27,14 @@ type OperatorSite struct {
 	Name      string `json:"name"`
 }
 
-// NewOperatorClient builds a client for a network base URL with an optional
-// cached operator token.
+// NewOperatorClient builds a client for a network base URL with a cached account
+// token (obtained via `friendo login`).
 func NewOperatorClient(baseURL, token string) *OperatorClient {
 	return &OperatorClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}
-}
-
-// Token returns the current operator token (for caching after Login).
-func (c *OperatorClient) Token() string { return c.token }
-
-// Login exchanges operator credentials for a session token, stored on the client.
-func (c *OperatorClient) Login(email, password string) error {
-	var out struct {
-		Token string `json:"token"`
-	}
-	if err := c.do(http.MethodPost, "/api/login", map[string]string{"email": email, "password": password}, &out); err != nil {
-		return err
-	}
-	if out.Token == "" {
-		return fmt.Errorf("login succeeded but no token was returned")
-	}
-	c.token = out.Token
-	return nil
 }
 
 // Valid reports whether the current token is accepted by the network.

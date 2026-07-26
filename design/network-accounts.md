@@ -70,7 +70,10 @@ one process, so it collapses:
 - `FRIENDO_OPERATOR_EMAIL` (kept) designates the bootstrap operator: on first boot that email is
   pre-granted the `operator` capability. They sign in via device-auth/OTP — **no password**. Drop
   `FRIENDO_OPERATOR_PASSWORD`.
-- **friendo.world migration:** keep the existing operator's email, grant it `operator`, drop its
+- **Safety net (shipped):** if *no* account holds the operator capability yet, the first person to
+  complete the console OTP sign-in claims it (mirrors first-run setup). So a network is reachable
+  even without `FRIENDO_OPERATOR_EMAIL`, and a misconfigured redeploy can't lock the console out.
+- **friendo.world migration:** keep the existing operator's email, grant it `operator` (env), drop its
   password hash; the first OTP login re-establishes it. (Requires Resend configured on friendo.world.)
 
 ## CLI reshape
@@ -114,16 +117,20 @@ one process, so it collapses:
 
 ## Phasing (each independently shippable)
 
-1. **Accounts + device-auth + `friendo whoami`.** Generalize the store; device-flow endpoints +
-   `/activate` OTP page; CLI device-auth (repoint the existing client). Operator = account with the
-   capability; bootstrap via `FRIENDO_OPERATOR_EMAIL`.
-2. **Ownership + self-service `friendo deploy`.** Registry `owner_account_id`; account-gated
-   `POST /api/sites` + `/api/sso/exchange` (in-process site session); repoint `friendo deploy`
-   (friendo.world default, `--network`). Signup default invite-only + `network invites`.
-3. **Reconcile + retire.** Fold `redeploy`/`destroy` into `deploy`/`network`; remove the operator
-   password path + `network login`/`operator add`; gate `friendo network *` by capability; migrate
-   friendo.world's operator to OTP.
-4. **Polish.** Quotas, `network accounts`/`signups` management, the open-signups toggle.
+1. ✅ **Accounts + device-auth + `friendo whoami`.** (shipped) Generalized store; device-flow endpoints +
+   `/activate` OTP page; CLI device-auth. Operator = account with the capability; bootstrap via
+   `FRIENDO_OPERATOR_EMAIL`.
+2. ✅ **Ownership + self-service `friendo deploy`.** (shipped) Registry `owner_account_id`; account-gated
+   `POST /api/account/sites` + `/api/sso/exchange` (in-process site session); `friendo deploy`
+   (friendo.world default, `--network`). Signup default invite-only + `network invite` + a console UI
+   (signups toggle, invite form, owner column). R2 media covers uploads **and** content galleries.
+3. ✅ **Reconcile + retire.** (shipped) Removed the operator password store (`network.Operators`) and the
+   whole WfP platform-client subtree (`PlatformClient`, `platformClient`, SSO-code, device-auth, the
+   legacy `redeploy`/`destroy` commands + `RunDeploy`/`RunWhoami`). Console sign-in is OTP; the operator
+   API is gated on the `operator` capability (401 unauth / 403 non-operator). `friendo network login`
+   (password) and `operator add` are gone → `friendo login` + `friendo network operator grant`. First
+   sign-in claims operator when none exists (see bootstrap net above).
+4. **Polish (next).** Quotas, `network accounts`/`signups` management beyond the current console UI.
 
 ## Open items
 

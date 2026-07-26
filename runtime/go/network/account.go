@@ -284,6 +284,27 @@ func (a *Accounts) StartSession(accountID string) (string, error) {
 	return token, nil
 }
 
+// EndSession deletes an account session token (logout).
+func (a *Accounts) EndSession(token string) {
+	a.conn.Exec(`DELETE FROM account_sessions WHERE token = ?`, token)
+}
+
+// AnyOperator reports whether any account holds the operator capability. Used to
+// bootstrap the first operator: when none exists, the first console sign-in claims
+// it (mirroring first-run setup).
+func (a *Accounts) AnyOperator() (bool, error) {
+	accts, err := a.List()
+	if err != nil {
+		return false, err
+	}
+	for _, ac := range accts {
+		if ac.Has("operator") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ValidateSession returns the account for a valid, unexpired token.
 func (a *Accounts) ValidateSession(token string) (*Account, bool) {
 	if token == "" {
