@@ -54,11 +54,15 @@ export type Settings = {
   users: number;
   moderation: { auto_approve: boolean };
   access: AccessSettings;
+  content: { accept_submissions: boolean };
+  // DB keys frozen by friendo.toml's [settings] block — rendered read-only.
+  managed: string[];
 };
 
 export type SettingsPatch = {
   moderation?: { auto_approve: boolean };
   access?: Partial<AccessSettings>;
+  content?: { accept_submissions?: boolean };
 };
 
 export class ApiError extends Error {

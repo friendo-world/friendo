@@ -1,0 +1,87 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<h1>Write a post</h1>
+<p>This whole form is one <code>&lt;friendo-form&gt;</code>. Sign in, fill it out, and
+hit Publish — the field <em>names</em> decide where each value lands. <code>title</code>
+and <code>body</code> become the post's own columns; everything else
+(<code>mood</code>, <code>tags</code>, <code>where</code>, <code>cover</code>) becomes
+metadata under the post's <code>data</code>, readable back in a template as
+<code>record.data.mood</code> and friends. No custom JavaScript, no schema edits.</p>
+
+<div class="signin">
+    <h2>Sign in first</h2>
+    <friendo-auth></friendo-auth>
+    <p class="note">Contributors and above post directly. Members can submit (into the
+    review queue) only when an admin turns on <strong>Members can submit posts</strong>
+    in Settings.</p>
+</div>
+
+<!-- The author writes an ordinary form. `<friendo-input>` adds the rich types
+     (a markdown editor, a click-to-pick map, an image picker, a tag chip input);
+     everything else is a plain native control. On Publish the component creates the
+     post via /_/api and fires `friendo:submitted`, which the script below turns into
+     a link (published) or a "pending review" note (a member submission). -->
+<friendo-form collection="blog">
+    <label class="field"><span>Title</span>
+        <input name="title" placeholder="A good title" required></label>
+    <label class="field"><span>Story</span>
+        <friendo-input name="body" type="richtext" placeholder="Write your story…"></friendo-input></label>
+    <label class="field"><span>Where was this?</span>
+        <friendo-input name="where" type="location"></friendo-input></label>
+    <label class="field"><span>Cover image</span>
+        <friendo-input name="cover" type="media" accept="image/*"></friendo-input></label>
+    <label class="field"><span>Tags</span>
+        <friendo-input name="tags" type="tags"></friendo-input></label>
+    <label class="field"><span>Mood</span>
+        <select name="mood"><option value="calm">calm</option><option value="hyped">hyped</option></select></label>
+    <button type="submit">Publish</button>
+</friendo-form>
+
+<p id="result" class="result" hidden></p>
+
+<script>
+    // Handle the created post ourselves instead of a blind redirect: a contributor's
+    // post publishes right away (link to it); a member's submission is pending (it
+    // won't be visible until an editor approves it, so a redirect would 404).
+    var form = document.querySelector("friendo-form");
+    var result = document.getElementById("result");
+    form.addEventListener("friendo:submitted", function (e) {
+        var r = e.detail.record;
+        result.hidden = false;
+        if (r.status === "published") {
+            result.innerHTML = "Published! <a href=\"/blog/" + encodeURIComponent(r.slug) + "\">View your post &rarr;</a>";
+        } else {
+            result.textContent = "Thanks — your post was submitted for review and will appear once an editor approves it.";
+        }
+    });
+</script>
+
+<p style="margin-top:1.5rem"><a href="/">&larr; Back home</a></p>
+
+<style>
+    /* <friendo-form> is a light-DOM controller — no shadow root — so the author's
+       own inputs are styled directly, and its thin status/error line is selectable
+       by attribute (not ::part, which needs a shadow root). */
+    .signin .note { font-size: .85rem; color: var(--muted); margin: .6rem 0 0; }
+    friendo-form { display: grid; gap: 1.1rem; margin-top: 1.5rem; }
+    .field > span { display: block; font-weight: 600; margin-bottom: .3rem; }
+    friendo-form input, friendo-form select {
+        font: inherit; font-weight: 400; padding: .5em .6em;
+        border: 1px solid #d7d7e2; border-radius: 8px;
+    }
+    friendo-form input { width: 100%; }
+    friendo-form button[type=submit] {
+        justify-self: start; background: var(--accent); color: #fff; border: 0;
+        border-radius: 999px; padding: .6em 1.4em; font: inherit; cursor: pointer;
+    }
+    friendo-form [part=status] { color: var(--muted); }
+    friendo-form [part=error] { color: #b03030; }
+    .result { background: #f2f0ff; border: 1px solid #e0dcff; border-radius: 10px; padding: .8rem 1rem; }
+
+    /* Each <friendo-input> IS a shadow component, so ::part() works as usual. */
+    friendo-input::part(editor) { border-radius: 8px; }
+    friendo-input::part(tool) { border-radius: 6px; }
+    friendo-input::part(chip) { background: #efeaff; border-color: var(--accent); }
+    friendo-input::part(map) { height: 300px; }
+</style>
+{% endblock %}

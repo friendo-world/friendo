@@ -37,6 +37,7 @@ themselves, so nothing else is needed.
 | `<friendo-poll>` | `poll-slug` (or `poll-id`) | Renders a poll; signed-in members vote once and see the tally. |
 | `<friendo-channel>` | `channel-id` | A **realtime** message feed; signed-in members post and delete their own, and new messages stream in live. |
 | `<friendo-map>` | `target-type`, `target-id` | An interactive [Leaflet](https://leafletjs.com/) map of a record's [locations](#tagging-a-location), one marker per pin. Public — no sign-in needed. |
+| `<friendo-form>` | `collection`, `redirect` (optional), `status` (optional) | A create-a-post form: the author's own inputs (plus rich `<friendo-input>` types) become a new post, submitted from the page. See [Submitting posts from a page](#submitting-posts-from-a-page). |
 
 `<friendo-map>` loads Leaflet (open-source) and OpenStreetMap tiles from a CDN the
 first time a map appears on a page — no API key, and the rest of the SDK stays
@@ -138,9 +139,17 @@ Available parts:
 | `friendo-reactions` | `row`, `button`, `emoji`, `count` |
 | `friendo-poll` | `question`, `option`, `bar`, `result`, `total` |
 | `friendo-map` | `map`, `empty` |
+| `friendo-input` | `input`, `toolbar`, `tool`, `editor`, `map`, `coords`, `file`, `preview`, `note`, `chips`, `chip`, `chip-remove` |
+| `friendo-form` | `status`, `error` |
 
 Reaction and poll buttons carry `aria-pressed="true"` when they reflect the
 member's own reaction / vote, so you can style the selected state.
+
+`<friendo-form>` is the one exception to the shadow-root rule: it's a light-DOM
+controller (so your own inputs stay yours — your CSS applies and your submit button
+drives it), which means its `status`/`error` parts aren't reachable with `::part()`.
+Style them by attribute instead — `friendo-form [part="error"] { … }`. Each
+`<friendo-input>` *is* a shadow component, so its parts style with `::part()` as usual.
 
 ## Events
 
@@ -152,6 +161,9 @@ The SDK dispatches DOM events you can hook into:
 - **`friendo:needs-auth`** — bubbles from `<friendo-reactions>` / `<friendo-poll>`
   when a signed-out visitor tries to act. Catch it to scroll to your
   `<friendo-auth>` element or open a sign-in prompt.
+- **`friendo:submitted`** — bubbles from `<friendo-form>` after it creates a post;
+  `event.detail.record` is the new record. Use it to update the page or show a
+  confirmation (an alternative to the `redirect` attribute).
 
 ## Adding a poll
 
@@ -249,6 +261,101 @@ renders an interactive map:
 ```html
 <friendo-map target-type="post" target-id="{{ record.id }}"></friendo-map>
 ```
+
+## Submitting posts from a page
+
+Comments, reactions, and polls let visitors add *to* a post. `<friendo-form>` lets
+them create *a whole post* — a title, a body, and any extra metadata — straight from
+a page on your site, with no admin UI, no endpoint knowledge, and no schema edit. You
+write an ordinary form; the component turns it into a created post.
+
+```html
+<script src="/friendo.js" defer></script>
+
+<friendo-form collection="blog" redirect="/blog/{slug}">
+  <input name="title" placeholder="Title" required />
+  <friendo-input name="body" type="richtext" placeholder="Write your story…"></friendo-input>
+  <friendo-input name="where" type="location"></friendo-input>
+  <friendo-input name="cover" type="media" accept="image/*"></friendo-input>
+  <friendo-input name="tags" type="tags"></friendo-input>
+  <select name="mood"><option>calm</option><option>hyped</option></select>
+  <button type="submit">Publish</button>
+</friendo-form>
+```
+
+### The one rule: field names decide where values land
+
+**Reserved names become post columns; every other name becomes metadata under
+`data`.** That's the whole convention — guessable without docs.
+
+| Field name | Lands as |
+|---|---|
+| `title` | the post's title |
+| `body` | the post's body |
+| `slug` | the post's slug (auto-derived from `title` if you omit it) |
+| `status` | requested status (clamped server-side — see below) |
+| *anything else* (`mood`, `tags`, `where`, `cover`…) | `data.<name>` |
+
+So the form above creates a post whose `data` is
+`{ "where": {lat,lng}, "cover": "<url>", "tags": [...], "mood": "calm" }` — and those
+read straight back in a template, no extra wiring:
+
+```html
+<p>Mood: {{ record.data.mood }}</p>
+<ul>{% for t in record.data.tags %}<li>{{ t }}</li>{% endfor %}</ul>
+```
+
+### Rich inputs: `<friendo-input>`
+
+Native `<input>`, `<textarea>`, and `<select>` work as-is. For richer values, drop in
+a `<friendo-input>` with a `type` — `<friendo-form>` reads its value at submit time:
+
+| `type` | Renders | Value shape |
+|---|---|---|
+| `richtext` | a **WYSIWYG** editor ([TipTap](https://tiptap.dev/)) — bold, italic, H2/H3 headings, bullet & numbered lists, blockquote, inline code, and links, all shown live as you type | a **markdown** string (so it still flows through the `markdown` filter and fits the `body` column) |
+| `location` | a click-to-pick [Leaflet](https://leafletjs.com/) map | `{ lat, lng }` in `data.<name>` |
+| `media` | a file/image picker with preview | uploaded after the post is created; its public URL is stored in `data.<name>` |
+| `tags` | a chip input | a `string[]` |
+
+The rich inputs lean on machinery loaded only when they appear on a page, so the rest
+of the SDK stays lean: `richtext` lazy-loads [TipTap](https://tiptap.dev/) and
+`location`/`media` use [Leaflet](#tagging-a-location) and the
+[media API](#uploading-images). Both editors load their library from a CDN the first
+time they're used; if `richtext` can't reach it, it falls back to a plain Markdown
+textarea, so the form always works.
+
+**A location field becomes a map pin automatically.** When a post is created with a
+`{ lat, lng }` value in its `data` (which is exactly what the `location` input
+produces), the runtime geo-tags the post server-side — so
+`<friendo-map target-type="post" target-id="{{ record.id }}">` shows the pin with no
+extra call. Because it happens on the server, it works for member submissions too,
+which can't reach the contributor-gated locations API directly.
+
+### After submit: redirect or handle it yourself
+
+Give `<friendo-form>` a `redirect` and it navigates there on success, substituting
+`{slug}` and `{id}` from the new record (`redirect="/blog/{slug}"`). Omit it and the
+form resets and shows a confirmation in its `status` part instead. Either way it fires
+a **`friendo:submitted`** event whose `event.detail.record` is the created post, so you
+can update the page, show a toast, or drive a custom redirect.
+
+### Who can submit
+
+By default only **contributors and above** (anyone who can create content) may post —
+their submission publishes or waits per your normal [approval setting](/docs/auth), no
+different from authoring in the admin UI.
+
+Ordinary **members** (passwordless community accounts) are blocked unless you opt in:
+turn on **Members can submit posts** in admin **Settings** (the
+`content.accept_submissions` setting). When it's on, a signed-in member may submit, and
+their post is **forced into the review queue as `pending`** — a requested `published`
+status is ignored — so an editor approves it exactly like a pending comment before it
+goes live. Member submissions are rate-limited to keep the opened surface from being
+spammed. When the setting is off, members get a `403`.
+
+> **Media in member submissions.** In this first cut the `media` input is a
+> contributor+ affordance — a member sees a note instead of a picker, so their
+> submission simply carries no file. Contributors and above upload normally.
 
 ## Sending email
 

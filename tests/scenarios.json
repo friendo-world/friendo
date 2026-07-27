@@ -978,6 +978,80 @@
   },
 
   {
+    "name": "member submissions are off by default",
+    "method": "GET", "path": "/settings",
+    "expect": { "status": 200, "json": { "content.accept_submissions": false } }
+  },
+  {
+    "name": "owner creates a plain member to submit posts",
+    "method": "POST", "path": "/users",
+    "body": { "email": "submitter@test.com", "name": "Sub", "password": "password12345", "role": "member" },
+    "expect": { "status": 201, "json": { "user.role": "member" } }
+  },
+  {
+    "name": "the submitter logs in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "submitter@test.com", "password": "password12345" },
+    "expect": { "status": 200, "json": { "user.role": "member" } }
+  },
+  {
+    "name": "a member cannot submit a post while submissions are off",
+    "method": "POST", "path": "/collections/blog/records",
+    "body": { "title": "From a member", "body": "hello", "data": { "mood": "calm" } },
+    "expect": { "status": 403 }
+  },
+  {
+    "name": "owner logs back in to allow submissions",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "owner turns on member submissions",
+    "method": "PUT", "path": "/settings",
+    "body": { "content": { "accept_submissions": true } },
+    "expect": { "status": 200, "json": { "content.accept_submissions": true } }
+  },
+  {
+    "name": "the submitter logs back in",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "submitter@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "a member submission is forced pending and carries arbitrary data",
+    "method": "POST", "path": "/collections/blog/records",
+    "body": { "title": "My Trip", "slug": "my-trip", "body": "the story", "status": "published", "data": { "mood": "calm", "tags": ["travel", "summer"], "where": { "lat": 48.8584, "lng": 2.2945 } } },
+    "expect": {
+      "status": 201,
+      "json": { "record.collection": "blog", "record.status": "pending", "record.title": "My Trip", "record.slug": "my-trip", "record.data.mood": "calm", "record.data.tags.0": "travel", "record.data.where.lat": 48.8584 }
+    },
+    "capture": { "submissionId": "record.id" }
+  },
+  {
+    "name": "the server auto-geo-tagged the member submission from its data.where",
+    "method": "GET", "path": "/locations?target_type=post&target_id=${submissionId}",
+    "expect": { "status": 200, "length": { "locations": 1 }, "json": { "locations.0.lat": 48.8584, "locations.0.lng": 2.2945, "locations.0.label": "My Trip" } }
+  },
+  {
+    "name": "owner logs in to review the submission",
+    "method": "POST", "path": "/auth/login",
+    "body": { "email": "owner@test.com", "password": "password12345" },
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "the member submission is in the review queue as pending",
+    "method": "GET", "path": "/records?status=pending",
+    "expect": { "status": 200, "length": { "records": 1 }, "json": { "records.0.id": "${submissionId}", "records.0.status": "pending" } }
+  },
+  {
+    "name": "owner turns member submissions back off",
+    "method": "PUT", "path": "/settings",
+    "body": { "content": { "accept_submissions": false } },
+    "expect": { "status": 200, "json": { "content.accept_submissions": false } }
+  },
+
+  {
     "name": "brute-force login attempt 1 fails",
     "method": "POST", "path": "/auth/login",
     "body": { "email": "nobody@test.com", "password": "wrong" },

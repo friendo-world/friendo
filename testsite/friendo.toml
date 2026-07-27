@@ -3,3 +3,8 @@ name = "testsite"
 
 [content]
 types = ["blog", "pages"]
+
+# Declared here, so it's applied on startup and shown read-only in admin Settings.
+# This also lets the /submit demo accept member submissions (into the review queue).
+[settings]
+accept_submissions = true

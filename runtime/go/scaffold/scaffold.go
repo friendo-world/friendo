@@ -57,6 +57,15 @@ name = "%s"
 [content]
 types = ["blog", "pages"]
 
+# Optional: make this file the source of truth for these site settings. Uncomment a
+# key and it is applied on startup and shown read-only in the admin UI (Settings).
+# [settings]
+# default_role = "member"        # a new sign-up becomes: "member" or "contributor"
+# signups_enabled = true         # allow public sign-ups
+# require_approval = false        # hold contributor posts for review before publishing
+# accept_submissions = false      # let members submit posts via <friendo-form> (into the review queue)
+# auto_approve = false            # publish new comments immediately instead of queuing them
+
 [deploy]
 # domain = "mysite.com"
 `, name)

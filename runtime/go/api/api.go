@@ -14,11 +14,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/friendo-world/friendo/runtime/go/data"
@@ -32,6 +34,10 @@ import (
 // Public endpoints (me, auth) carry no auth so the SPA can bootstrap and log in.
 // Everything else requires site admin authentication (session cookie).
 func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*http.Request) *data.User, permalink data.PermalinkFunc, store storage.Backend) {
+	// friendo.toml's [settings] block is the source of truth for the settings it
+	// declares: apply them to the DB now (overwriting any admin edit) and mark them
+	// so the settings API reports them read-only and refuses to change them.
+	managed := applyManagedSettings(db, siteDir)
 	r.Route("/api", func(r chi.Router) {
 		// Public endpoints — used by the SPA to bootstrap and authenticate.
 		r.Get("/me", handleMe(authFunc))
@@ -79,7 +85,10 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// actor's own posts unless they also hold content.edit.any.
 		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db)))
 		r.Get("/collections/{collection}/records", capGate(authFunc, data.CapContentCreate, handleListRecords(db, authFunc)))
-		r.Post("/collections/{collection}/records", capGate(authFunc, data.CapContentCreate, handleCreateRecord(db, authFunc)))
+		// Create self-gates: contributors+ (content.create) post directly; when the
+		// site opts in (content.accept_submissions), a signed-in member may submit a
+		// post that's forced into the pending review queue.
+		r.Post("/collections/{collection}/records", handleCreateRecord(db, authFunc))
 		// Post-review queue — editor+ (content.edit.any) lists posts by status;
 		// content.publish flips a post's status without touching its content.
 		r.Get("/records", capGate(authFunc, data.CapContentEditAny, handleListRecordsByStatus(db)))
@@ -122,8 +131,8 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Delete("/users/{id}", capGate(authFunc, data.CapUserManage, handleDeleteUser(db, authFunc)))
 
 		// Settings + sync — admin+ (site.configure).
-		r.Get("/settings", capGate(authFunc, data.CapSiteConfigure, handleSettings(db, siteName)))
-		r.Put("/settings", capGate(authFunc, data.CapSiteConfigure, handleUpdateSettings(db, siteName)))
+		r.Get("/settings", capGate(authFunc, data.CapSiteConfigure, handleSettings(db, siteName, managed)))
+		r.Put("/settings", capGate(authFunc, data.CapSiteConfigure, handleUpdateSettings(db, siteName, managed)))
 		r.Post("/push/templates", capGate(authFunc, data.CapSiteConfigure, handlePushTemplates(siteDir)))
 		r.Post("/push/assets", capGate(authFunc, data.CapSiteConfigure, handlePushAssets(siteDir, store)))
 		r.Post("/push/data", capGate(authFunc, data.CapSiteConfigure, handlePushData(db)))
@@ -318,15 +327,38 @@ func (in recordInput) status() string {
 
 func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		// Contributors+ (content.create) create directly. A member without that
+		// capability may submit only when the site opts in; their post is
+		// rate-limited and forced into the pending review queue.
+		memberSubmission := false
+		if !user.Can(data.CapContentCreate) {
+			if !db.GetBoolSetting(settingAcceptSubmissions, false) {
+				jsonError(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			if !db.RateLimitAllow("submission:"+user.ID, commentRateLimit, commentRateWindow) {
+				jsonError(w, "you're submitting too fast — slow down", http.StatusTooManyRequests)
+				return
+			}
+			memberSubmission = true
+		}
+
 		var in recordInput
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
 		collection := chi.URLParam(r, "collection")
-		user := authFunc(r)
 		authorID := db.DefaultAuthorID(user.ID)
 		status := recordStatusFor(db, user, in.status())
+		if memberSubmission {
+			status = "pending" // community submissions always enter the review queue
+		}
 		id, err := db.CreateRecord(collection, in.Slug, in.Title, in.Body, status, authorID)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
@@ -334,10 +366,42 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		}
 		if len(in.Data) > 0 && string(in.Data) != "null" {
 			db.SetRecordData(id, string(in.Data))
+			autoGeotag(db, id, in.Title, in.Data)
 		}
 		record, _ := db.GetRecordByID(id)
 		w.WriteHeader(http.StatusCreated)
 		jsonResponse(w, map[string]any{"record": record})
+	}
+}
+
+// autoGeotag scans a newly created record's data blob for fields shaped like
+// {lat, lng} and geo-tags the post with each. A post authored through
+// <friendo-form>'s location input stores its pick in data.<name>, so this makes it
+// appear on <friendo-map> with no extra call — and, being server-side, it works for
+// member submissions too (they can't reach the contributor-gated locations API).
+// Out-of-range coordinates are skipped. Runs on create only (the form is create-only).
+func autoGeotag(db *data.DB, postID, title string, raw json.RawMessage) {
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return
+	}
+	// Deterministic order so multiple pins tag in a stable sequence.
+	names := make([]string, 0, len(data))
+	for k := range data {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		obj, ok := data[k].(map[string]any)
+		if !ok {
+			continue
+		}
+		lat, latOK := obj["lat"].(float64)
+		lng, lngOK := obj["lng"].(float64)
+		if !latOK || !lngOK || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+			continue
+		}
+		db.CreateLocation("post", postID, lat, lng, title)
 	}
 }
 
@@ -2204,14 +2268,95 @@ func handleDeleteUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 
 // Setting keys.
 const (
-	settingAutoApprove     = "moderation.auto_approve"
-	settingDefaultRole     = "access.default_role"
-	settingSignupsEnabled  = "access.signups_enabled"
-	settingRequireApproval = "content.require_approval"
+	settingAutoApprove       = "moderation.auto_approve"
+	settingDefaultRole       = "access.default_role"
+	settingSignupsEnabled    = "access.signups_enabled"
+	settingRequireApproval   = "content.require_approval"
+	settingAcceptSubmissions = "content.accept_submissions"
 )
 
-// settingsPayload builds the settings object returned by GET/PUT /settings.
-func settingsPayload(db *data.DB, siteName string) map[string]any {
+// tomlSettingsConfig mirrors the [settings] block of friendo.toml. Pointer fields
+// distinguish "declared" from "absent" so only the keys the author actually wrote
+// are treated as managed.
+type tomlSettingsConfig struct {
+	Settings struct {
+		AutoApprove       *bool   `toml:"auto_approve"`
+		DefaultRole       *string `toml:"default_role"`
+		SignupsEnabled    *bool   `toml:"signups_enabled"`
+		RequireApproval   *bool   `toml:"require_approval"`
+		AcceptSubmissions *bool   `toml:"accept_submissions"`
+	} `toml:"settings"`
+}
+
+// applyManagedSettings makes friendo.toml the source of truth for the settings its
+// [settings] block declares: each declared key is written into the DB (overwriting
+// any admin edit) and added to the returned set, which the settings API uses to
+// report them and to refuse changes. Keys the author omits stay admin-managed.
+// Applied once at mount time — editing friendo.toml takes effect on the next start.
+func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
+	managed := map[string]bool{}
+	if siteDir == "" {
+		return managed
+	}
+	path := filepath.Join(siteDir, "friendo.toml")
+	if _, err := os.Stat(path); err != nil {
+		return managed
+	}
+	var cfg tomlSettingsConfig
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		log.Printf("friendo.toml: could not read [settings]: %v", err)
+		return managed
+	}
+	s := cfg.Settings
+	set := func(key, val string) {
+		db.SetSetting(key, val)
+		managed[key] = true
+	}
+	if s.AutoApprove != nil {
+		set(settingAutoApprove, boolSetting(*s.AutoApprove))
+	}
+	if s.SignupsEnabled != nil {
+		set(settingSignupsEnabled, boolSetting(*s.SignupsEnabled))
+	}
+	if s.RequireApproval != nil {
+		set(settingRequireApproval, boolSetting(*s.RequireApproval))
+	}
+	if s.AcceptSubmissions != nil {
+		set(settingAcceptSubmissions, boolSetting(*s.AcceptSubmissions))
+	}
+	if s.DefaultRole != nil {
+		if *s.DefaultRole == "member" || *s.DefaultRole == "contributor" {
+			set(settingDefaultRole, *s.DefaultRole)
+		} else {
+			log.Printf("friendo.toml: ignoring invalid [settings] default_role %q (want \"member\" or \"contributor\")", *s.DefaultRole)
+		}
+	}
+	return managed
+}
+
+// managedList returns the managed setting keys in a stable order for the API, so the
+// admin SPA can render those controls read-only.
+func managedList(managed map[string]bool) []string {
+	order := []string{settingAutoApprove, settingDefaultRole, settingSignupsEnabled, settingRequireApproval, settingAcceptSubmissions}
+	out := []string{}
+	for _, k := range order {
+		if managed[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+func boolSetting(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+// settingsPayload builds the settings object returned by GET/PUT /settings. The
+// `managed` list names the keys frozen by friendo.toml's [settings] block.
+func settingsPayload(db *data.DB, siteName string, managed map[string]bool) map[string]any {
 	users, _ := db.ListUsers()
 	counts, _ := db.CollectionCounts()
 	return map[string]any{
@@ -2224,18 +2369,25 @@ func settingsPayload(db *data.DB, siteName string) map[string]any {
 			"signups_enabled":  db.GetBoolSetting(settingSignupsEnabled, true),
 			"require_approval": db.GetBoolSetting(settingRequireApproval, false),
 		},
+		"content": map[string]any{
+			"accept_submissions": db.GetBoolSetting(settingAcceptSubmissions, false),
+		},
+		"managed": managedList(managed),
 	}
 }
 
-func handleSettings(db *data.DB, siteName string) http.HandlerFunc {
+func handleSettings(db *data.DB, siteName string, managed map[string]bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse(w, settingsPayload(db, siteName))
+		jsonResponse(w, settingsPayload(db, siteName, managed))
 	}
 }
 
 // handleUpdateSettings persists admin-configurable settings: the comment
-// auto-approve toggle and the access policy (default role, signups, approval).
-func handleUpdateSettings(db *data.DB, siteName string) http.HandlerFunc {
+// auto-approve toggle, the access policy (default role, signups, approval), and the
+// member-submissions toggle. Keys frozen by friendo.toml's [settings] block are
+// silently skipped — the SPA disables them, and this keeps the DB from drifting from
+// the file (which would just overwrite it on the next start anyway).
+func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Moderation *struct {
@@ -2246,22 +2398,19 @@ func handleUpdateSettings(db *data.DB, siteName string) http.HandlerFunc {
 				SignupsEnabled  *bool   `json:"signups_enabled"`
 				RequireApproval *bool   `json:"require_approval"`
 			} `json:"access"`
+			Content *struct {
+				AcceptSubmissions *bool `json:"accept_submissions"`
+			} `json:"content"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		boolStr := func(b bool) string {
-			if b {
-				return "true"
-			}
-			return "false"
-		}
-		if in.Moderation != nil && in.Moderation.AutoApprove != nil {
-			db.SetSetting(settingAutoApprove, boolStr(*in.Moderation.AutoApprove))
+		if in.Moderation != nil && in.Moderation.AutoApprove != nil && !managed[settingAutoApprove] {
+			db.SetSetting(settingAutoApprove, boolSetting(*in.Moderation.AutoApprove))
 		}
 		if in.Access != nil {
-			if in.Access.DefaultRole != nil {
+			if in.Access.DefaultRole != nil && !managed[settingDefaultRole] {
 				role := *in.Access.DefaultRole
 				if role != "member" && role != "contributor" {
 					jsonError(w, "default_role must be member or contributor", http.StatusBadRequest)
@@ -2269,14 +2418,17 @@ func handleUpdateSettings(db *data.DB, siteName string) http.HandlerFunc {
 				}
 				db.SetSetting(settingDefaultRole, role)
 			}
-			if in.Access.SignupsEnabled != nil {
-				db.SetSetting(settingSignupsEnabled, boolStr(*in.Access.SignupsEnabled))
+			if in.Access.SignupsEnabled != nil && !managed[settingSignupsEnabled] {
+				db.SetSetting(settingSignupsEnabled, boolSetting(*in.Access.SignupsEnabled))
 			}
-			if in.Access.RequireApproval != nil {
-				db.SetSetting(settingRequireApproval, boolStr(*in.Access.RequireApproval))
+			if in.Access.RequireApproval != nil && !managed[settingRequireApproval] {
+				db.SetSetting(settingRequireApproval, boolSetting(*in.Access.RequireApproval))
 			}
 		}
-		jsonResponse(w, settingsPayload(db, siteName))
+		if in.Content != nil && in.Content.AcceptSubmissions != nil && !managed[settingAcceptSubmissions] {
+			db.SetSetting(settingAcceptSubmissions, boolSetting(*in.Content.AcceptSubmissions))
+		}
+		jsonResponse(w, settingsPayload(db, siteName, managed))
 	}
 }
 

@@ -135,11 +135,12 @@ Server-side relations are now wired (v0.3, Tier 0): a post template can render
 — approved/public data attached to the focused record, no JS required. The SDK
 components remain the interactive, signed-in path.
 
-**Planned (added v0.3 scope):** a `<friendo-form>` submission component — ordinary
+**Shipped (added v0.3 scope):** a `<friendo-form>` submission component — ordinary
 inputs plus rich `<friendo-input>` types (rich text, location, media, tags) that
 create a post with arbitrary `data` metadata from the frontend, reusing the existing
-records-create endpoint. Contributors author; members submit into the review queue
-behind an opt-in setting. Design: [design/v0.3-friendo-form-plan.md](design/v0.3-friendo-form-plan.md).
+records-create endpoint. Contributors author directly; members submit into the review
+queue behind the opt-in `content.accept_submissions` setting (with a submission rate
+limit). Design: [design/v0.3-friendo-form-plan.md](design/v0.3-friendo-form-plan.md).
 
 ## Testing
 

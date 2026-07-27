@@ -31,6 +31,35 @@ types = ["posts", "comments", "reactions"]
 are created simply by having records in them (via the admin UI, the API, or a
 `content/` folder), so this is descriptive rather than enforced.
 
+## `[settings]`
+
+The behavioural settings you'd otherwise flip in admin **Settings** can be declared
+here instead — handy for keeping a site's policy in version control and shipping it
+with the folder. **`friendo.toml` is the source of truth for any key you set here:**
+it's applied on startup (overwriting the stored value) and that control is shown
+**read-only** in the admin UI. Omit a key and it stays editable in the admin UI as
+usual.
+
+```toml
+[settings]
+default_role = "member"        # what a new sign-up becomes: "member" or "contributor"
+signups_enabled = true         # allow public sign-ups
+require_approval = false        # hold contributor posts for review before publishing
+accept_submissions = false      # let members submit posts via <friendo-form> (into the review queue)
+auto_approve = false            # publish new comments immediately instead of queuing them
+```
+
+| Key | What | Default |
+|---|---|---|
+| `default_role` | Role a self-serve visitor gets on sign-up — `member` or `contributor` | `member` |
+| `signups_enabled` | Whether the public can create accounts | `true` |
+| `require_approval` | Hold contributor posts as drafts until an editor publishes them | `false` |
+| `accept_submissions` | Let signed-in members submit posts from a [`<friendo-form>`](/docs/community#submitting-posts-from-a-page) into the review queue | `false` |
+| `auto_approve` | Publish new comments immediately instead of queuing them for moderation | `false` |
+
+Changes take effect on the next start (like `[site].name`). Keys you leave out are
+managed in the admin UI and travel between sites with `friendo push --settings`.
+
 ## `[deploy]`
 
 Written by `friendo deploy`, but you can set it yourself:

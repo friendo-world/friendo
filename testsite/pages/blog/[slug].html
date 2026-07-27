@@ -2,6 +2,22 @@
 {% block content %}
 <article>
     <h1>{{ record.title }}</h1>
+
+    <!-- Metadata submitted through <friendo-form> lands in the post's `data` blob,
+         so it renders server-side with no extra wiring. A cover image lands in
+         `data.cover` (the uploaded asset's URL); `data.mood` / `data.tags` are the
+         plain fields the form's <select> and tags input produced. -->
+    {% if record.data.cover %}
+    <img class="cover" src="{{ record.data.cover }}" alt="">
+    {% endif %}
+
+    {% if record.data.mood or record.data.tags %}
+    <p class="post-meta">
+        {% if record.data.mood %}<span class="mood">{{ record.data.mood }}</span>{% endif %}
+        {% for tag in record.data.tags %}<span class="tag">#{{ tag }}</span>{% endfor %}
+    </p>
+    {% endif %}
+
     {{ record.body|markdown }}
 </article>
 

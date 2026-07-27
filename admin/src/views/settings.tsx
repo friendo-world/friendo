@@ -111,10 +111,29 @@ export function SettingsView() {
 
   const activePreset = s ? PRESETS.find((p) => matchesPreset(s.access, p.access))?.key : undefined;
 
+  // DB keys that friendo.toml's [settings] block has frozen — their controls render
+  // read-only. (These are the internal setting keys the API reports in `managed`.)
+  const MK = {
+    autoApprove: "moderation.auto_approve",
+    defaultRole: "access.default_role",
+    signups: "access.signups_enabled",
+    approval: "content.require_approval",
+    submissions: "content.accept_submissions",
+  };
+  const isManaged = (k: string) => s?.managed?.includes(k) ?? false;
+  const accessManaged = isManaged(MK.defaultRole) || isManaged(MK.signups) || isManaged(MK.approval);
+  const managedHint = (base: string, k: string) => (isManaged(k) ? base + " · Set in friendo.toml." : base);
+
   return (
     <div class="mx-auto max-w-3xl px-4 py-8">
       <h1 class="mb-6 text-xl font-bold">Settings</h1>
       {error && <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+      {s && s.managed.length > 0 && (
+        <div class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          Some settings are defined in <code class="rounded bg-amber-100 px-1.5 py-0.5">friendo.toml</code> and
+          are read-only here. Edit the file to change them.
+        </div>
+      )}
 
       <h2 class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase">Site</h2>
       <div class="mb-8 rounded-lg bg-white p-6 shadow-sm">
@@ -136,7 +155,7 @@ export function SettingsView() {
             <button
               key={p.key}
               type="button"
-              disabled={!s || saving}
+              disabled={!s || saving || accessManaged}
               onClick={() => patch({ access: p.access })}
               class={
                 "rounded-lg border p-3 text-left " +
@@ -154,14 +173,14 @@ export function SettingsView() {
             <span>
               <span class="text-sm font-medium">New members can post</span>
               <span class="mt-1 block text-xs text-gray-400">
-                What a visitor becomes when they sign up.
+                {managedHint("What a visitor becomes when they sign up.", MK.defaultRole)}
               </span>
             </span>
             <select
-              disabled={!s || saving}
+              disabled={!s || saving || isManaged(MK.defaultRole)}
               value={s?.access.default_role}
               onChange={(e) => patch({ access: { default_role: (e.target as HTMLSelectElement).value as AccessSettings["default_role"] } })}
-              class="rounded-md border border-gray-300 px-2 py-1 text-sm"
+              class="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
             >
               <option value="member">Member — comment &amp; react only</option>
               <option value="contributor">Contributor — can post their own</option>
@@ -171,19 +190,28 @@ export function SettingsView() {
           {s && (
             <Toggle
               label="Allow sign-ups"
-              hint="When off, only invited accounts can join."
+              hint={managedHint("When off, only invited accounts can join.", MK.signups)}
               on={s.access.signups_enabled}
-              disabled={saving}
+              disabled={saving || isManaged(MK.signups)}
               onToggle={() => patch({ access: { signups_enabled: !s.access.signups_enabled } })}
             />
           )}
           {s && (
             <Toggle
               label="Posts need approval"
-              hint="When on, posts by contributors wait as drafts until an editor publishes them."
+              hint={managedHint("When on, posts by contributors wait as drafts until an editor publishes them.", MK.approval)}
               on={s.access.require_approval}
-              disabled={saving}
+              disabled={saving || isManaged(MK.approval)}
               onToggle={() => patch({ access: { require_approval: !s.access.require_approval } })}
+            />
+          )}
+          {s && (
+            <Toggle
+              label="Members can submit posts"
+              hint={managedHint("When on, signed-in members can submit posts from a page's <friendo-form>. Submissions always wait in the review queue until an editor publishes them.", MK.submissions)}
+              on={s.content.accept_submissions}
+              disabled={saving || isManaged(MK.submissions)}
+              onToggle={() => patch({ content: { accept_submissions: !s.content.accept_submissions } })}
             />
           )}
         </div>
@@ -194,9 +222,9 @@ export function SettingsView() {
         {s && (
           <Toggle
             label="Auto-approve comments"
-            hint="When on, new comments publish immediately. When off, they wait in the moderation queue."
+            hint={managedHint("When on, new comments publish immediately. When off, they wait in the moderation queue.", MK.autoApprove)}
             on={s.moderation.auto_approve}
-            disabled={saving}
+            disabled={saving || isManaged(MK.autoApprove)}
             onToggle={() => patch({ moderation: { auto_approve: !s.moderation.auto_approve } })}
           />
         )}
