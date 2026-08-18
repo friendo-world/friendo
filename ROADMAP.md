@@ -10,6 +10,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Single-runtime pivot** | Unify on the Go runtime; friendo.world → network mode (Coolify + Hetzner) | ✅ Shipped |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
 | **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
+| **v0.4** | Open the network — quotas, account management, custom domains | Planned |
 
 ---
 
@@ -42,8 +43,9 @@ hosting guide: [DEPLOY.md](DEPLOY.md); accounts/auth design:
   gone → `friendo network destroy` / `friendo network operator grant`).
 - **friendo.world cutover** — live on Coolify + Hetzner + Cloudflare R2.
 
-**Next:** polish — quotas, richer `network accounts` / `signups` management, and custom
-domains.
+**Next (v0.4):** open the network to real tenants — quotas, richer `network accounts` /
+`signups` management, and custom domains. Scope:
+[design/v0.4-roadmap.md](design/v0.4-roadmap.md).
 
 ---
 
@@ -155,8 +157,18 @@ earned its keep, catching a 401-vs-403 divergence during Phase 3a. With the
 single-runtime pivot the edge runner is gone; the same fixtures now stand alone as the
 Go regression suite (`go test ./...`).
 
-Still uncovered (worth growing as those areas land): the template/rendering layer,
-the sync push/pull endpoints, and the CLI deploy flow.
+Coverage has since grown past REST. The **render layer** has its own fixtures
+(`render-scenarios.json`), the **SQL statement splitter** is covered by
+`splitter-cases.json`, and the **CLI sync flow** is exercised end-to-end by
+[cli/internal/deploy/roundtrip_test.go](cli/internal/deploy/roundtrip_test.go), which
+drives the real deploy client against an in-process runtime (setup -> push -> pull ->
+assert the data round-trips). Network mode has unit coverage for the dispatcher,
+registry, console, and self-service claim; a Playwright check (`npm run test:sdk`)
+drives the SDK components in a browser.
+
+Still uncovered (worth growing as those areas land): the live `friendo deploy`
+device-auth path against a running network, and the storage backend against a real
+S3/R2 endpoint.
 
 ## friendo.world — live on network mode
 

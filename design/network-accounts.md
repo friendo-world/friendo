@@ -130,13 +130,14 @@ one process, so it collapses:
    API is gated on the `operator` capability (401 unauth / 403 non-operator). `friendo network login`
    (password) and `operator add` are gone → `friendo login` + `friendo network operator grant`. First
    sign-in claims operator when none exists (see bootstrap net above).
-4. **Polish (next).** Quotas, `network accounts`/`signups` management beyond the current console UI.
+4. **Polish (next).** Quotas, `network accounts`/`signups` management beyond the current console UI,
+   and custom domains — scoped as **v0.4**: [v0.4-roadmap.md](v0.4-roadmap.md).
 
 ## Open items
 
 - **Email delivery is now required for login** (OTP) — confirm Resend on friendo.world; dev uses
   the OTP echo.
-- `/activate` page: minimal server-rendered HTML (like the operator console), reusing OTP.
 - Quotas model (per-account site count / storage) — first cut can be a simple count cap.
+  Scoped in [v0.4-roadmap.md](v0.4-roadmap.md) (Tier A); storage accounting is still undecided.
 - Operator **support-access** into sites owned by others — ties to the earlier "power boundary"
   decision; keep it explicit + audit-logged, not implicit.
