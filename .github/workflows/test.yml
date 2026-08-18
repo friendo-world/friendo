@@ -30,7 +30,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: cd admin && npm install
+      # npm ci installs exactly the committed lockfile — an unpinned `npm install`
+      # floats the caret ranges and rebuilds different bundles than the committed ones.
+      - run: cd admin && npm ci
       - run: npm run admin && npm run sdk
       - name: committed bundles must be current
         run: |
