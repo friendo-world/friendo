@@ -61,6 +61,8 @@ Every page is rendered with:
 | `record` | The matched record on a dynamic `[param]` route |
 | `record.data.<field>` | Custom [front matter](/docs/content) fields (tags, weight, …) |
 | `record.comments` / `.reactions` / `.poll` / `.gallery` | The post's public [community relations](#community-relations) (server-rendered) |
+| `user` | Who's signed in — `name`, `email`, `role`, `id` — or empty for a visitor. See [Members-only pages](#members-only-pages) |
+| `gate` | Only on your `login.html`, when it's standing in for a members-only page: `required`, `reason`, `path` |
 
 A record's built-in fields are `id`, `slug`, `title`, `body`, `status`,
 `published_at`, `created`, `updated`. Any extra keys from a content file's front
@@ -86,6 +88,62 @@ so you can render it server-side with no JavaScript (the interactive
 ```
 
 These are attached before the template runs, so they're plain values to loop over.
+
+## Members-only pages
+
+Every page knows who's looking at it. `user` is the signed-in account (anyone who
+signed in through [`<friendo-auth>`](/docs/community) or the admin), or empty for a
+visitor:
+
+```html
+{% if user %}Hi {{ user.name }}{% else %}<friendo-auth reload></friendo-auth>{% endif %}
+```
+
+To make a whole page for signed-in people only, put one tag at the top:
+
+```html
+{# pages/members.html #}
+{% extends "layouts/base.html" %}
+{% members only %}
+{% block content %}<h1>Welcome back, {{ user.name }}</h1>{% endblock %}
+```
+
+| Tag | Who gets in |
+|---|---|
+| `{% members only %}` | anyone signed in |
+| `{% contributors only %}` | contributors and up |
+| `{% editors only %}` | editors and up |
+| `{% admins only %}` | admins and owners |
+| `{% owners only %}` | owners |
+| `{% members only if user.email == "pat@example.com" %}` | signed in **and** the condition holds — any expression over `user`, `record`, … |
+
+The tag works at the top of a page, inside a block, or in a layout — put
+`{% members only %}` in `layouts/members.html` and every page that extends it is
+members-only. To gate whole folders without touching each page, list them under
+[`[access]` in `friendo.toml`](/docs/config#access).
+
+**What a visitor sees.** The same URL, but your `pages/login.html` instead of the
+page (status 401 if they're not signed in, 403 if they are but it's not enough).
+If you don't have a `login.html`, friendo shows a small built-in one: the site
+name, a line about why, and `<friendo-auth>`. Either way, once they sign in the
+page reloads and the real content appears. A custom `login.html` gets a `gate`
+variable to explain itself:
+
+```html
+{# pages/login.html #}
+{% extends "layouts/base.html" %}
+{% block content %}
+  {% if gate.reason == "signin" %}<p>Sign in to see {{ gate.path }}.</p>
+  {% elif gate.reason == "role" %}<p>That page is for {{ gate.required }}s and up.</p>
+  {% else %}<p>That page isn't available to your account.</p>{% endif %}
+  <friendo-auth reload></friendo-auth>
+{% endblock %}
+```
+
+`reload` on `<friendo-auth>` makes the page reload after signing in or out — use it
+on any page that renders `{{ user }}` server-side. Members-only pages are left out
+of a [static export](/docs/static-export), since a static host can't check who's
+asking.
 
 ## Control flow
 

@@ -240,5 +240,18 @@ passwordless `member` account. They share the same session/cookie and role gate,
 so they authenticate but can't reach admin endpoints. See the Phase 3 design in
 [design/phase-3-community.md](design/phase-3-community.md).
 
+**Pages know the viewer.** The `friendo_session` cookie is site-wide (`Path=/`,
+`SameSite=Lax`, HttpOnly), so the template renderer resolves the session on every
+page and exposes `user` (`id`, `name`, `email`, `role`) to templates. A page opts
+into a gate with `{% members only %}` / `{% editors only %}` / … (optionally
+`if <expression>`); friendo.toml's `[access]` table gates whole paths. Because
+pongo2 executes only the root layout's document, the route table extracts the tag
+from each page file and runs it as its own one-line template before rendering
+(`renderer/gate.go`); a tag in a layout or block is caught during the render. A
+blocked viewer gets `pages/login.html` (or a built-in sign-in page) at the same URL
+with 401/403, plus a `gate` variable. Role gates use the `RoleRank` ladder — the
+one place besides the user-management rank guard that does. Static export skips
+gated pages. Responses carry `Vary: Cookie`.
+
 Bcrypt hashes are portable, so `friendo push --users` carries accounts to a
 deployed site unchanged (a blank incoming hash never overwrites a real one).

@@ -18,6 +18,7 @@ var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
 
 func init() {
 	RegisterFilters()
+	RegisterGateTags()
 }
 
 // RegisterFilters registers all custom Pongo2 filters.

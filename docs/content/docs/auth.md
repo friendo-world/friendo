@@ -84,6 +84,11 @@ powers the [community features](/docs/community).
 Promote a member to contributor, editor or admin and nothing changes about how
 they sign in.
 
+Your pages know who's signed in, too: `{{ user.name }}` renders in a template, and
+`{% members only %}` at the top of a page (or `editors only`, `admins only`, …)
+keeps it for the people it's meant for — visitors see your `login.html` instead.
+See [Members-only pages](/docs/templates#members-only-pages).
+
 ## Access presets
 
 Different sites want different defaults. In admin **Settings → Access & roles**,

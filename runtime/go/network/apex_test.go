@@ -168,8 +168,10 @@ func TestOpenAdminSSO(t *testing.T) {
 	for _, ck := range rec.Result().Cookies() {
 		if ck.Name == "friendo_session" && ck.Value != "" {
 			session = ck.Value
-			if ck.Path != "/_/" || !ck.HttpOnly {
-				t.Errorf("session cookie attributes: path=%s httponly=%v", ck.Path, ck.HttpOnly)
+			// Site-wide + Lax: pages render the viewer, and a link from elsewhere
+			// to a members-only page still carries the session.
+			if ck.Path != "/" || !ck.HttpOnly || ck.SameSite != http.SameSiteLaxMode {
+				t.Errorf("session cookie attributes: path=%s httponly=%v samesite=%v", ck.Path, ck.HttpOnly, ck.SameSite)
 			}
 		}
 	}

@@ -62,6 +62,23 @@ password_login = false          # also allow signing in with a password (everyon
 Changes take effect on the next start (like `[site].name`). Keys you leave out are
 managed in the admin UI and travel to a deployed site with `friendo push --data`.
 
+## `[access]`
+
+Paths that are for signed-in people only, so a whole folder can be
+[members-only](/docs/templates#members-only-pages) without a tag on each page:
+
+```toml
+[access]
+members_only = ["/members/*", "/downloads"]   # anyone signed in
+editors_only = ["/newsroom/*"]                # editors and up
+```
+
+Also `contributors_only`, `admins_only` and `owners_only`. A pattern ending in `/*`
+covers that path and everything under it (a page that doesn't exist there shows
+the sign-in page rather than a 404, so the folder doesn't reveal what's inside);
+any other pattern must match the whole path. A page under a gated path can still
+ask for more with its own tag. Takes effect on the next start.
+
 ## `[deploy]`
 
 Written by `friendo deploy`, but you can set it yourself:

@@ -67,6 +67,12 @@ types = ["blog", "pages"]
 # auto_approve = false            # publish new comments immediately instead of queuing them
 # password_login = false          # also allow signing in with a password (everyone can always use an emailed code)
 
+# Optional: members-only paths. A page can also gate itself with {%% members only %%}
+# (or editors only, admins only …) at the top of its template. Restart to apply.
+# [access]
+# members_only = ["/members/*"]   # signed-in people only: this path and everything under it
+# editors_only = ["/newsroom/*"]  # editors and up
+
 [deploy]
 # domain = "mysite.com"
 `, name)

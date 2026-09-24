@@ -5,7 +5,8 @@
  * any Friendo site with no custom JavaScript:
  *
  *   <script src="/friendo.js" defer></script>
- *   <friendo-auth></friendo-auth>
+ *   <friendo-auth></friendo-auth>            (add `reload` to reload the page after sign-in/out —
+ *                                             for pages that render {{ user }} or are members-only)
  *   <friendo-comments post-id="…"></friendo-comments>
  *   <friendo-reactions target-type="post" target-id="…"></friendo-reactions>
  *   <friendo-poll poll-id="…"></friendo-poll>
@@ -33,8 +34,8 @@
 
   var API = "/_/api";
 
-  // Shared JSON fetch. Cookies ride along (the friendo_session cookie's path is
-  // /_/, which matches every /_/api request).
+  // Shared JSON fetch. Cookies ride along (the friendo_session cookie is
+  // site-wide, so pages can render the viewer and every /_/api call carries it).
   async function api(path, opts) {
     var res = await fetch(API + path, Object.assign({ credentials: "same-origin" }, opts));
     var body = null;
@@ -113,7 +114,13 @@
 
   // --- <friendo-auth> ------------------------------------------------------
   // Passwordless email + one-time-code login. Emits friendo:auth on state change.
+  // With the `reload` attribute it also reloads the page after signing in or out,
+  // so server-rendered {{ user }} content and members-only pages catch up.
   class FriendoAuth extends FriendoElement {
+    _afterAuthChange(user) {
+      broadcastAuth(user);
+      if (this.hasAttribute("reload")) location.reload();
+    }
     css() {
       return (
         "input{font:inherit;padding:.4em .5em;border:1px solid #ccc;border-radius:6px}" +
@@ -155,7 +162,7 @@
       var self = this;
       this.shadowRoot.querySelector('[part="logout"]').onclick = async function () {
         await api("/auth/logout", { method: "POST" }).catch(function () {});
-        broadcastAuth(null);
+        self._afterAuthChange(null);
       };
 
       var panel = this.shadowRoot.querySelector('[part="personas"]');
@@ -245,7 +252,7 @@
         status.textContent = "Verifying…";
         try {
           var r = await api("/auth/verify-code", jsonBody("POST", { email: email, code: code }));
-          broadcastAuth(r.user);
+          this._afterAuthChange(r.user);
         } catch (err) {
           status.textContent = err.message;
         }

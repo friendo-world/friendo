@@ -2159,8 +2159,10 @@ func ValidRole(role string) bool {
 	return ok
 }
 
-// RoleRank returns the trust level of a role (higher = more access). Used by the
-// rank guard on user management; capabilities gate everything else.
+// RoleRank returns the trust level of a role (higher = more access). Two things
+// use the ladder on purpose: the rank guard on user management, and members-only
+// pages ({% editors only %} means editor and up — a page is not a capability).
+// Capabilities gate everything else.
 func RoleRank(role string) int {
 	switch role {
 	case "owner":
@@ -2176,6 +2178,12 @@ func RoleRank(role string) int {
 	default:
 		return 0
 	}
+}
+
+// RoleAtLeast reports whether role sits at or above min on the ladder. An unknown
+// min never matches, so a typo in a gate fails closed.
+func RoleAtLeast(role, min string) bool {
+	return RoleRank(min) > 0 && RoleRank(role) >= RoleRank(min)
 }
 
 // --- Ownership ---

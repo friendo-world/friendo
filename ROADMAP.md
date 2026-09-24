@@ -66,7 +66,10 @@ pages (`/account`, `/network`, `/activate`, `/login`) are thin shells around new
 `<friendo-account>` (your sites, domains, **Open admin** into a site), `<friendo-console>`
 (every operator lever, incl. the ones the old console lacked), `<friendo-activate>` — and a
 home site takes a page over by defining it. The Go-template console is gone; every operator
-action is JSON under `/api/network/*`, so `friendo network …` works from anywhere. **Docs +
+action is JSON under `/api/network/*`, so `friendo network …` works from anywhere.
+**Members-only pages:** templates see `{{ user }}`; `{% members only %}` (or `editors only`,
+…, with an optional `if` condition) or `[access]` in `friendo.toml` gates a page or a path,
+showing the site's `login.html` in place. **Docs +
 landing:** `www/` (friendo.world's home site) and a refreshed docs site with Hosting pages,
 published by hand with `npm run deploy:www|docs`. Scope and decisions:
 [design/v0.5-roadmap.md](design/v0.5-roadmap.md).

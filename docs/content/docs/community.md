@@ -31,7 +31,7 @@ themselves, so nothing else is needed.
 
 | Component | Attributes | What it does |
 |---|---|---|
-| `<friendo-auth>` | — | Passwordless email sign-in (one-time code). Shows who's signed in and a sign-out button. |
+| `<friendo-auth>` | `reload` (optional) | Passwordless email sign-in (one-time code). Shows who's signed in and a sign-out button. With `reload`, the page reloads after signing in or out — for pages that render `{{ user }}` or are [members-only](/docs/templates#members-only-pages). |
 | `<friendo-comments>` | `post-id` | Lists approved comments and, for signed-in members, a compose box. |
 | `<friendo-reactions>` | `target-type`, `target-id`, `emojis` (optional, comma-separated; default `👍,❤️,🎉`) | Emoji reactions with live counts; click toggles yours. |
 | `<friendo-poll>` | `poll-slug` (or `poll-id`) | Renders a poll; signed-in members vote once and see the tally. |
@@ -157,7 +157,7 @@ The SDK dispatches DOM events you can hook into:
 
 - **`friendo:auth`** — fired on `document` when a member signs in or out;
   `event.detail.user` is the member (or `null`). All components on the page
-  refresh automatically.
+  refresh automatically (a `<friendo-auth reload>` reloads the whole page instead).
 - **`friendo:needs-auth`** — bubbles from `<friendo-reactions>` / `<friendo-poll>`
   when a signed-out visitor tries to act. Catch it to scroll to your
   `<friendo-auth>` element or open a sign-in prompt.

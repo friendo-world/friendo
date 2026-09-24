@@ -9,11 +9,37 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/flosch/pongo2/v6"
 
 	"github.com/friendo-world/friendo/runtime/go/data"
-	_ "github.com/friendo-world/friendo/runtime/go/renderer"
+	"github.com/friendo-world/friendo/runtime/go/renderer" // also registers filters + gate tags
 )
+
+// exportConfig is the slice of friendo.toml a static export cares about: the
+// site name, and the [access] rules that mark whole paths members-only.
+type exportConfig struct {
+	Site struct {
+		Name string `toml:"name"`
+	} `toml:"site"`
+	Access renderer.AccessRules `toml:"access"`
+}
+
+func loadExportConfig(siteDir string) exportConfig {
+	cfg := exportConfig{}
+	if tomlPath := filepath.Join(siteDir, "friendo.toml"); fileExists(tomlPath) {
+		toml.DecodeFile(tomlPath, &cfg)
+	}
+	if cfg.Site.Name == "" {
+		cfg.Site.Name = filepath.Base(siteDir)
+	}
+	return cfg
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
 
 // Run exports the site in the given mode.
 // "static" renders all pages to dist/ as flat HTML files.
@@ -65,6 +91,8 @@ func exportStatic() error {
 
 	loader := pongo2.MustNewLocalFileSystemLoader(siteDir)
 	tplSet := pongo2.NewSet("friendo", loader)
+	cfg := loadExportConfig(siteDir)
+	site := map[string]string{"name": cfg.Site.Name}
 
 	// Build collections context.
 	collections := make(map[string]any)
@@ -91,18 +119,30 @@ func exportStatic() error {
 		rel, _ := filepath.Rel(pagesDir, path)
 		rel = filepath.ToSlash(rel)
 
-		// Skip dynamic route templates — they need to be rendered per-record.
-		if strings.Contains(rel, "[") {
-			return renderDynamicPages(tplSet, db, collections, rel, distDir, &count)
-		}
-
 		urlPath := "/" + strings.TrimSuffix(rel, ".html")
 		if strings.HasSuffix(urlPath, "/index") {
 			urlPath = strings.TrimSuffix(urlPath, "index")
 		}
 
+		// A members-only page has no place in a static export: a static host
+		// serves everything as 200 to everyone, and nobody is signed in. Skip it
+		// (not a stub — a stub would still be indexed) and say so.
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if renderer.FindGate(src) != "" || cfg.Access.Requires(urlPath) != "" {
+			fmt.Printf("Skipped %s (members only)\n", rel)
+			return nil
+		}
+
+		// Skip dynamic route templates — they need to be rendered per-record.
+		if strings.Contains(rel, "[") {
+			return renderDynamicPages(tplSet, db, collections, site, rel, distDir, &count)
+		}
+
 		ctx := pongo2.Context{
-			"site":        map[string]string{"name": "Friendo Site"},
+			"site":        site,
 			"request":     map[string]string{"path": urlPath},
 			"collections": collections,
 		}
@@ -147,7 +187,7 @@ func exportStatic() error {
 
 // renderDynamicPages renders a dynamic route template (e.g. blog/[slug].html)
 // once per matching record and writes each to dist.
-func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map[string]any, rel, distDir string, count *int) error {
+func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map[string]any, site map[string]string, rel, distDir string, count *int) error {
 	// Extract collection name from parent directory.
 	// e.g. "blog/[slug].html" -> collection "blog"
 	parts := strings.Split(rel, "/")
@@ -176,7 +216,7 @@ func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map
 		urlPath := "/" + collectionName + "/" + slug
 
 		ctx := pongo2.Context{
-			"site":        map[string]string{"name": "Friendo Site"},
+			"site":        site,
 			"request":     map[string]string{"path": urlPath},
 			"collections": collections,
 			"record":      record,

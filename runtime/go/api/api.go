@@ -1322,16 +1322,22 @@ func handleVotePoll(db *data.DB, authFunc func(*http.Request) *data.User) http.H
 // sessionCookieName must match the cookie read by admin.GetSessionUser.
 const sessionCookieName = "friendo_session"
 
+// The cookie is site-wide (Path /) so a page render can see who's viewing — that's
+// what lets a template say {{ user.name }} or {% members only %}. Before members-only
+// pages it was scoped to /_/ (admin + API only). SameSite is Lax rather than Strict
+// so a top-level link from an email or a chat to a members-only page still carries
+// the session; every mutating API call is a JSON POST/PUT/DELETE from fetch, which
+// Lax never attaches cross-site, so the CSRF posture is unchanged.
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
-		Path:     "/_/",
+		Path:     "/",
 		HttpOnly: true,
 		// Secure only over HTTPS — a Secure cookie isn't sent over plain http,
 		// which would break local `friendo serve` on http://localhost.
 		Secure:   requestIsHTTPS(r),
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400 * 7,
 	})
 }
@@ -1349,14 +1355,20 @@ func requestIsHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
+// clearSessionCookie expires the session cookie on both its current path (/) and
+// the legacy /_/ path. Browsers key cookies by name + domain + path, so a browser
+// that signed in before the cookie went site-wide still holds a /_/ cookie — and
+// would stay signed in to the admin after logout until it expired.
 func clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/_/",
-		HttpOnly: true,
-		MaxAge:   -1,
-	})
+	for _, p := range []string{"/", "/_/"} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookieName,
+			Value:    "",
+			Path:     p,
+			HttpOnly: true,
+			MaxAge:   -1,
+		})
+	}
 }
 
 // userJSON is the public shape of a user returned to the SPA (no password hash).
