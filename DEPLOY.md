@@ -71,14 +71,53 @@ Create an application from this repo (build pack: **Dockerfile**).
   survives redeploys).
 - **Port:** the container listens on **3000**; let Coolify's Traefik route to it (don't publish
   the port directly).
-- **Domains / wildcard routing (the one fiddly bit):** route **both** the apex (`example.com` →
-  operator console) **and** the wildcard (`*.example.com` → tenant sites) to this app. Set the
-  app's domain to your apex and add a wildcard route. Depending on your Traefik version, that's a
-  custom label like:
+- **Routing (the one fiddly bit):** three kinds of hostname have to reach this app — the apex
+  (`example.com` → operator console), the wildcard (`*.example.com` → tenant sites), and
+  **any other hostname** (a tenant's custom domain arrives with *their* domain in the Host
+  header, not one of yours). Set the app's domain to your apex, then replace the generated
+  Traefik labels under **Advanced → Custom Docker Labels** with this block (Traefik **v3**
+  syntax, which is what current Coolify ships):
   ```
-  traefik.http.routers.friendo.rule=Host(`example.com`) || HostRegexp(`{sub:[a-z0-9-]+}.example.com`)
+  traefik.enable=true
+  traefik.http.routers.friendo-https.rule=Host(`example.com`) || HostRegexp(`^[a-z0-9-]+\.example\.com$`)
+  traefik.http.routers.friendo-https.entryPoints=https
+  traefik.http.routers.friendo-https.tls=true
+  traefik.http.routers.friendo-https.service=friendo
+  traefik.http.routers.friendo-https.priority=100
+  traefik.http.routers.friendo-http.rule=Host(`example.com`) || HostRegexp(`^[a-z0-9-]+\.example\.com$`)
+  traefik.http.routers.friendo-http.entryPoints=http
+  traefik.http.routers.friendo-http.service=friendo
+  traefik.http.routers.friendo-http.priority=100
+  traefik.http.routers.friendo-catchall-https.rule=PathPrefix(`/`)
+  traefik.http.routers.friendo-catchall-https.entryPoints=https
+  traefik.http.routers.friendo-catchall-https.tls=true
+  traefik.http.routers.friendo-catchall-https.service=friendo
+  traefik.http.routers.friendo-catchall-https.priority=50
+  traefik.http.routers.friendo-catchall-http.rule=PathPrefix(`/`)
+  traefik.http.routers.friendo-catchall-http.entryPoints=http
+  traefik.http.routers.friendo-catchall-http.service=friendo
+  traefik.http.routers.friendo-catchall-http.priority=50
+  traefik.http.services.friendo.loadbalancer.server.port=3000
   ```
-  (Traefik v3 changed `HostRegexp` syntax — verify against your Coolify's Traefik version.)
+  The `catchall` routers are what make custom domains work: without them Traefik answers a
+  tenant's domain itself (a bare 404, or a `503 no available server` if a stale rule from
+  another resource matches first) and friendo never sees the request. The explicit
+  priorities pin the order — your own hostnames take the specific routers, everything else
+  falls through to friendo, which serves the site if the domain is verified and, if not,
+  a page explaining that the domain isn't connected (or isn't verified yet) and what to do. (Traefik's default priority is the rule's character length,
+  so an unpinned catch-all can lose to a leftover rule.) Coolify regenerates these labels if
+  you later change the app's domain in its UI, so re-add the block if you do.
+
+  **Check it from your laptop** by sending the box a hostname it has never heard of:
+  ```sh
+  curl -sk -o /dev/null -w "HTTP %{http_code}\n" \
+    --resolve not-a-real-domain.example:443:<server-ip> https://not-a-real-domain.example/
+  ```
+  You want a **404 from friendo** — its own page, starting `Nothing is connected to
+  not-a-real-domain.example`, with instructions. Traefik's plain `404 page not found` body,
+  or a **503 no available server**, means the catch-all isn't winning yet and the request
+  never reached friendo. Once a tenant verifies a domain, that same path serves their site
+  instead.
 
 ### Environment variables
 
@@ -141,6 +180,23 @@ A tenant then runs `friendo domain add theirdomain.com`, adds the single CNAME t
 given, and runs `friendo domain verify theirdomain.com`. Cloudflare handles ownership
 validation and the certificate; nothing is installed on the box.
 
+Two things that live outside Cloudflare and are easy to miss:
+
+- **Traefik must pass unknown hostnames through to friendo.** Cloudflare forwards a
+  custom hostname to your fallback origin with the *tenant's* domain in the Host header.
+  `friendo domain verify` succeeds regardless (it talks to the Cloudflare API), but the
+  domain then serves a Traefik 404/503 unless the `catchall` routers from
+  [section 3](#3-coolify-app) are in place. Run the curl check there before your first real
+  domain.
+- **Origin TLS for foreign hostnames.** Traefik presents your Origin CA cert (issued for
+  `example.com` + `*.example.com`) for any SNI, and Cloudflare trusts Origin CA. If a
+  connected domain shows a Cloudflare **526** page, the zone's **Full (strict)** mode is
+  refusing that cert for a name it doesn't cover — drop the zone to **Full** and retry.
+
+The same Traefik point applies **without** Cloudflare for SaaS: under the default TXT
+verification, a custom domain still reaches the box with its own hostname, so the
+catch-all is required either way.
+
 > Sign-in is passwordless everywhere: the operator console, `friendo login`, and member
 > login all deliver a one-time code by email — so `RESEND_API_KEY` + `FRIENDO_EMAIL_FROM`
 > are required on a live network (without them, no one can receive a code).
@@ -166,6 +222,18 @@ Deploy.
    ```
 4. Upload an image in the site's admin and confirm the object appears in your **R2 bucket**
    (first real R2 smoke). Confirm the admin SPA loads and the site serves over HTTPS.
+5. **Custom domains (if configured):** with a domain you control,
+   ```sh
+   cd my-site && friendo domain add yourtest.com --network https://example.com
+   # add the CNAME it prints at your registrar, wait for it to resolve, then
+   friendo domain verify yourtest.com --network https://example.com
+   ```
+   `https://yourtest.com` should serve `demo` over HTTPS with a Cloudflare-issued
+   certificate. Before `verify`, the same URL shows a friendo page saying the domain isn't
+   live yet and listing the remaining steps — that's expected. A Traefik `404 page not found` or
+   `503 no available server` means the catch-all routers in section 3 are missing; a
+   Cloudflare 526 means the origin TLS mode note above applies. Finish with
+   `friendo domain remove yourtest.com` so the test hostname stops billing.
 
 Add another operator from the box: `docker exec <container> friendo network --root
 /data/network operator grant someone@example.com` — they then sign in passwordless with

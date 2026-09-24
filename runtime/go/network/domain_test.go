@@ -53,6 +53,7 @@ func TestUnverifiedDomainNeverRoutes(t *testing.T) {
 	d := NewDispatcher(reg, "localhost", 0)
 	defer d.Close()
 	d.SetDomainLookup(accounts.SiteForDomain)
+	d.SetDomainStatus(accounts.GetDomain)
 
 	get := func(host string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", "http://"+host+"/", nil)
@@ -65,10 +66,9 @@ func TestUnverifiedDomainNeverRoutes(t *testing.T) {
 	if _, err := accounts.AddDomain("zeta-example.com", "zeta"); err != nil {
 		t.Fatalf("AddDomain: %v", err)
 	}
-	// Unverified: falls through to the apex listing, never to the tenant.
-	body := get("zeta-example.com").Body.String()
-	if strings.Contains(body, "Zeta") && !strings.Contains(body, "friendo network") {
-		t.Errorf("an unverified domain served the tenant:\n%s", body)
+	// Unverified: the "not live yet" page, never the tenant.
+	if rec := get("zeta-example.com"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "isn't live yet") {
+		t.Errorf("unverified domain = %d, want the not-live-yet page:\n%s", rec.Code, rec.Body.String())
 	}
 
 	// Verified: routes like a subdomain.
@@ -89,8 +89,74 @@ func TestUnverifiedDomainNeverRoutes(t *testing.T) {
 		t.Fatalf("RemoveDomain: %v", err)
 	}
 	d.ForgetDomain("zeta-example.com")
-	if body := get("zeta-example.com").Body.String(); !strings.Contains(body, "friendo network") {
-		t.Errorf("a disconnected domain still served the tenant:\n%s", body)
+	if rec := get("zeta-example.com"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "Nothing is connected") {
+		t.Errorf("a disconnected domain still served the tenant: %d\n%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUnknownHostExplainsItself — a domain that points here but doesn't serve a
+// site gets a page that says which state it's in and what to do, instead of the
+// operator console. The person reading it is usually the tenant, mid-setup.
+func TestUnknownHostExplainsItself(t *testing.T) {
+	root := t.TempDir()
+	reg, err := NewRegistry(root)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	if _, err := reg.Provision("zeta", "Zeta"); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	accounts := mustAccounts(t, root)
+	d := NewDispatcher(reg, "localhost", 0)
+	defer d.Close()
+	d.SetDomainLookup(accounts.SiteForDomain)
+	d.SetDomainStatus(accounts.GetDomain)
+
+	get := func(host string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "http://"+host+"/", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		d.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Never connected: a 404 that says how to connect it.
+	rec := get("nobody.example.com")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown domain = %d, want 404", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "Nothing is connected to nobody.example.com") ||
+		!strings.Contains(body, "friendo domain add nobody.example.com") {
+		t.Errorf("unknown-domain page doesn't say what to do:\n%s", body)
+	}
+	if got := rec.Header().Get("X-Robots-Tag"); got != "noindex" {
+		t.Errorf("X-Robots-Tag = %q, want noindex", got)
+	}
+
+	// Added but not verified: a 404 that names the site and says to verify.
+	if _, err := accounts.AddDomain("zeta-example.com", "zeta"); err != nil {
+		t.Fatalf("AddDomain: %v", err)
+	}
+	rec = get("zeta-example.com")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("pending domain = %d, want 404", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "zeta-example.com isn't live yet") ||
+		!strings.Contains(body, "friendo domain verify zeta-example.com") ||
+		!strings.Contains(body, "zeta.localhost") {
+		t.Errorf("pending-domain page doesn't say what to do:\n%s", body)
+	}
+
+	// Hosts that can't be anyone's domain still reach the apex: health checks
+	// and local curls come in on an IP or a bare name.
+	for _, host := range []string{"127.0.0.1", "127.0.0.1:3000", "friendo-container", "[::1]:3000"} {
+		if rec := get(host); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "friendo network") {
+			t.Errorf("%s = %d, want the apex", host, rec.Code)
+		}
+	}
+	// And an unknown *subdomain* keeps the plain 404 it always had.
+	if rec := get("nope.localhost"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "No site at nope.localhost") {
+		t.Errorf("unknown subdomain = %d %q, want the plain 404", rec.Code, rec.Body.String())
 	}
 }
 

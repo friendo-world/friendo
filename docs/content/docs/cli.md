@@ -123,7 +123,9 @@ commands, not the operator's — they run against the network with your own sign
 Adding a domain changes nothing on its own. Your site keeps serving at its network
 address the whole time, and the new domain starts working only once you've added
 the records and verified it — an unverified domain never serves traffic, which is
-what stops someone claiming a domain that isn't theirs.
+what stops someone claiming a domain that isn't theirs. Until then, anyone visiting the
+domain sees a short page saying it isn't live yet and listing the remaining steps, so
+you can check on it from a browser as well as with `friendo domain list`.
 
 ## Config & auth
 

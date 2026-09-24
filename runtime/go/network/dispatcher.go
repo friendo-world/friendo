@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -47,6 +48,10 @@ type Dispatcher struct {
 	// is not a pure string operation, so results are cached (see resolveDomain)
 	// rather than hitting the store on every request.
 	domainLookup func(host string) (string, bool)
+	// domainStatus tells an added-but-unverified domain apart from one nobody
+	// has connected, so the page an unrouted host sees can say which. Optional;
+	// it never affects routing (see SetDomainStatus).
+	domainStatus func(host string) (Domain, bool)
 	domainMu     sync.Mutex
 	domainCache  map[string]domainEntry
 }
@@ -55,9 +60,10 @@ type Dispatcher struct {
 // unknown host is the common case for stray internet traffic, and re-asking the
 // store for every hit of it is the thing worth avoiding.
 type domainEntry struct {
-	sub   string
-	found bool
-	at    time.Time
+	sub     string
+	found   bool // verified: route to sub
+	pending bool // claimed for sub, not yet verified
+	at      time.Time
 }
 
 // domainCacheTTL bounds how stale a routing answer can be. A domain that is
@@ -103,19 +109,34 @@ func (d *Dispatcher) SetSuspendedCheck(fn func(string) (Suspension, bool)) { d.s
 // Without it, a host outside the base domain falls through to the apex as before.
 func (d *Dispatcher) SetDomainLookup(fn func(string) (string, bool)) { d.domainLookup = fn }
 
-// resolveDomain answers host→site through a short-lived cache.
-func (d *Dispatcher) resolveDomain(host string) (string, bool) {
+// SetDomainStatus lets the dispatcher tell a domain that's been added but not
+// yet verified apart from one nobody has connected — normally Accounts.GetDomain.
+// It only shapes the page an unrouted host sees (serveNotConnected); routing
+// itself still goes through the verified-only lookup. Optional: without it every
+// unrouted host gets the generic "not connected" page.
+func (d *Dispatcher) SetDomainStatus(fn func(string) (Domain, bool)) { d.domainStatus = fn }
+
+// resolveDomain answers host→site through a short-lived cache. verified means
+// route to sub; pending means the domain is claimed for sub but not yet proven,
+// so the visitor can be told to finish setting it up. Positive, pending and
+// negative answers are all cached alike.
+func (d *Dispatcher) resolveDomain(host string) (sub string, verified, pending bool) {
 	d.domainMu.Lock()
 	defer d.domainMu.Unlock()
 	if e, ok := d.domainCache[host]; ok && time.Since(e.at) < domainCacheTTL {
-		return e.sub, e.found
+		return e.sub, e.found, e.pending
 	}
-	sub, found := d.domainLookup(host)
+	sub, verified = d.domainLookup(host)
+	if !verified && d.domainStatus != nil {
+		if dom, ok := d.domainStatus(host); ok && !dom.Verified {
+			sub, pending = dom.Subdomain, true
+		}
+	}
 	if d.domainCache == nil || len(d.domainCache) >= maxDomainCache {
 		d.domainCache = map[string]domainEntry{}
 	}
-	d.domainCache[host] = domainEntry{sub: sub, found: found, at: time.Now()}
-	return sub, found
+	d.domainCache[host] = domainEntry{sub: sub, found: verified, pending: pending, at: time.Now()}
+	return sub, verified, pending
 }
 
 // ForgetDomain drops a cached routing answer so a change lands at once instead
@@ -130,11 +151,19 @@ func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sub := d.subdomain(r.Host)
 	// Not under the base domain — it may be a tenant's own domain. Only verified
 	// ones resolve, so an unverified claim can never take someone else's traffic.
+	// Any other real-looking hostname gets a page saying so (serveNotConnected)
+	// rather than the operator console: the person looking is almost always the
+	// tenant, mid-setup, checking whether it works yet. A bare IP or single-label
+	// host (health checks, `curl localhost`) can't be anyone's domain and still
+	// reaches the apex.
 	if sub == "" && d.domainLookup != nil {
-		if host := hostOnly(r.Host); host != "" && host != d.baseDomain {
-			if s, ok := d.resolveDomain(host); ok {
-				sub = s
+		if host := hostOnly(r.Host); host != "" && host != d.baseDomain && !literalHost(host) {
+			s, verified, pending := d.resolveDomain(host)
+			if !verified {
+				d.serveNotConnected(w, host, s, pending)
+				return
 			}
+			sub = s
 		}
 	}
 	if sub == "" {
@@ -182,7 +211,7 @@ func (d *Dispatcher) subdomain(host string) string {
 	}
 	suffix := "." + d.baseDomain
 	if !strings.HasSuffix(host, suffix) {
-		return "" // unknown host — treat as apex rather than guess a tenant
+		return "" // not under the base domain — ServeHTTP decides what it is
 	}
 	label := strings.TrimSuffix(host, suffix)
 	if i := strings.IndexByte(label, '.'); i >= 0 {
@@ -198,6 +227,16 @@ func hostOnly(host string) string {
 		host = host[:i]
 	}
 	return host
+}
+
+// literalHost reports a host that can't be anyone's custom domain: an IP
+// address, or a single label like "localhost" or a container name. Those come
+// from health checks and local curls, and belong on the apex.
+func literalHost(host string) bool {
+	if net.ParseIP(strings.Trim(host, "[]")) != nil {
+		return true
+	}
+	return !strings.Contains(host, ".")
 }
 
 // siteHandler returns the cached handler for a site, building it (open DB +
@@ -334,6 +373,43 @@ func (d *Dispatcher) serveHold(w http.ResponseWriter, r *http.Request, sub strin
 		fmt.Fprintf(w, `<p>Reason: %s</p>`, html.EscapeString(s.Reason))
 	}
 	fmt.Fprint(w, `<p class="muted">Nothing has been deleted. If this is your site, contact the operator to have it put back.</p>`)
+}
+
+// serveNotConnected is what a visitor sees at a domain that points here but
+// doesn't serve a site. Most often that visitor is the tenant themself, checking
+// whether their domain works yet — so rather than landing them on the operator
+// console (a login page, on their own domain, with no hint why), it says which
+// of the two states the domain is in and exactly what to do next. It's a 404
+// because nothing lives here yet, and noindex so a half-set-up domain never
+// gets crawled as one.
+func (d *Dispatcher) serveNotConnected(w http.ResponseWriter, host, sub string, pending bool) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Robots-Tag", "noindex")
+	w.WriteHeader(http.StatusNotFound)
+	h := html.EscapeString(host)
+	fmt.Fprint(w, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`+
+		`<title>Domain not connected</title>`+
+		`<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;line-height:1.5;color:#111}`+
+		`h1{font-size:1.3rem;margin-bottom:.4rem}.muted{color:#6b7280}`+
+		`code{background:#f3f4f6;padding:.1rem .3rem;border-radius:.2rem}ol{padding-left:1.2rem}li{margin:.3rem 0}</style>`)
+	if pending {
+		site := html.EscapeString(sub + "." + d.baseDomain)
+		fmt.Fprintf(w, `<h1>%s isn't live yet</h1>`+
+			`<p>This domain is connected to <a href="//%s/">%s</a> but hasn't been verified, so it isn't serving anything yet.</p>`+
+			`<p>If this is your domain, finish connecting it:</p><ol>`+
+			`<li>Add the DNS records that <code>friendo domain add %s</code> printed (run it again to see them).</li>`+
+			`<li>Wait for DNS to travel — a few minutes, occasionally a few hours.</li>`+
+			`<li>Run <code>friendo domain verify %s</code>.</li></ol>`+
+			`<p class="muted">Until then your site is still at <a href="//%s/">%s</a>.</p>`,
+			h, site, site, h, h, site, site)
+		return
+	}
+	fmt.Fprintf(w, `<h1>Nothing is connected to %s</h1>`+
+		`<p>This address points at a friendo network, but no site here has claimed it.</p>`+
+		`<p>If this is your domain and you want it to serve your friendo site, run this from your site's folder and follow the steps it prints:</p>`+
+		`<p><code>friendo domain add %s</code></p>`+
+		`<p class="muted">Not expecting this page? The domain's DNS points at this server, but nobody has connected it — check with whoever manages the domain.</p>`,
+		h, h)
 }
 
 // serveApex renders the operator view: a minimal listing of the network's sites.

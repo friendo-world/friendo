@@ -104,10 +104,12 @@ Manage a network you run on this box with --root, or a remote network with
 			// destroyed site stops serving at once.
 			console := network.NewConsole(reg, accounts, baseDomain)
 			console.SetDestroyer(d.DestroySite)
-			// A suspended site serves a hold page instead of the tenant, and a
-			// verified custom domain routes to its site like a subdomain would.
+			// A suspended site serves a hold page instead of the tenant; a verified
+			// custom domain routes to its site like a subdomain would; a domain
+			// that's added but not yet verified gets a page saying how to finish.
 			d.SetSuspendedCheck(accounts.SiteSuspension)
 			d.SetDomainLookup(accounts.SiteForDomain)
+			d.SetDomainStatus(accounts.GetDomain)
 
 			aa := network.NewAccountAuth(accounts, reg, baseDomain)
 			// Cloudflare for SaaS when it's configured — it validates ownership and

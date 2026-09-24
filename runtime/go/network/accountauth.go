@@ -296,6 +296,11 @@ func (aa *AccountAuth) addDomain(w http.ResponseWriter, r *http.Request) {
 	if instructions.ProviderID != "" {
 		aa.accounts.SetDomainProviderID(d.Domain, instructions.ProviderID)
 	}
+	// Drop any cached "nobody has connected this" answer, so the domain's page
+	// says "finish setting it up" straight away rather than after the TTL.
+	if aa.domainChanged != nil {
+		aa.domainChanged(d.Domain)
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"domain":       d.Domain,
 		"site":         d.Subdomain,
