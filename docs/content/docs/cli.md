@@ -82,10 +82,48 @@ subdomain. These need the **operator** capability on your account.
 | `friendo network sites` | List the sites on the network |
 | `friendo network provision <sub>` | Create a new site |
 | `friendo network deploy <sub>` | Provision + push the current folder in one step |
+| `friendo network sites suspend <sub>` | Show visitors a hold notice instead of the site (`--reason`) |
+| `friendo network sites resume <sub>` | Put a site on hold back on the air |
 | `friendo network destroy <sub>` | Delete a site and all its data (`--yes` to confirm) |
-| `friendo network invite <email>` | Pre-create an account so it can sign in |
+| `friendo network accounts` | List accounts with their role, sites, and status |
+| `friendo network accounts suspend <email>` | Block an account from signing in or creating sites (`--reason`) |
+| `friendo network accounts resume <email>` | Let a suspended account back in |
+| `friendo network accounts signout <email>` | Sign an account out of every device |
+| `friendo network invite <email>` | Invite someone (`--days`, default 14) |
+| `friendo network invites` | List outstanding invites (`revoke <email>`, `prune`) |
+| `friendo network quota` | Show or set how many sites an account can create |
 | `friendo network signups <open\|invite>` | Set who may create an account |
 | `friendo network operator grant <email>` | Grant an account the operator capability |
+| `friendo network operator revoke <email>` | Remove the operator capability |
+
+### Limits and levers
+
+Every account can create a limited number of sites — **3** by default, so opening
+signups can't cost you without bound. Raise it for everyone with
+`friendo network quota --default 10`, or for one person with
+`friendo network quota ada@example.com 25`. Operators are never limited. Someone
+who hits the cap is told what the limit is and that an operator can lift it.
+
+**Suspending** is the reversible alternative to `destroy`. Suspending an *account*
+blocks sign-in, new sites, and any session it already holds; suspending a *site*
+serves visitors a hold page. Neither deletes anything. Operators can't be
+suspended — demote them first with `operator revoke`.
+
+### `friendo domain …`
+Use your own domain for a site instead of its network address. These are **your**
+commands, not the operator's — they run against the network with your own sign-in.
+
+| Command | What |
+|---|---|
+| `friendo domain add <domain>` | Connect a domain and print the DNS records to add (`--site`) |
+| `friendo domain verify <domain>` | Check the records are in place and go live |
+| `friendo domain list` | Your domains and whether each is live |
+| `friendo domain remove <domain>` | Disconnect it (the site keeps its network address) |
+
+Adding a domain changes nothing on its own. Your site keeps serving at its network
+address the whole time, and the new domain starts working only once you've added
+the records and verified it — an unverified domain never serves traffic, which is
+what stops someone claiming a domain that isn't theirs.
 
 ## Config & auth
 

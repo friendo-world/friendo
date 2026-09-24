@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/friendo-world/friendo/runtime/go/content"
 	"github.com/friendo-world/friendo/runtime/go/data"
@@ -35,7 +36,39 @@ type Dispatcher struct {
 	// apexHandler serves the bare base domain (the operator console). When nil,
 	// the apex falls back to a minimal site listing (serveApex).
 	apexHandler http.Handler
+
+	// suspended reports whether a site is on hold, and why. Set by the running
+	// network (see SetSuspendedCheck); nil means nothing is suspended, which
+	// keeps the dispatcher independent of the accounts store.
+	suspended func(sub string) (Suspension, bool)
+
+	// domainLookup resolves a *verified* custom hostname to a site — the fallback
+	// when a request host isn't under baseDomain. This is the first time routing
+	// is not a pure string operation, so results are cached (see resolveDomain)
+	// rather than hitting the store on every request.
+	domainLookup func(host string) (string, bool)
+	domainMu     sync.Mutex
+	domainCache  map[string]domainEntry
 }
+
+// domainEntry is one cached host→site answer, including the negative one — an
+// unknown host is the common case for stray internet traffic, and re-asking the
+// store for every hit of it is the thing worth avoiding.
+type domainEntry struct {
+	sub   string
+	found bool
+	at    time.Time
+}
+
+// domainCacheTTL bounds how stale a routing answer can be. A domain that is
+// removed or unverified keeps routing for at most this long, which is the price
+// of not querying per request.
+const domainCacheTTL = 30 * time.Second
+
+// maxDomainCache caps the cache. Past it the map is dropped wholesale rather
+// than evicted one by one — it refills in a few requests and the bookkeeping
+// isn't worth it at this size.
+const maxDomainCache = 1024
 
 type siteHandler struct {
 	handler http.Handler
@@ -60,8 +93,50 @@ func NewDispatcher(reg *Registry, baseDomain string, maxCached int) *Dispatcher 
 // HandleApex sets the handler for the bare base domain — the operator console.
 func (d *Dispatcher) HandleApex(h http.Handler) { d.apexHandler = h }
 
+// SetSuspendedCheck tells the dispatcher how to spot a suspended site — normally
+// Accounts.SiteSuspension. A suspended site serves a hold page instead of the
+// tenant, without its data being touched or its handler evicted.
+func (d *Dispatcher) SetSuspendedCheck(fn func(string) (Suspension, bool)) { d.suspended = fn }
+
+// SetDomainLookup tells the dispatcher how to resolve a custom hostname —
+// normally Accounts.SiteForDomain, which only answers for verified domains.
+// Without it, a host outside the base domain falls through to the apex as before.
+func (d *Dispatcher) SetDomainLookup(fn func(string) (string, bool)) { d.domainLookup = fn }
+
+// resolveDomain answers host→site through a short-lived cache.
+func (d *Dispatcher) resolveDomain(host string) (string, bool) {
+	d.domainMu.Lock()
+	defer d.domainMu.Unlock()
+	if e, ok := d.domainCache[host]; ok && time.Since(e.at) < domainCacheTTL {
+		return e.sub, e.found
+	}
+	sub, found := d.domainLookup(host)
+	if d.domainCache == nil || len(d.domainCache) >= maxDomainCache {
+		d.domainCache = map[string]domainEntry{}
+	}
+	d.domainCache[host] = domainEntry{sub: sub, found: found, at: time.Now()}
+	return sub, found
+}
+
+// ForgetDomain drops a cached routing answer so a change lands at once instead
+// of after the TTL — used when a domain is disconnected or newly verified.
+func (d *Dispatcher) ForgetDomain(host string) {
+	d.domainMu.Lock()
+	defer d.domainMu.Unlock()
+	delete(d.domainCache, strings.ToLower(strings.TrimSpace(host)))
+}
+
 func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sub := d.subdomain(r.Host)
+	// Not under the base domain — it may be a tenant's own domain. Only verified
+	// ones resolve, so an unverified claim can never take someone else's traffic.
+	if sub == "" && d.domainLookup != nil {
+		if host := hostOnly(r.Host); host != "" && host != d.baseDomain {
+			if s, ok := d.resolveDomain(host); ok {
+				sub = s
+			}
+		}
+	}
 	if sub == "" {
 		if d.apexHandler != nil {
 			d.apexHandler.ServeHTTP(w, r)
@@ -69,6 +144,15 @@ func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		d.serveApex(w, r)
 		return
+	}
+
+	// A suspended site never reaches its handler — checked before the cache so
+	// resuming and suspending both take effect on the next request.
+	if d.suspended != nil {
+		if s, held := d.suspended(sub); held {
+			d.serveHold(w, r, sub, s)
+			return
+		}
 	}
 
 	handler, err := d.siteHandler(sub)
@@ -92,10 +176,7 @@ func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // subdomain extracts the tenant label from a request host. Returns "" for the
 // bare base domain (the apex/operator view) or any host that isn't under it.
 func (d *Dispatcher) subdomain(host string) string {
-	host = strings.ToLower(host)
-	if i := strings.IndexByte(host, ':'); i >= 0 {
-		host = host[:i] // strip any :port
-	}
+	host = hostOnly(host)
 	if host == "" || host == d.baseDomain {
 		return ""
 	}
@@ -108,6 +189,15 @@ func (d *Dispatcher) subdomain(host string) string {
 		label = label[:i] // left-most label only
 	}
 	return label
+}
+
+// hostOnly lowercases a request host and strips any :port.
+func hostOnly(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	return host
 }
 
 // siteHandler returns the cached handler for a site, building it (open DB +
@@ -221,6 +311,29 @@ func (d *Dispatcher) ListenAndServe(port int) error {
 	log.Printf("  apex / operator view:  http://%s%s/", d.baseDomain, addr)
 	log.Printf("  a site:                http://<subdomain>.%s%s/", d.baseDomain, addr)
 	return http.ListenAndServe(addr, d)
+}
+
+// serveHold is what a visitor sees at a suspended site: an explanation, not a
+// 404 (the site exists) and not a 503 (nothing is going to fix itself).
+func (d *Dispatcher) serveHold(w http.ResponseWriter, r *http.Request, sub string, s Suspension) {
+	// Name the address the visitor actually typed. Reached through a tenant's own
+	// domain, "zeta.friendo.world" would mean nothing to them.
+	shown := hostOnly(r.Host)
+	if shown == "" {
+		shown = sub + "." + d.baseDomain
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><title>Site on hold</title>`+
+		`<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;line-height:1.5;color:#111}`+
+		`h1{font-size:1.3rem;margin-bottom:.4rem}.muted{color:#6b7280}</style>`+
+		`<h1>This site is on hold</h1>`+
+		`<p><strong>%s</strong> has been paused by the operator of this network.</p>`,
+		html.EscapeString(shown))
+	if s.Reason != "" {
+		fmt.Fprintf(w, `<p>Reason: %s</p>`, html.EscapeString(s.Reason))
+	}
+	fmt.Fprint(w, `<p class="muted">Nothing has been deleted. If this is your site, contact the operator to have it put back.</p>`)
 }
 
 // serveApex renders the operator view: a minimal listing of the network's sites.

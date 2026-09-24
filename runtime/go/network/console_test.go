@@ -347,3 +347,180 @@ func TestConsoleSignupsAndInvite(t *testing.T) {
 		t.Error("unauthenticated request changed the signup policy")
 	}
 }
+
+// TestConsoleQuota drives the operator UI for site limits: the network-wide
+// default, a per-account override, and clearing it back to the default.
+func TestConsoleQuota(t *testing.T) {
+	root := t.TempDir()
+	reg, err := NewRegistry(root)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	accounts := mustAccounts(t, root)
+	c := NewConsole(reg, accounts, "localhost")
+	ck := operatorCookieFor(t, accounts, "op@example.com")
+
+	// Someone to limit, with a site so usage is non-zero.
+	alice, err := accounts.EnsureAccount("alice@example.com")
+	if err != nil {
+		t.Fatalf("EnsureAccount: %v", err)
+	}
+	if err := accounts.SetSiteOwner("alice-site", alice); err != nil {
+		t.Fatalf("SetSiteOwner: %v", err)
+	}
+
+	// Set the network-wide default.
+	if rec := do(t, c, "POST", "http://localhost/quota", url.Values{"sites": {"5"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /quota = %d, want 303", rec.Code)
+	}
+	if got := accounts.DefaultSiteQuota(); got != 5 {
+		t.Errorf("default quota = %d, want 5", got)
+	}
+
+	// The dashboard shows the limit and what alice has used against it.
+	body := do(t, c, "GET", "http://localhost/", nil, ck).Body.String()
+	if !strings.Contains(body, "1 of 5") {
+		t.Errorf("dashboard should show alice at 1 of 5:\n%s", body)
+	}
+
+	// Override just alice, leaving the default alone.
+	if rec := do(t, c, "POST", "http://localhost/accounts/"+alice+"/quota",
+		url.Values{"sites": {"20"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST account quota = %d, want 303", rec.Code)
+	}
+	if n, ok := accounts.AccountSiteQuota(alice); !ok || n != 20 {
+		t.Errorf("alice override = %d, %v; want 20", n, ok)
+	}
+	if got := accounts.DefaultSiteQuota(); got != 5 {
+		t.Errorf("an override changed the default to %d", got)
+	}
+
+	// An empty value clears the override.
+	if rec := do(t, c, "POST", "http://localhost/accounts/"+alice+"/quota",
+		url.Values{"sites": {""}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("clearing the override = %d, want 303", rec.Code)
+	}
+	if _, ok := accounts.AccountSiteQuota(alice); ok {
+		t.Error("override survived being cleared")
+	}
+
+	// "unlimited" is accepted in the form, and a bad value is reported, not stored.
+	if rec := do(t, c, "POST", "http://localhost/quota", url.Values{"sites": {"unlimited"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /quota unlimited = %d, want 303", rec.Code)
+	}
+	if got := accounts.DefaultSiteQuota(); got != QuotaUnlimited {
+		t.Errorf("default quota = %d, want unlimited (0)", got)
+	}
+	if rec := do(t, c, "POST", "http://localhost/quota", url.Values{"sites": {"heaps"}}, ck); rec.Code != http.StatusOK {
+		t.Errorf("bad quota value = %d, want the dashboard re-rendered with an error", rec.Code)
+	}
+
+	// Unauthenticated changes are rejected.
+	if rec := do(t, c, "POST", "http://localhost/quota", url.Values{"sites": {"99"}}, nil); rec.Code != http.StatusSeeOther {
+		t.Errorf("unauth POST /quota = %d, want 303 redirect", rec.Code)
+	}
+	if got := accounts.DefaultSiteQuota(); got != QuotaUnlimited {
+		t.Error("unauthenticated request changed the default quota")
+	}
+}
+
+// TestConsoleSuspendAndInvites drives the operator UI for the levers that exist
+// for when something goes wrong: hold a site, suspend a person, sign them out,
+// and manage outstanding invites.
+func TestConsoleSuspendAndInvites(t *testing.T) {
+	root := t.TempDir()
+	reg, err := NewRegistry(root)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	if _, err := reg.Provision("zeta", "Zeta"); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	accounts := mustAccounts(t, root)
+	c := NewConsole(reg, accounts, "localhost")
+	ck := operatorCookieFor(t, accounts, "op@example.com")
+
+	alice, err := accounts.EnsureAccount("alice@example.com")
+	if err != nil {
+		t.Fatalf("EnsureAccount: %v", err)
+	}
+	if _, err := accounts.StartSession(alice); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	// Put a site on hold, with a reason, and take it back off.
+	if rec := do(t, c, "POST", "http://localhost/sites/zeta/suspend",
+		url.Values{"reason": {"spam"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("suspend site = %d, want 303", rec.Code)
+	}
+	held, ok := accounts.SiteSuspension("zeta")
+	if !ok || held.Reason != "spam" {
+		t.Fatalf("SiteSuspension = %+v, %v", held, ok)
+	}
+	if body := do(t, c, "GET", "http://localhost/", nil, ck).Body.String(); !strings.Contains(body, "on hold") {
+		t.Errorf("dashboard should show zeta on hold:\n%s", body)
+	}
+	if rec := do(t, c, "POST", "http://localhost/sites/zeta/resume", nil, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("resume site = %d, want 303", rec.Code)
+	}
+	if _, ok := accounts.SiteSuspension("zeta"); ok {
+		t.Error("site suspension survived resume")
+	}
+
+	// Suspend a person, then let them back in.
+	if rec := do(t, c, "POST", "http://localhost/accounts/"+alice+"/suspend",
+		url.Values{"reason": {"abuse"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("suspend account = %d, want 303", rec.Code)
+	}
+	if s, ok := accounts.AccountSuspension(alice); !ok || s.Reason != "abuse" {
+		t.Errorf("AccountSuspension = %+v, %v", s, ok)
+	}
+	if body := do(t, c, "GET", "http://localhost/", nil, ck).Body.String(); !strings.Contains(body, "suspended") {
+		t.Errorf("dashboard should show alice suspended:\n%s", body)
+	}
+	if rec := do(t, c, "POST", "http://localhost/accounts/"+alice+"/resume", nil, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("resume account = %d, want 303", rec.Code)
+	}
+	if _, ok := accounts.AccountSuspension(alice); ok {
+		t.Error("account suspension survived resume")
+	}
+
+	// Sign them out of everywhere.
+	if rec := do(t, c, "POST", "http://localhost/accounts/"+alice+"/signout", nil, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("signout = %d, want 303", rec.Code)
+	}
+
+	// Inviting mints an invite (not an account), and it can be revoked.
+	if rec := do(t, c, "POST", "http://localhost/invite",
+		url.Values{"email": {"ada@example.com"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("invite = %d, want 303", rec.Code)
+	}
+	if _, ok := accounts.ValidInvite("ada@example.com"); !ok {
+		t.Fatal("invite was not created")
+	}
+	if _, exists := accounts.GetByEmail("ada@example.com"); exists {
+		t.Error("inviting should not create the account until they sign in")
+	}
+	inv, _ := accounts.GetInvite("ada@example.com")
+	if inv.InvitedBy != "op@example.com" {
+		t.Errorf("InvitedBy = %q, want the signed-in operator", inv.InvitedBy)
+	}
+	if body := do(t, c, "GET", "http://localhost/", nil, ck).Body.String(); !strings.Contains(body, "ada@example.com") {
+		t.Errorf("dashboard should list the outstanding invite:\n%s", body)
+	}
+	if rec := do(t, c, "POST", "http://localhost/invites/revoke",
+		url.Values{"email": {"ada@example.com"}}, ck); rec.Code != http.StatusSeeOther {
+		t.Fatalf("revoke invite = %d, want 303", rec.Code)
+	}
+	if _, ok := accounts.GetInvite("ada@example.com"); ok {
+		t.Error("invite survived revocation")
+	}
+
+	// Unauthenticated suspension is rejected and changes nothing.
+	if rec := do(t, c, "POST", "http://localhost/sites/zeta/suspend", url.Values{}, nil); rec.Code != http.StatusSeeOther {
+		t.Errorf("unauth suspend = %d, want 303 redirect", rec.Code)
+	}
+	if _, ok := accounts.SiteSuspension("zeta"); ok {
+		t.Error("unauthenticated request suspended a site")
+	}
+}

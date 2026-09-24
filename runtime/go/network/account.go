@@ -66,6 +66,35 @@ CREATE TABLE IF NOT EXISTS site_owners (
 CREATE TABLE IF NOT EXISTS network_settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS account_quotas (
+  account_id TEXT PRIMARY KEY,
+  sites      INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS account_suspensions (
+  account_id TEXT PRIMARY KEY,
+  reason     TEXT NOT NULL DEFAULT '',
+  created    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS site_suspensions (
+  subdomain TEXT PRIMARY KEY,
+  reason    TEXT NOT NULL DEFAULT '',
+  created   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS site_domains (
+  domain      TEXT PRIMARY KEY,
+  subdomain   TEXT NOT NULL,
+  token       TEXT NOT NULL,
+  provider_id TEXT NOT NULL DEFAULT '',
+  verified    INTEGER NOT NULL DEFAULT 0,
+  created     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS site_domains_subdomain ON site_domains (subdomain);
+CREATE TABLE IF NOT EXISTS invites (
+  email      TEXT PRIMARY KEY,
+  expires_at TEXT NOT NULL,
+  created    TEXT NOT NULL,
+  invited_by TEXT NOT NULL DEFAULT ''
 );`
 
 // Account is a network account.
@@ -143,6 +172,23 @@ func (a *Accounts) Grant(email, capability string) error {
 	}
 	caps := append(acct.Capabilities, capability)
 	_, err = a.conn.Exec(`UPDATE accounts SET capabilities = ? WHERE id = ?`, strings.Join(caps, ","), id)
+	return err
+}
+
+// Revoke removes a capability from an account. The counterpart to Grant — an
+// operator has to be demoted before they can be suspended.
+func (a *Accounts) Revoke(email, capability string) error {
+	acct, ok := a.GetByEmail(email)
+	if !ok {
+		return fmt.Errorf("no account for %q", email)
+	}
+	var kept []string
+	for _, c := range acct.Capabilities {
+		if c != capability {
+			kept = append(kept, c)
+		}
+	}
+	_, err := a.conn.Exec(`UPDATE accounts SET capabilities = ? WHERE id = ?`, strings.Join(kept, ","), acct.ID)
 	return err
 }
 
@@ -257,13 +303,27 @@ func (a *Accounts) VerifyOTP(email, code string) (string, error) {
 			continue
 		}
 		if bcrypt.CompareHashAndPassword([]byte(c.hash), []byte(code)) == nil {
+			existing, exists := a.GetByEmail(email)
+			// A suspended account can't sign back in. The code was right; the
+			// account is the problem, and saying so is the only useful answer.
+			if exists {
+				if _, suspended := a.AccountSuspension(existing.ID); suspended {
+					return "", ErrAccountSuspended
+				}
+			}
 			// Signup gate: an unknown email can only create an account when signups
-			// are open (invite mode = an operator must pre-create/invite the account).
-			if _, exists := a.GetByEmail(email); !exists && a.Signups() == "invite" {
-				return "", ErrSignupsInviteOnly
+			// are open, or when an operator has invited it.
+			if !exists && a.Signups() == "invite" {
+				if _, invited := a.ValidInvite(email); !invited {
+					return "", ErrSignupsInviteOnly
+				}
 			}
 			a.conn.Exec(`DELETE FROM account_otp WHERE email = ?`, email) // codes are single-use
-			return a.EnsureAccount(email)
+			id, err := a.EnsureAccount(email)
+			if err == nil && !exists {
+				a.conn.Exec(`DELETE FROM invites WHERE email = ?`, email) // the invite has done its job
+			}
+			return id, err
 		}
 	}
 	return "", fmt.Errorf("invalid or expired code")
@@ -305,8 +365,23 @@ func (a *Accounts) AnyOperator() (bool, error) {
 	return false, nil
 }
 
-// ValidateSession returns the account for a valid, unexpired token.
+// ValidateSession returns the account for a valid, unexpired token. A suspended
+// account is rejected here rather than at each call site, so suspension takes
+// effect everywhere at once — including sessions issued before it.
 func (a *Accounts) ValidateSession(token string) (*Account, bool) {
+	acct, ok := a.sessionAccount(token)
+	if !ok {
+		return nil, false
+	}
+	if _, suspended := a.AccountSuspension(acct.ID); suspended {
+		return nil, false
+	}
+	return acct, true
+}
+
+// sessionAccount resolves a token to its account without the suspension check.
+// Only for telling "suspended" apart from "expired" when reporting an error.
+func (a *Accounts) sessionAccount(token string) (*Account, bool) {
 	if token == "" {
 		return nil, false
 	}

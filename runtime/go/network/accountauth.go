@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -22,6 +23,14 @@ type AccountAuth struct {
 	reg      *Registry
 	base     string
 	tpl      *template.Template
+
+	// domains is how a custom domain proves itself and gets a certificate.
+	// Defaults to the self-hosted DNS check; friendo.world sets Cloudflare.
+	domains DomainProvider
+
+	// domainChanged, when set, is called after a domain starts or stops routing
+	// so the dispatcher can drop its cached answer instead of waiting out the TTL.
+	domainChanged func(host string)
 }
 
 // NewAccountAuth builds the identity + self-service handlers.
@@ -32,6 +41,21 @@ func NewAccountAuth(accounts *Accounts, reg *Registry, baseDomain string) *Accou
 		base:     strings.ToLower(strings.TrimSpace(baseDomain)),
 		tpl:      template.Must(template.New("activate").Parse(activateTemplates)),
 	}
+}
+
+// SetDomainProvider chooses how custom domains are verified and certificated.
+func (aa *AccountAuth) SetDomainProvider(p DomainProvider) { aa.domains = p }
+
+// SetDomainChangedHook registers a callback for when a domain's routing changes.
+func (aa *AccountAuth) SetDomainChangedHook(fn func(host string)) { aa.domainChanged = fn }
+
+// domainProvider returns the configured provider, defaulting to the DNS check so
+// a self-hosted network works with no configuration at all.
+func (aa *AccountAuth) domainProvider() DomainProvider {
+	if aa.domains == nil {
+		aa.domains = &DNSProvider{BaseDomain: aa.base}
+	}
+	return aa.domains
 }
 
 // register mounts the identity + self-service routes on a mux.
@@ -45,6 +69,11 @@ func (aa *AccountAuth) register(m *http.ServeMux) {
 	m.HandleFunc("POST /api/account/sites", aa.createSite)
 	m.HandleFunc("GET /api/account/sites", aa.listSites)
 	m.HandleFunc("POST /api/sso/exchange", aa.ssoExchange)
+	// Custom domains, for a site the account owns.
+	m.HandleFunc("POST /api/account/domains", aa.addDomain)
+	m.HandleFunc("GET /api/account/domains", aa.listDomains)
+	m.HandleFunc("POST /api/account/domains/verify", aa.verifyDomain)
+	m.HandleFunc("DELETE /api/account/domains", aa.removeDomain)
 }
 
 // ApexRouter combines the identity endpoints with the operator console into one
@@ -99,10 +128,25 @@ func (aa *AccountAuth) devicePoll(w http.ResponseWriter, r *http.Request) {
 func (aa *AccountAuth) whoami(w http.ResponseWriter, r *http.Request) {
 	acct, ok := aa.accountFromBearer(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		aa.deny(w, r)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"email": acct.Email, "capabilities": acct.Capabilities})
+}
+
+// deny explains a rejected token. A suspended account gets a 403 saying so —
+// otherwise the same bare 401 would send someone off to re-run `friendo login`
+// over and over against a network that will never let them back in.
+func (aa *AccountAuth) deny(w http.ResponseWriter, r *http.Request) {
+	h := r.Header.Get("Authorization")
+	if strings.HasPrefix(h, "Bearer ") {
+		token := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+		if s, suspended := aa.accounts.SuspensionForSession(token); suspended {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": SuspensionMessage(s)})
+			return
+		}
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 }
 
 func (aa *AccountAuth) accountFromBearer(r *http.Request) (*Account, bool) {
@@ -120,7 +164,7 @@ func (aa *AccountAuth) accountFromBearer(r *http.Request) (*Account, bool) {
 func (aa *AccountAuth) createSite(w http.ResponseWriter, r *http.Request) {
 	acct, ok := aa.accountFromBearer(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		aa.deny(w, r)
 		return
 	}
 	var body struct{ Subdomain, Name string }
@@ -148,6 +192,17 @@ func (aa *AccountAuth) createSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A brand-new site — check the account's quota before creating anything.
+	// Operators are exempt; everyone else gets a message that names the limit.
+	if over, used, allowed := aa.accounts.AtSiteLimit(acct); over {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error":   SiteLimitMessage(used, allowed),
+			"used":    used,
+			"allowed": allowed,
+		})
+		return
+	}
+
 	site, err := aa.reg.Provision(sub, body.Name)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -167,7 +222,7 @@ func (aa *AccountAuth) createSite(w http.ResponseWriter, r *http.Request) {
 func (aa *AccountAuth) listSites(w http.ResponseWriter, r *http.Request) {
 	acct, ok := aa.accountFromBearer(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		aa.deny(w, r)
 		return
 	}
 	subs, err := aa.accounts.SitesOwnedBy(acct.ID)
@@ -175,7 +230,179 @@ func (aa *AccountAuth) listSites(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list sites"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sites": subs})
+	// The quota rides along so the CLI and console can show used / allowed
+	// *before* someone walks into the cap rather than only when they hit it.
+	used, allowed, _ := aa.accounts.SiteUsage(acct)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sites": subs,
+		"quota": map[string]any{"used": used, "allowed": allowed, "unlimited": allowed == QuotaUnlimited},
+	})
+}
+
+// --- custom domains ---
+
+// ownedSite resolves the subdomain in a request body and checks the account owns
+// it, writing the error itself when it doesn't.
+func (aa *AccountAuth) ownedSite(w http.ResponseWriter, acct *Account, sub string) bool {
+	sub = strings.ToLower(strings.TrimSpace(sub))
+	if owner, ok := aa.accounts.SiteOwner(sub); !ok || owner != acct.ID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you don't own that site"})
+		return false
+	}
+	return true
+}
+
+// addDomain connects a custom domain to one of the account's sites. It records
+// the domain unverified and hands back what the tenant has to do next — nothing
+// routes until they've done it.
+func (aa *AccountAuth) addDomain(w http.ResponseWriter, r *http.Request) {
+	acct, ok := aa.accountFromBearer(r)
+	if !ok {
+		aa.deny(w, r)
+		return
+	}
+	var body struct{ Domain, Subdomain string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	domain, err := NormalizeDomain(body.Domain)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	// The network's own domain is not a custom domain — that's what subdomains are.
+	if aa.base != "" && (domain == aa.base || strings.HasSuffix(domain, "."+aa.base)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("%s is already part of this network — custom domains are for a domain you own elsewhere", domain),
+		})
+		return
+	}
+	if !aa.ownedSite(w, acct, body.Subdomain) {
+		return
+	}
+
+	d, err := aa.accounts.AddDomain(domain, strings.ToLower(strings.TrimSpace(body.Subdomain)))
+	if err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	instructions, err := aa.domainProvider().Attach(d)
+	if err != nil {
+		// The record stays so the tenant can retry without losing their place.
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if instructions.ProviderID != "" {
+		aa.accounts.SetDomainProviderID(d.Domain, instructions.ProviderID)
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"domain":       d.Domain,
+		"site":         d.Subdomain,
+		"verified":     false,
+		"instructions": instructions,
+	})
+}
+
+// listDomains reports the custom domains on the account's sites.
+func (aa *AccountAuth) listDomains(w http.ResponseWriter, r *http.Request) {
+	acct, ok := aa.accountFromBearer(r)
+	if !ok {
+		aa.deny(w, r)
+		return
+	}
+	subs, err := aa.accounts.SitesOwnedBy(acct.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list sites"})
+		return
+	}
+	if only := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("site"))); only != "" {
+		if !aa.ownedSite(w, acct, only) {
+			return
+		}
+		subs = []string{only}
+	}
+	out := []map[string]any{}
+	for _, sub := range subs {
+		list, err := aa.accounts.DomainsForSite(sub)
+		if err != nil {
+			continue
+		}
+		for _, d := range list {
+			out = append(out, map[string]any{
+				"domain": d.Domain, "site": d.Subdomain, "verified": d.Verified, "status": d.Status(),
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"domains": out})
+}
+
+// verifyDomain asks the provider whether the tenant's DNS is in place yet.
+func (aa *AccountAuth) verifyDomain(w http.ResponseWriter, r *http.Request) {
+	acct, ok := aa.accountFromBearer(r)
+	if !ok {
+		aa.deny(w, r)
+		return
+	}
+	var body struct{ Domain string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	d, found := aa.accounts.GetDomain(body.Domain)
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "that domain isn't connected to this network"})
+		return
+	}
+	if !aa.ownedSite(w, acct, d.Subdomain) {
+		return
+	}
+	if err := aa.accounts.VerifyDomain(d.Domain, aa.domainProvider()); err != nil {
+		// Not an error in the tenant's world — DNS just isn't there yet. 409 says
+		// "try again later" rather than "you did something wrong".
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "domain": d.Domain})
+		return
+	}
+	if aa.domainChanged != nil {
+		aa.domainChanged(d.Domain)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"domain": d.Domain, "site": d.Subdomain, "verified": true})
+}
+
+// removeDomain disconnects a custom domain. The site keeps serving at its
+// <subdomain>.<baseDomain> address.
+func (aa *AccountAuth) removeDomain(w http.ResponseWriter, r *http.Request) {
+	acct, ok := aa.accountFromBearer(r)
+	if !ok {
+		aa.deny(w, r)
+		return
+	}
+	var body struct{ Domain string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	d, found := aa.accounts.GetDomain(body.Domain)
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "that domain isn't connected to this network"})
+		return
+	}
+	if !aa.ownedSite(w, acct, d.Subdomain) {
+		return
+	}
+	// Release it at the provider first, but never let that failure strand the
+	// tenant — the record goes either way.
+	if err := aa.domainProvider().Detach(d); err != nil {
+		log.Printf("[network] releasing %s at the provider failed: %v", d.Domain, err)
+	}
+	if err := aa.accounts.RemoveDomain(d.Domain); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if aa.domainChanged != nil {
+		aa.domainChanged(d.Domain)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ssoExchange issues a site admin session (friendo_session) for a subdomain the
@@ -184,7 +411,7 @@ func (aa *AccountAuth) listSites(w http.ResponseWriter, r *http.Request) {
 func (aa *AccountAuth) ssoExchange(w http.ResponseWriter, r *http.Request) {
 	acct, ok := aa.accountFromBearer(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		aa.deny(w, r)
 		return
 	}
 	var body struct{ Subdomain string }

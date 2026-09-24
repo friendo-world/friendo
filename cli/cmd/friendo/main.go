@@ -254,7 +254,7 @@ claims the subdomain, and pushes your content.
 		},
 	}
 
-	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, pushCmd, pullCmd, loginCmd, whoamiCmd, logoutCmd, newNetworkCommand())
+	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, pushCmd, pullCmd, loginCmd, whoamiCmd, logoutCmd, newNetworkCommand(), newDomainCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

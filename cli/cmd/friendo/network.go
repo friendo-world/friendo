@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -103,7 +104,36 @@ Manage a network you run on this box with --root, or a remote network with
 			// destroyed site stops serving at once.
 			console := network.NewConsole(reg, accounts, baseDomain)
 			console.SetDestroyer(d.DestroySite)
-			d.HandleApex(network.ApexRouter(console, network.NewAccountAuth(accounts, reg, baseDomain)))
+			// A suspended site serves a hold page instead of the tenant, and a
+			// verified custom domain routes to its site like a subdomain would.
+			d.SetSuspendedCheck(accounts.SiteSuspension)
+			d.SetDomainLookup(accounts.SiteForDomain)
+
+			aa := network.NewAccountAuth(accounts, reg, baseDomain)
+			// Cloudflare for SaaS when it's configured — it validates ownership and
+			// issues/renews the certificate, so this process never handles TLS. A
+			// self-hosted network falls back to a TXT check it can do on its own.
+			if cf, ok := network.CloudflareFromEnv(baseDomain); ok {
+				aa.SetDomainProvider(cf)
+				console.SetDomainProvider(cf)
+				fmt.Printf("Custom domains: Cloudflare for SaaS — tenants CNAME to %s\n", cf.CNAMETarget)
+				// Point the zone's fallback origin at this network. Without it every
+				// custom hostname validates and then has nowhere to go, and it's a
+				// dashboard step that only ever gets skipped once.
+				if cf.FallbackOrigin == "" {
+					fmt.Fprintln(os.Stderr, "  ! FRIENDO_CF_FALLBACK_ORIGIN is not set — custom hostnames will have no origin "+
+						"to reach. Set it to a proxied record in the zone that points at this network.")
+				} else if msg, err := cf.EnsureFallbackOrigin(); err != nil {
+					fmt.Fprintf(os.Stderr, "  ! could not set the Cloudflare fallback origin: %v\n", err)
+				} else {
+					fmt.Printf("  %s\n", msg)
+				}
+			} else {
+				fmt.Println("Custom domains: DNS verification (set FRIENDO_CF_API_TOKEN + FRIENDO_CF_ZONE_ID for Cloudflare)")
+			}
+			aa.SetDomainChangedHook(d.ForgetDomain)
+			console.SetDomainChangedHook(d.ForgetDomain)
+			d.HandleApex(network.ApexRouter(console, aa))
 
 			// Designate the first operator from env (turnkey containers). Otherwise
 			// the first person to sign in at the apex console claims operator.
@@ -208,6 +238,38 @@ subdomain (as an operator) and then pushes your templates, assets, and content
 		},
 	}
 
+	// friendo network sites suspend/resume — take a site off the air without
+	// deleting it. The reversible counterpart to destroy.
+	var siteReason string
+	sitesSuspend := &cobra.Command{
+		Use:   "suspend <subdomain>",
+		Short: "Show visitors a hold notice instead of the site (reversible)",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			exitOnErr(accounts.SuspendSite(args[0], siteReason))
+			fmt.Printf("%q is on hold. Nothing was deleted — put it back with: "+
+				"friendo network sites resume %s\n", args[0], args[0])
+		},
+	}
+	sitesSuspend.Flags().StringVar(&siteReason, "reason", "", "Why — shown on the hold page")
+
+	sitesResume := &cobra.Command{
+		Use:   "resume <subdomain>",
+		Short: "Put a site on hold back on the air",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			exitOnErr(accounts.ResumeSite(args[0]))
+			fmt.Printf("%q is serving again.\n", args[0])
+		},
+	}
+	sites.AddCommand(sitesSuspend, sitesResume)
+
 	// friendo network destroy <subdomain>
 	var yes bool
 	destroy := &cobra.Command{
@@ -248,7 +310,19 @@ subdomain (as an operator) and then pushes your templates, assets, and content
 			fmt.Printf("Granted operator to %q — they sign in with 'friendo login'.\n", args[0])
 		},
 	}
-	operator.AddCommand(opGrant)
+	opRevoke := &cobra.Command{
+		Use:   "revoke <email>",
+		Short: "Remove the operator capability from an account",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			exitOnErr(accounts.Revoke(args[0], "operator"))
+			fmt.Printf("%q is no longer an operator — their account and sites are untouched.\n", args[0])
+		},
+	}
+	operator.AddCommand(opGrant, opRevoke)
 
 	// friendo network signups <open|invite> — set who may create an account.
 	signups := &cobra.Command{
@@ -264,24 +338,251 @@ subdomain (as an operator) and then pushes your templates, assets, and content
 		},
 	}
 
-	// friendo network invite <email> — pre-create an account so they can sign in
-	// even when signups are invite-only.
+	// friendo network invite <email> — mint an invite so they can sign in even
+	// when signups are invite-only. Invites expire, and can be revoked.
+	var inviteDays int
 	invite := &cobra.Command{
 		Use:   "invite <email>",
-		Short: "Invite someone by pre-creating their account",
+		Short: "Invite someone to the network",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			accounts, err := network.OpenAccounts(root)
 			exitOnErr(err)
 			defer accounts.Close()
-			if _, err := accounts.EnsureAccount(args[0]); err != nil {
-				exitOnErr(err)
+			ttl := time.Duration(inviteDays) * 24 * time.Hour
+			inv, err := accounts.CreateInvite(args[0], "", ttl)
+			exitOnErr(err)
+			fmt.Printf("Invited %s — they can sign in with 'friendo login' (expires %s).\n", inv.Email, inv.Expires())
+		},
+	}
+	invite.Flags().IntVar(&inviteDays, "days", 14, "How many days the invite stays good")
+
+	// friendo network invites — see what's outstanding, revoke, tidy up.
+	invites := &cobra.Command{
+		Use:   "invites",
+		Short: "List outstanding invites",
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			list, err := accounts.Invites()
+			exitOnErr(err)
+			if len(list) == 0 {
+				fmt.Println("No invites outstanding. Invite someone with: friendo network invite <email>")
+				return
 			}
-			fmt.Printf("Invited %q — they can now sign in with 'friendo login'.\n", args[0])
+			for _, inv := range list {
+				fmt.Printf("  %-32s %-8s %s\n", inv.Email, inv.Status(), inv.Expires())
+			}
+		},
+	}
+	invitesRevoke := &cobra.Command{
+		Use:   "revoke <email>",
+		Short: "Withdraw an invite",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			exitOnErr(accounts.RevokeInvite(args[0]))
+			fmt.Printf("Revoked the invite for %s.\n", args[0])
+		},
+	}
+	invitesPrune := &cobra.Command{
+		Use:   "prune",
+		Short: "Forget invites that have already expired",
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			n, err := accounts.PruneInvites()
+			exitOnErr(err)
+			fmt.Printf("Removed %d expired invite(s).\n", n)
+		},
+	}
+	invites.AddCommand(invitesRevoke, invitesPrune)
+
+	// friendo network accounts — who's on the network, and the levers for when
+	// something goes wrong: suspend, resume, and sign someone out everywhere.
+	accountsCmd := &cobra.Command{
+		Use:   "accounts",
+		Short: "List the accounts on the network",
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			list, err := accounts.List()
+			exitOnErr(err)
+			if len(list) == 0 {
+				fmt.Println("No accounts yet.")
+				return
+			}
+			held, _ := accounts.SuspendedAccounts()
+			for _, acct := range list {
+				role := "member"
+				if acct.Has("operator") {
+					role = "operator"
+				}
+				used, allowed, err := accounts.SiteUsage(acct)
+				if err != nil {
+					continue
+				}
+				status := "active"
+				if s, ok := held[acct.ID]; ok {
+					status = "SUSPENDED"
+					if s.Reason != "" {
+						status += " (" + s.Reason + ")"
+					}
+				}
+				fmt.Printf("  %-32s %-9s %d of %-10s %s\n",
+					acct.Email, role, used, network.FormatQuota(allowed), status)
+			}
 		},
 	}
 
-	cmd.AddCommand(serve, deployCmd, provision, sites, destroy, operator, signups, invite)
+	// byEmail resolves an account for the account subcommands, with guidance
+	// rather than a bare "not found".
+	byEmail := func(accounts *network.Accounts, email string) *network.Account {
+		acct, ok := accounts.GetByEmail(email)
+		if !ok {
+			exitOnErr(fmt.Errorf("no account for %q — see who exists with: friendo network accounts", email))
+		}
+		return acct
+	}
+
+	var suspendReason string
+	accountsSuspend := &cobra.Command{
+		Use:   "suspend <email>",
+		Short: "Block an account from signing in or creating sites (reversible)",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			acct := byEmail(accounts, args[0])
+			exitOnErr(accounts.SuspendAccount(acct.ID, suspendReason))
+			n, _ := accounts.RevokeSessions(acct.ID)
+			fmt.Printf("Suspended %s (%d session(s) ended). Their sites are untouched — "+
+				"put them on hold separately if you need to.\n", acct.Email, n)
+		},
+	}
+	accountsSuspend.Flags().StringVar(&suspendReason, "reason", "", "Why — shown to you, and to them when they try to sign in")
+
+	accountsResume := &cobra.Command{
+		Use:   "resume <email>",
+		Short: "Let a suspended account back in",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			acct := byEmail(accounts, args[0])
+			exitOnErr(accounts.ResumeAccount(acct.ID))
+			fmt.Printf("%s can sign in again.\n", acct.Email)
+		},
+	}
+
+	accountsSignout := &cobra.Command{
+		Use:   "signout <email>",
+		Short: "Sign an account out of every device (for a lost laptop)",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+			acct := byEmail(accounts, args[0])
+			n, err := accounts.RevokeSessions(acct.ID)
+			exitOnErr(err)
+			fmt.Printf("Ended %d session(s) for %s — they can sign in again with 'friendo login'.\n", n, acct.Email)
+		},
+	}
+	accountsCmd.AddCommand(accountsSuspend, accountsResume, accountsSignout)
+
+	// friendo network quota — how many sites one account may create. Without a
+	// cap, opening signups lets a single account claim subdomains without end.
+	var quotaDefault string
+	quota := &cobra.Command{
+		Use:   "quota [email] [limit]",
+		Short: "Show or set how many sites an account can create",
+		Long: `Every account can create a limited number of sites. Run with no arguments to
+see the network default and what everyone is using.
+
+  friendo network quota                      show the limits and who's near them
+  friendo network quota --default 5          everyone gets 5 sites
+  friendo network quota --default unlimited  no limit for anyone
+  friendo network quota ada@example.com 20   give one person their own limit
+  friendo network quota ada@example.com default   put them back on the default
+
+Operators are never limited.`,
+		Args: cobra.MaximumNArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			accounts, err := network.OpenAccounts(root)
+			exitOnErr(err)
+			defer accounts.Close()
+
+			// friendo network quota --default <n|unlimited>
+			if quotaDefault != "" {
+				n, err := network.ParseQuota(quotaDefault)
+				exitOnErr(err)
+				exitOnErr(accounts.SetDefaultSiteQuota(n))
+				fmt.Printf("Everyone can now create %s site(s).\n", network.FormatQuota(n))
+				return
+			}
+
+			// friendo network quota <email> <limit>
+			if len(args) > 0 {
+				acct, ok := accounts.GetByEmail(args[0])
+				if !ok {
+					exitOnErr(fmt.Errorf("no account for %q — invite them first: friendo network invite %s", args[0], args[0]))
+				}
+				if len(args) == 1 {
+					used, allowed, err := accounts.SiteUsage(acct)
+					exitOnErr(err)
+					fmt.Printf("%s — %d of %s site(s) used\n", acct.Email, used, network.FormatQuota(allowed))
+					return
+				}
+				if strings.EqualFold(strings.TrimSpace(args[1]), "default") {
+					exitOnErr(accounts.ClearAccountSiteQuota(acct.ID))
+					fmt.Printf("%s now uses the network default (%s site(s)).\n",
+						acct.Email, network.FormatQuota(accounts.DefaultSiteQuota()))
+					return
+				}
+				n, err := network.ParseQuota(args[1])
+				exitOnErr(err)
+				exitOnErr(accounts.SetAccountSiteQuota(acct.ID, n))
+				fmt.Printf("%s can now create %s site(s).\n", acct.Email, network.FormatQuota(n))
+				return
+			}
+
+			// No arguments — show the default and everyone's usage against it.
+			fmt.Printf("Default: %s site(s) per account\n", network.FormatQuota(accounts.DefaultSiteQuota()))
+			list, err := accounts.List()
+			exitOnErr(err)
+			if len(list) == 0 {
+				fmt.Println("No accounts yet.")
+				return
+			}
+			overrides, _ := accounts.AccountQuotas()
+			fmt.Println()
+			for _, acct := range list {
+				used, allowed, err := accounts.SiteUsage(acct)
+				if err != nil {
+					continue
+				}
+				note := ""
+				if acct.Has("operator") {
+					note = "  (operator — never limited)"
+				} else if _, ok := overrides[acct.ID]; ok {
+					note = "  (own limit)"
+				}
+				fmt.Printf("  %-32s %d of %s%s\n", acct.Email, used, network.FormatQuota(allowed), note)
+			}
+		},
+	}
+	quota.Flags().StringVar(&quotaDefault, "default", "", "Set the network-wide limit (a number, or 'unlimited')")
+
+	cmd.AddCommand(serve, deployCmd, provision, sites, destroy, operator, signups,
+		invite, invites, accountsCmd, quota)
 	return cmd
 }
 

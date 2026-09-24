@@ -195,11 +195,17 @@ func RunNetworkDeploy(subdomain, networkURL string) error {
 	// 2. Claim the subdomain (created + owned by this account, or verified yours).
 	fmt.Printf("Claiming %s on %s …\n", subdomain, networkURL)
 	var claim struct {
-		Error string `json:"error"`
+		Error   string `json:"error"`
+		Used    int    `json:"used"`
+		Allowed int    `json:"allowed"`
 	}
 	if status, err := accountPost(networkURL+"/api/account/sites", token,
 		map[string]string{"subdomain": subdomain, "name": siteCfg.Site.Name}, &claim); err != nil {
 		return err
+	} else if status == http.StatusForbidden && claim.Allowed > 0 {
+		// Hitting the site limit isn't a claim failure to go debug — the network's
+		// message already says what happened and both ways out, so show it as-is.
+		return fmt.Errorf("%s", claim.Error)
 	} else if status >= 300 {
 		return fmt.Errorf("could not claim %q: %s", subdomain, orDefault(claim.Error, "request failed"))
 	}

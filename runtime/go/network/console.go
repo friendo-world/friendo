@@ -3,6 +3,7 @@ package network
 import (
 	"encoding/json"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
 
@@ -27,6 +28,11 @@ type Console struct {
 	// sets it to the dispatcher's DestroySite so deletes also evict the live
 	// handler. See SetDestroyer.
 	destroy func(string) error
+
+	// domains is how a custom domain is released when an operator disconnects
+	// one; domainChanged lets the dispatcher drop its cached routing answer.
+	domains       DomainProvider
+	domainChanged func(host string)
 }
 
 // NewConsole builds the operator console over a registry + the accounts store.
@@ -47,6 +53,15 @@ func NewConsole(reg *Registry, accounts *Accounts, baseDomain string) *Console {
 	m.HandleFunc("POST /sites/{sub}/destroy", c.requireAuth(c.postDestroySite))
 	m.HandleFunc("POST /signups", c.requireAuth(c.postSignups))
 	m.HandleFunc("POST /invite", c.requireAuth(c.postInvite))
+	m.HandleFunc("POST /quota", c.requireAuth(c.postQuota))
+	m.HandleFunc("POST /accounts/{id}/quota", c.requireAuth(c.postAccountQuota))
+	m.HandleFunc("POST /sites/{sub}/suspend", c.requireAuth(c.postSuspendSite))
+	m.HandleFunc("POST /sites/{sub}/resume", c.requireAuth(c.postResumeSite))
+	m.HandleFunc("POST /accounts/{id}/suspend", c.requireAuth(c.postSuspendAccount))
+	m.HandleFunc("POST /accounts/{id}/resume", c.requireAuth(c.postResumeAccount))
+	m.HandleFunc("POST /accounts/{id}/signout", c.requireAuth(c.postSignOutAccount))
+	m.HandleFunc("POST /invites/revoke", c.requireAuth(c.postRevokeInvite))
+	m.HandleFunc("POST /domains/remove", c.requireAuth(c.postRemoveDomain))
 	m.HandleFunc("GET /", c.requireAuth(c.getDashboard))
 
 	// JSON operator API (for the CLI). Account Bearer token + operator capability.
@@ -65,6 +80,12 @@ func (c *Console) ServeHTTP(w http.ResponseWriter, r *http.Request) { c.mux.Serv
 // DestroySite, which also evicts the live handler — instead of the registry
 // directly. Without it, deletes only touch disk and a cached site keeps serving.
 func (c *Console) SetDestroyer(fn func(string) error) { c.destroy = fn }
+
+// SetDomainProvider chooses how custom domains are verified and certificated.
+func (c *Console) SetDomainProvider(p DomainProvider) { c.domains = p }
+
+// SetDomainChangedHook registers a callback for when a domain stops routing.
+func (c *Console) SetDomainChangedHook(fn func(host string)) { c.domainChanged = fn }
 
 // --- auth ---
 
@@ -199,23 +220,141 @@ func (c *Console) postSignups(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// postInvite pre-creates an account so it can sign in even under invite-only,
-// optionally granting it the operator capability.
+// postInvite mints an invite so someone can sign in even under invite-only.
+// Ticking "operator" grants the capability outright, which creates the account —
+// an operator is a decision, not a pending invitation.
 func (c *Console) postInvite(w http.ResponseWriter, r *http.Request) {
-	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
-	if email == "" {
+	addr := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	if addr == "" {
 		c.renderDashboard(w, "email is required to invite someone")
 		return
 	}
-	if _, err := c.accounts.EnsureAccount(email); err != nil {
-		c.renderDashboard(w, err.Error())
-		return
-	}
 	if r.FormValue("operator") != "" {
-		if err := c.accounts.Grant(email, "operator"); err != nil {
+		if err := c.accounts.Grant(addr, "operator"); err != nil {
 			c.renderDashboard(w, err.Error())
 			return
 		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	by := ""
+	if op, ok := c.currentOperator(r); ok {
+		by = op.Email
+	}
+	if _, err := c.accounts.CreateInvite(addr, by, 0); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// postRevokeInvite withdraws an outstanding invite.
+func (c *Console) postRevokeInvite(w http.ResponseWriter, r *http.Request) {
+	if err := c.accounts.RevokeInvite(r.FormValue("email")); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// postRemoveDomain disconnects a custom domain — the operator's copy of the
+// tenant's own command, for when a tenant can't do it themselves.
+func (c *Console) postRemoveDomain(w http.ResponseWriter, r *http.Request) {
+	name := strings.ToLower(strings.TrimSpace(r.FormValue("domain")))
+	if d, ok := c.accounts.GetDomain(name); ok && c.domains != nil {
+		if err := c.domains.Detach(d); err != nil {
+			log.Printf("[network] releasing %s at the provider failed: %v", name, err)
+		}
+	}
+	if err := c.accounts.RemoveDomain(name); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	if c.domainChanged != nil {
+		c.domainChanged(name)
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// --- suspension (the reversible alternative to destroy) ---
+
+func (c *Console) postSuspendSite(w http.ResponseWriter, r *http.Request) {
+	if err := c.accounts.SuspendSite(r.PathValue("sub"), strings.TrimSpace(r.FormValue("reason"))); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (c *Console) postResumeSite(w http.ResponseWriter, r *http.Request) {
+	if err := c.accounts.ResumeSite(r.PathValue("sub")); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (c *Console) postSuspendAccount(w http.ResponseWriter, r *http.Request) {
+	if err := c.accounts.SuspendAccount(r.PathValue("id"), strings.TrimSpace(r.FormValue("reason"))); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (c *Console) postResumeAccount(w http.ResponseWriter, r *http.Request) {
+	if err := c.accounts.ResumeAccount(r.PathValue("id")); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// postSignOutAccount drops every session an account holds — the lost-laptop
+// answer. They can sign straight back in; anyone holding the old token can't.
+func (c *Console) postSignOutAccount(w http.ResponseWriter, r *http.Request) {
+	if _, err := c.accounts.RevokeSessions(r.PathValue("id")); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// postQuota sets the network-wide default site cap. "unlimited" lifts it.
+func (c *Console) postQuota(w http.ResponseWriter, r *http.Request) {
+	n, err := ParseQuota(r.FormValue("sites"))
+	if err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	if err := c.accounts.SetDefaultSiteQuota(n); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// postAccountQuota sets (or clears, with an empty value) one account's override,
+// so an operator can lift the cap for a single tenant without lifting it globally.
+func (c *Console) postAccountQuota(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	raw := strings.TrimSpace(r.FormValue("sites"))
+	if raw == "" || strings.EqualFold(raw, "default") {
+		if err := c.accounts.ClearAccountSiteQuota(id); err != nil {
+			c.renderDashboard(w, err.Error())
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	n, err := ParseQuota(raw)
+	if err != nil {
+		c.renderDashboard(w, err.Error())
+		return
+	}
+	if err := c.accounts.SetAccountSiteQuota(id, n); err != nil {
+		c.renderDashboard(w, err.Error())
+		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -226,23 +365,47 @@ func (c *Console) renderDashboard(w http.ResponseWriter, errMsg string) {
 		http.Error(w, "network error", http.StatusInternalServerError)
 		return
 	}
-	// Map each site to its owner's email for the sites table.
-	owners := make(map[string]string, len(sites))
+	// One row per site: owner, and whether it's on hold.
+	heldSites, _ := c.accounts.SuspendedSites()
+	siteRows := make([]siteRow, 0, len(sites))
 	for _, s := range sites {
+		row := siteRow{Site: s}
 		if id, ok := c.accounts.SiteOwner(s.Subdomain); ok {
 			if acct, ok := c.accounts.Get(id); ok {
-				owners[s.Subdomain] = acct.Email
+				row.Owner = acct.Email
 			}
 		}
+		if held, ok := heldSites[s.Subdomain]; ok {
+			row.Suspended, row.Reason = true, held.Reason
+		}
+		siteRows = append(siteRows, row)
 	}
+	// Each account with its site usage against its cap, so the limit is visible
+	// before anyone walks into it.
 	accounts, _ := c.accounts.List()
+	overrides, _ := c.accounts.AccountQuotas()
+	heldAccounts, _ := c.accounts.SuspendedAccounts()
+	rows := make([]accountRow, 0, len(accounts))
+	for _, acct := range accounts {
+		used, allowed, _ := c.accounts.SiteUsage(acct)
+		_, hasOverride := overrides[acct.ID]
+		row := accountRow{Account: acct, Used: used, Allowed: allowed, Override: hasOverride}
+		if held, ok := heldAccounts[acct.ID]; ok {
+			row.Suspended, row.Reason = true, held.Reason
+		}
+		rows = append(rows, row)
+	}
+	invites, _ := c.accounts.Invites()
+	domains, _ := c.accounts.Domains()
 	c.render(w, "dashboard", pageData{
-		Sites:    sites,
-		Base:     c.base,
-		Error:    errMsg,
-		Signups:  c.accounts.Signups(),
-		Accounts: accounts,
-		Owners:   owners,
+		Domains:      domains,
+		Sites:        siteRows,
+		Base:         c.base,
+		Error:        errMsg,
+		Signups:      c.accounts.Signups(),
+		Accounts:     rows,
+		Invites:      invites,
+		DefaultQuota: FormatQuota(c.accounts.DefaultSiteQuota()),
 	})
 }
 
@@ -253,13 +416,37 @@ func (c *Console) render(w http.ResponseWriter, name string, data pageData) {
 	}
 }
 
+// accountRow is one line of the console's People table: an account plus how many
+// sites it has used against the cap that applies to it, and whether it's on hold.
+type accountRow struct {
+	*Account
+	Used      int
+	Allowed   int  // QuotaUnlimited (0) = no cap
+	Override  bool // the cap comes from a per-account override, not the default
+	Suspended bool
+	Reason    string
+}
+
+// AllowedLabel renders the cap for the table ("unlimited" rather than "0").
+func (r accountRow) AllowedLabel() string { return FormatQuota(r.Allowed) }
+
+// siteRow is one line of the console's Sites table.
+type siteRow struct {
+	Site
+	Owner     string
+	Suspended bool
+	Reason    string
+}
+
 type pageData struct {
-	Sites    []Site
-	Base     string
-	Error    string
-	Signups  string            // "open" | "invite"
-	Accounts []*Account        // network accounts (for the operator view)
-	Owners   map[string]string // subdomain → owner email
+	Sites        []siteRow
+	Base         string
+	Error        string
+	Signups      string       // "open" | "invite"
+	Accounts     []accountRow // network accounts + usage (for the operator view)
+	Invites      []Invite     // outstanding invitations
+	Domains      []Domain     // custom domains across the network
+	DefaultQuota string       // network-wide default site cap, human-readable
 	// Sign-in (passwordless OTP).
 	Email   string // the email a code was sent to
 	Sent    bool   // a code has been sent (show the code field)
@@ -373,7 +560,7 @@ body{font-family:system-ui,sans-serif;max-width:44rem;margin:3rem auto;padding:0
 h1{margin-bottom:.1rem}.muted{color:#6b7280}form{margin:1rem 0}
 input{padding:.4rem .5rem;font:inherit;border:1px solid #d1d5db;border-radius:6px}
 button{padding:.4rem .8rem;font:inherit;border:0;border-radius:6px;background:#111;color:#fff;cursor:pointer}
-button.danger{background:#b91c1c}.err{color:#b91c1c}a{color:#2563eb}
+button.danger{background:#b91c1c}.err{color:#b91c1c}a{color:#2563eb}.held{color:#b45309;font-weight:600}
 table{border-collapse:collapse;width:100%;margin-top:1rem}td,th{text-align:left;padding:.4rem .5rem;border-bottom:1px solid #eee}
 .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
 </style>{{end}}
@@ -402,14 +589,24 @@ table{border-collapse:collapse;width:100%;margin-top:1rem}td,th{text-align:left;
 <input name="subdomain" placeholder="subdomain" required>
 <input name="name" placeholder="Display name (optional)">
 <button type="submit">Create site</button></form>
-<table><tr><th>Subdomain</th><th>Name</th><th>Owner</th><th></th></tr>
+<table><tr><th>Subdomain</th><th>Name</th><th>Owner</th><th>Status</th><th></th></tr>
 {{range .Sites}}<tr>
 <td><a href="//{{.Subdomain}}.{{$.Base}}/">{{.Subdomain}}.{{$.Base}}</a></td>
 <td>{{.Name}}</td>
-<td class="muted">{{with index $.Owners .Subdomain}}{{.}}{{else}}—{{end}}</td>
-<td><form method="post" action="/sites/{{.Subdomain}}/destroy" style="margin:0" onsubmit="return confirm('Delete {{.Subdomain}} and all its data?')"><button class="danger">Delete</button></form></td>
+<td class="muted">{{if .Owner}}{{.Owner}}{{else}}—{{end}}</td>
+<td>{{if .Suspended}}<span class="held">on hold</span>{{if .Reason}} <span class="muted">— {{.Reason}}</span>{{end}}{{else}}<span class="muted">live</span>{{end}}</td>
+<td class="row">
+{{if .Suspended}}
+<form method="post" action="/sites/{{.Subdomain}}/resume" style="margin:0"><button>Put back</button></form>
+{{else}}
+<form method="post" action="/sites/{{.Subdomain}}/suspend" class="row" style="margin:0">
+<input name="reason" placeholder="reason (optional)" size="14"><button>Put on hold</button></form>
+{{end}}
+<form method="post" action="/sites/{{.Subdomain}}/destroy" style="margin:0" onsubmit="return confirm('Delete {{.Subdomain}} and all its data?')"><button class="danger">Delete</button></form>
+</td>
 </tr>{{end}}
 </table>
+<p class="muted">Putting a site on hold shows visitors a notice instead of the site. Nothing is deleted, and you can put it back any time.</p>
 
 <h2>Who can join</h2>
 <p class="muted">
@@ -420,15 +617,65 @@ table{border-collapse:collapse;width:100%;margin-top:1rem}td,th{text-align:left;
 {{else}}<input type="hidden" name="policy" value="open"><button>Switch to open</button>{{end}}
 </form>
 
+<h2>How many sites each person gets</h2>
+<p class="muted">Everyone can create <strong>{{.DefaultQuota}}</strong> site(s) unless you give them their own limit below. Operators are never limited.</p>
+<form method="post" action="/quota" class="row">
+<input name="sites" value="{{.DefaultQuota}}" size="10" aria-label="Sites per person">
+<button type="submit">Save limit</button>
+<span class="muted">a number, or <code>unlimited</code></span>
+</form>
+
 <h2>People</h2>
 <form method="post" action="/invite" class="row">
 <input name="email" type="email" placeholder="email to invite" required>
 <label class="muted"><input type="checkbox" name="operator" value="1"> operator</label>
 <button type="submit">Invite</button></form>
-<table><tr><th>Email</th><th>Role</th></tr>
+<table><tr><th>Email</th><th>Role</th><th>Sites</th><th>Their limit</th><th>Status</th><th></th></tr>
 {{range .Accounts}}<tr>
 <td>{{.Email}}</td>
 <td class="muted">{{if .Has "operator"}}operator{{else}}member{{end}}</td>
-</tr>{{else}}<tr><td colspan="2" class="muted">No accounts yet.</td></tr>{{end}}
-</table>{{end}}
+<td class="muted">{{.Used}} of {{.AllowedLabel}}</td>
+<td>{{if .Has "operator"}}<span class="muted">—</span>{{else}}
+<form method="post" action="/accounts/{{.ID}}/quota" class="row" style="margin:0">
+<input name="sites" value="{{if .Override}}{{.AllowedLabel}}{{end}}" placeholder="default" size="8" aria-label="Site limit for {{.Email}}">
+<button type="submit">Set</button>
+</form>{{end}}</td>
+<td>{{if .Suspended}}<span class="held">suspended</span>{{if .Reason}} <span class="muted">— {{.Reason}}</span>{{end}}{{else}}<span class="muted">active</span>{{end}}</td>
+<td class="row">
+{{if .Has "operator"}}<span class="muted">—</span>{{else if .Suspended}}
+<form method="post" action="/accounts/{{.ID}}/resume" style="margin:0"><button>Let back in</button></form>
+{{else}}
+<form method="post" action="/accounts/{{.ID}}/suspend" class="row" style="margin:0">
+<input name="reason" placeholder="reason (optional)" size="14"><button class="danger">Suspend</button></form>
+{{end}}
+<form method="post" action="/accounts/{{.ID}}/signout" style="margin:0" onsubmit="return confirm('Sign {{.Email}} out of every device?')"><button>Sign out everywhere</button></form>
+</td>
+</tr>{{else}}<tr><td colspan="6" class="muted">No accounts yet.</td></tr>{{end}}
+</table>
+<p class="muted">Leave someone's limit blank to use the network default. Suspending blocks sign-in and new sites without deleting anything; operators can't be suspended.</p>
+
+<h2>Custom domains</h2>
+<table><tr><th>Domain</th><th>Site</th><th>Status</th><th></th></tr>
+{{range .Domains}}<tr>
+<td>{{if .Verified}}<a href="//{{.Domain}}/">{{.Domain}}</a>{{else}}{{.Domain}}{{end}}</td>
+<td class="muted">{{.Subdomain}}</td>
+<td>{{if .Verified}}<span class="muted">live</span>{{else}}<span class="held">{{.Status}}</span>{{end}}</td>
+<td><form method="post" action="/domains/remove" style="margin:0"
+onsubmit="return confirm('Disconnect {{.Domain}}? The site keeps its network address.')">
+<input type="hidden" name="domain" value="{{.Domain}}"><button class="danger">Disconnect</button></form></td>
+</tr>{{else}}<tr><td colspan="4" class="muted">No custom domains yet.</td></tr>{{end}}
+</table>
+<p class="muted">Tenants connect their own domain with <code>friendo domain add</code>. A domain only starts serving once it's verified.</p>
+
+<h2>Outstanding invites</h2>
+<table><tr><th>Email</th><th>Status</th><th>Expires</th><th></th></tr>
+{{range .Invites}}<tr>
+<td>{{.Email}}</td>
+<td class="muted">{{.Status}}</td>
+<td class="muted">{{.Expires}}</td>
+<td><form method="post" action="/invites/revoke" style="margin:0">
+<input type="hidden" name="email" value="{{.Email}}"><button class="danger">Revoke</button></form></td>
+</tr>{{else}}<tr><td colspan="4" class="muted">No invites outstanding.</td></tr>{{end}}
+</table>
+<p class="muted">Invites last 14 days. An expired one can't be used — invite again to send a fresh one.</p>{{end}}
 `

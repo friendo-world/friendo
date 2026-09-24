@@ -103,11 +103,53 @@ FRIENDO_OPERATOR_EMAIL=you@example.com
 # Email delivery — REQUIRED for sign-in (operators + members receive their OTP by email).
 RESEND_API_KEY=...
 FRIENDO_EMAIL_FROM=friendo <noreply@example.com>
+
+# Custom domains via Cloudflare for SaaS — OPTIONAL. With these set, a tenant running
+# 'friendo domain add theirdomain.com' gets a Cloudflare custom hostname, and Cloudflare
+# validates ownership and issues + renews the certificate. Without them the network falls
+# back to verifying a TXT record itself and leaves TLS to whatever is in front.
+# The API token needs Zone → SSL and Certificates → Edit and Zone → Zone → Read.
+FRIENDO_CF_API_TOKEN=...
+FRIENDO_CF_ZONE_ID=...
+# Where Cloudflare sends custom-hostname traffic: a PROXIED record in your zone pointing
+# at this network. Set at boot, so there's no dashboard step to forget.
+FRIENDO_CF_FALLBACK_ORIGIN=origin.example.com
+# What tenants CNAME to. Defaults to the fallback origin, which is usually right —
+# set it only if you publish a separate target like cname.example.com.
+# FRIENDO_CF_CNAME_TARGET=cname.example.com
+# Certificate validation. "http" (default) needs nothing from the tenant but the CNAME;
+# "txt" adds records so they can pre-validate before moving live traffic.
+# FRIENDO_CF_SSL_METHOD=http
 ```
+
+### Setting up Cloudflare for SaaS
+
+One-time, on the `example.com` zone:
+
+1. **Enable Custom Hostnames** — dashboard → **SSL/TLS → Custom Hostnames**. It's a paid
+   add-on billed per active custom hostname; check the current price before opening it to
+   tenants, since each connected domain is a recurring cost.
+2. **Add a proxied origin record** — `origin.example.com  A  <server-ip>`, orange cloud on.
+   This is what `FRIENDO_CF_FALLBACK_ORIGIN` names, and the network sets it as the zone's
+   fallback origin on boot (watch for the `fallback origin …` line in the logs).
+3. **Create the API token** — My Profile → API Tokens → Custom token, scoped to this zone:
+   *Zone → SSL and Certificates → Edit* and *Zone → Zone → Read*. It deliberately does
+   **not** need DNS edit — friendo never writes DNS records, so a leaked token can't
+   repoint your zone.
+
+A tenant then runs `friendo domain add theirdomain.com`, adds the single CNAME they're
+given, and runs `friendo domain verify theirdomain.com`. Cloudflare handles ownership
+validation and the certificate; nothing is installed on the box.
 
 > Sign-in is passwordless everywhere: the operator console, `friendo login`, and member
 > login all deliver a one-time code by email — so `RESEND_API_KEY` + `FRIENDO_EMAIL_FROM`
 > are required on a live network (without them, no one can receive a code).
+
+> **Limits.** Each account can create **3** sites by default, so opening signups can't run
+> up an unbounded bill. Change it with `friendo network quota --default <n>`, or lift it for
+> one tenant with `friendo network quota <email> <n>`. Operators are never limited.
+> See `friendo network accounts` for who's using what, and `friendo network accounts suspend`
+> / `friendo network sites suspend` for the reversible alternative to `destroy`.
 
 Deploy.
 

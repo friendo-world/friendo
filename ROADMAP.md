@@ -10,7 +10,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Single-runtime pivot** | Unify on the Go runtime; friendo.world → network mode (Coolify + Hetzner) | ✅ Shipped |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
 | **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
-| **v0.4** | Open the network — quotas, account management, custom domains | Planned |
+| **v0.4** | Open the network — quotas, account management, custom domains | In progress |
 
 ---
 
@@ -43,9 +43,14 @@ hosting guide: [DEPLOY.md](DEPLOY.md); accounts/auth design:
   gone → `friendo network destroy` / `friendo network operator grant`).
 - **friendo.world cutover** — live on Coolify + Hetzner + Cloudflare R2.
 
-**Next (v0.4):** open the network to real tenants — quotas, richer `network accounts` /
-`signups` management, and custom domains. Scope:
-[design/v0.4-roadmap.md](design/v0.4-roadmap.md).
+**Next (v0.4):** open the network to real tenants. All three tiers are implemented —
+**quotas** (a per-account site cap with a per-account override), **account management**
+(account + site suspension, session revocation, expiring invites with revoke/prune), and
+**custom domains** (`friendo domain add/verify/list/remove`, with routing gated on
+verification). Custom-domain TLS goes through **Cloudflare for SaaS**, behind a provider
+seam so a self-hosted network falls back to a DNS TXT check. Still open before the tag:
+a live Cloudflare run against a real zone, re-confirming Resend on friendo.world, and the
+two coverage gaps below. Scope: [design/v0.4-roadmap.md](design/v0.4-roadmap.md).
 
 ---
 
@@ -166,9 +171,14 @@ assert the data round-trips). Network mode has unit coverage for the dispatcher,
 registry, console, and self-service claim; a Playwright check (`npm run test:sdk`)
 drives the SDK components in a browser.
 
+Network mode's v0.4 surface has unit coverage throughout: quota enforcement at the claim
+path, account and site suspension (including that suspension kills sessions issued before
+it), invite lifecycle, custom-domain routing and verification, and the Cloudflare client
+against a stub API.
+
 Still uncovered (worth growing as those areas land): the live `friendo deploy`
-device-auth path against a running network, and the storage backend against a real
-S3/R2 endpoint.
+device-auth path against a running network, the storage backend against a real
+S3/R2 endpoint, and the Cloudflare for SaaS client against a real zone.
 
 ## friendo.world — live on network mode
 
