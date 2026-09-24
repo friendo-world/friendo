@@ -10,7 +10,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Single-runtime pivot** | Unify on the Go runtime; friendo.world → network mode (Coolify + Hetzner) | ✅ Shipped |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
 | **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
-| **v0.4** | Open the network — quotas, account management, custom domains | In progress |
+| **v0.4** | Open the network — quotas, account management, custom domains | ✅ Shipped |
 
 ---
 
@@ -43,14 +43,15 @@ hosting guide: [DEPLOY.md](DEPLOY.md); accounts/auth design:
   gone → `friendo network destroy` / `friendo network operator grant`).
 - **friendo.world cutover** — live on Coolify + Hetzner + Cloudflare R2.
 
-**Next (v0.4):** open the network to real tenants. All three tiers are implemented —
-**quotas** (a per-account site cap with a per-account override), **account management**
-(account + site suspension, session revocation, expiring invites with revoke/prune), and
-**custom domains** (`friendo domain add/verify/list/remove`, with routing gated on
-verification). Custom-domain TLS goes through **Cloudflare for SaaS**, behind a provider
-seam so a self-hosted network falls back to a DNS TXT check. Still open before the tag:
-a live Cloudflare run against a real zone, re-confirming Resend on friendo.world, and the
-two coverage gaps below. Scope: [design/v0.4-roadmap.md](design/v0.4-roadmap.md).
+**v0.4 — shipped (2026-09):** the network is open to real tenants. **Quotas** (a
+per-account site cap with a per-account override), **account management** (account + site
+suspension, session revocation, expiring invites with revoke/prune), and **custom domains**
+(`friendo domain add/verify/list/remove`, with routing gated on verification and an
+explanatory page at any domain that isn't live yet). Custom-domain TLS goes through
+**Cloudflare for SaaS**, behind a provider seam so a self-hosted network falls back to a
+DNS TXT check. All of it was verified live on friendo.world before the tag: a real domain
+end to end through Cloudflare, Resend OTP delivery, a quota hit, and suspend/resume.
+Scope and decisions: [design/v0.4-roadmap.md](design/v0.4-roadmap.md).
 
 ---
 
@@ -176,9 +177,11 @@ path, account and site suspension (including that suspension kills sessions issu
 it), invite lifecycle, custom-domain routing and verification, and the Cloudflare client
 against a stub API.
 
-Still uncovered (worth growing as those areas land): the live `friendo deploy`
-device-auth path against a running network, the storage backend against a real
-S3/R2 endpoint, and the Cloudflare for SaaS client against a real zone.
+Still without *automated* coverage (each was exercised by hand on friendo.world before
+the v0.4 tag): the live `friendo deploy` device-auth path against a running network, the
+storage backend against a real S3/R2 endpoint, and the Cloudflare for SaaS client against
+a real zone. The new v0.4 CLI subcommands (`friendo domain …`, `network accounts/quota/
+invites`) also have no tests of their own yet.
 
 ## friendo.world — live on network mode
 
@@ -257,8 +260,11 @@ The old Workers-for-Platforms stack it replaced (dispatch namespaces, prod D1
 - ~~**No bulk runtime rollout.**~~ **Resolved by network mode:** one Go binary hosts
   every site, so a runtime update rolls out to all tenants when the single container
   redeploys; the operator console/API provides the admin scope.
-- **Customer custom domains** — pointing a tenant's own domain at their site (beyond
-  `*.friendo.world` subdomains) isn't wired up yet; a future item under network mode.
+- ~~**Customer custom domains**~~ — **shipped in v0.4:** `friendo domain add/verify/
+  list/remove`, Cloudflare for SaaS on friendo.world with a TXT-check fallback for
+  self-hosted networks. Selling domains (rather than connecting ones bought elsewhere)
+  remains a future idea; the Cloudflare relationship was chosen partly so it could share
+  the plumbing.
 - ~~Image galleries / page bundles~~ — **shipped in v0.3 (Tier 1):** a page bundle's
   sibling images auto-import as `field="gallery"` files and render via
   `{{ record.gallery }}` (and a `<friendo-gallery>` remains an optional client-side

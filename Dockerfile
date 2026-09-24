@@ -28,7 +28,10 @@ COPY --from=build /out/friendo /usr/local/bin/friendo
 #   FRIENDO_NETWORK_ROOT    where tenant folders + SQLite DBs live (a volume)
 #   FRIENDO_PORT            listen port
 #   FRIENDO_S3_*            R2/S3 media backend (endpoint/bucket/keys/region)
-#   FRIENDO_OPERATOR_PASSWORD, RESEND_API_KEY, FRIENDO_EMAIL_FROM   (optional)
+#   FRIENDO_OPERATOR_EMAIL  first operator (optional; else first console sign-in claims it)
+#   RESEND_API_KEY, FRIENDO_EMAIL_FROM   email OTP delivery (required for sign-in)
+#   FRIENDO_CF_*            custom domains via Cloudflare for SaaS (optional; see DEPLOY.md)
+# All are read at runtime, none at build time.
 ENV FRIENDO_NETWORK_ROOT=/data/network \
     FRIENDO_PORT=3000
 
