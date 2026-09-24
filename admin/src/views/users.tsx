@@ -29,45 +29,45 @@ export function Users() {
   }
 
   return (
-    <div class="mx-auto max-w-3xl px-4 py-8">
+    <div class="mx-auto max-w-[960px] px-4 py-8">
       <div class="mb-6 flex items-center justify-between">
         <h1 class="text-xl font-bold">Users</h1>
         <a href="/_/users/new"
-          class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+          class="bg-ink px-4 py-2 text-sm font-bold text-white hover:bg-link">
           Add user
         </a>
       </div>
 
-      {error && <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+      {error && <div class="mb-4 border border-crimson bg-tint px-3 py-2 text-sm text-crimson">{error}</div>}
 
       {users === null && !error ? (
-        <p class="text-sm text-gray-400">Loading…</p>
+        <p class="text-sm text-dim">Loading…</p>
       ) : users && users.length > 0 ? (
-        <div class="overflow-x-auto rounded-lg bg-white shadow-sm">
+        <div class="overflow-x-auto bg-white border border-ink">
           <table class="w-full">
             <thead>
-              <tr class="border-b border-gray-200">
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Email</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Role</th>
+              <tr class="border-b border-ink">
+                <th class="px-4 py-3 text-left text-xs font-bold text-dim">Name</th>
+                <th class="px-4 py-3 text-left text-xs font-bold text-dim">Email</th>
+                <th class="px-4 py-3 text-left text-xs font-bold text-dim">Role</th>
                 <th class="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.id} class="border-b border-gray-100 hover:bg-gray-50">
-                  <td class="px-4 py-3 text-sm font-medium">{u.name}</td>
-                  <td class="px-4 py-3 text-sm text-gray-600">{u.email}</td>
+                <tr key={u.id} class="border-b border-ink hover:bg-tint">
+                  <td class="px-4 py-3 text-sm font-bold">{u.name}</td>
+                  <td class="px-4 py-3 text-sm text-dim">{u.email}</td>
                   <td class="px-4 py-3"><RoleBadge role={u.role} /></td>
                   <td class="px-4 py-3">
                     <div class="flex justify-end gap-2">
                       <a href={`/_/users/${encodeURIComponent(u.id)}/edit`}
-                        class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
+                        class="bg-ink px-2 py-1 text-xs font-bold text-white hover:bg-link">
                         Edit
                       </a>
                       {u.id !== me.id && u.role !== "owner" && (
                         <button onClick={() => remove(u.id)}
-                          class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700">
+                          class="bg-crimson px-2 py-1 text-xs font-bold text-white hover:bg-ink">
                           Delete
                         </button>
                       )}
@@ -79,8 +79,8 @@ export function Users() {
           </table>
         </div>
       ) : (
-        <div class="rounded-lg bg-white p-6 text-center shadow-sm">
-          <p class="text-sm text-gray-500">No users yet.</p>
+        <div class="bg-white p-6 text-center border border-ink">
+          <p class="text-sm text-dim">No users yet.</p>
         </div>
       )}
     </div>

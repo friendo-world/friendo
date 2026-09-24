@@ -49,30 +49,30 @@ export function RecordForm({ collection, id }: { collection?: string; id?: strin
   }
 
   if (loading) {
-    return <div class="mx-auto max-w-3xl px-4 py-8 text-sm text-gray-400">Loading…</div>;
+    return <div class="mx-auto max-w-[960px] px-4 py-8 text-sm text-dim">Loading…</div>;
   }
 
   const field =
-    "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none";
+    "mt-1 block w-full border border-ink px-3 py-2 text-sm focus:border-link focus:ring-1 focus:ring-link focus:outline-none";
 
   return (
-    <div class="mx-auto max-w-3xl px-4 py-8">
-      <div class="mb-6 flex items-center gap-3 text-sm text-gray-500">
-        <a href={`/_/collections/${encodeURIComponent(coll)}`} class="hover:text-gray-900">
+    <div class="mx-auto max-w-[960px] px-4 py-8">
+      <div class="mb-6 flex items-center gap-3 text-sm text-dim">
+        <a href={`/_/collections/${encodeURIComponent(coll)}`} class="hover:text-ink">
           {coll}
         </a>
         <span>/</span>
-        <span class="text-gray-900">{editing ? "Edit" : "New"}</span>
+        <span class="text-ink">{editing ? "Edit" : "New"}</span>
       </div>
       <h1 class="mb-6 text-xl font-bold">
         {editing ? "Edit record" : `New ${coll} record`}
       </h1>
       {error && (
-        <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>
+        <div class="mb-4 border border-crimson bg-tint px-3 py-2 text-sm text-crimson">{error}</div>
       )}
-      <div class="rounded-lg bg-white p-6 shadow-sm">
+      <div class="bg-white p-6 border border-ink">
         <form onSubmit={submit}>
-          <label class="mb-4 block text-sm font-medium">
+          <label class="mb-4 block text-sm font-bold">
             Title
             <input
               type="text"
@@ -82,7 +82,7 @@ export function RecordForm({ collection, id }: { collection?: string; id?: strin
               class={field}
             />
           </label>
-          <label class="mb-4 block text-sm font-medium">
+          <label class="mb-4 block text-sm font-bold">
             Slug
             <input
               type="text"
@@ -92,7 +92,7 @@ export function RecordForm({ collection, id }: { collection?: string; id?: strin
               class={field}
             />
           </label>
-          <label class="mb-4 block text-sm font-medium">
+          <label class="mb-4 block text-sm font-bold">
             Body
             <textarea
               value={form.body}
@@ -100,7 +100,7 @@ export function RecordForm({ collection, id }: { collection?: string; id?: strin
               class={field + " min-h-40 resize-y"}
             />
           </label>
-          <label class="mb-5 block text-sm font-medium">
+          <label class="mb-5 block text-sm font-bold">
             Status
             <select
               value={form.status}
@@ -114,7 +114,7 @@ export function RecordForm({ collection, id }: { collection?: string; id?: strin
           <button
             type="submit"
             disabled={busy}
-            class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            class="bg-ink px-4 py-2 text-sm font-bold text-white hover:bg-link disabled:opacity-50"
           >
             {busy ? "Saving…" : editing ? "Save" : "Create"}
           </button>

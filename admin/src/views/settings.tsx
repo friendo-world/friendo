@@ -6,8 +6,8 @@ import { RoleBadge } from "../components/role-badge";
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <div>
-      <dt class="text-xs font-medium text-gray-400 uppercase">{label}</dt>
-      <dd class="mt-1 text-sm font-medium">{value}</dd>
+      <dt class="text-xs font-bold text-dim">{label}</dt>
+      <dd class="mt-1 text-sm font-bold">{value}</dd>
     </div>
   );
 }
@@ -28,8 +28,8 @@ function Toggle({
   return (
     <label class="flex items-start justify-between gap-4">
       <span>
-        <span class="text-sm font-medium">{label}</span>
-        <span class="mt-1 block text-xs text-gray-400">{hint}</span>
+        <span class="text-sm font-bold">{label}</span>
+        <span class="mt-1 block text-xs text-dim">{hint}</span>
       </span>
       <button
         type="button"
@@ -38,15 +38,15 @@ function Toggle({
         disabled={disabled}
         onClick={onToggle}
         class={
-          "relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors " +
-          (on ? "bg-blue-600" : "bg-gray-300") +
+          "relative inline-flex h-6 w-11 shrink-0 border border-ink transition-colors " +
+          (on ? "bg-link" : "bg-white") +
           (disabled ? " opacity-50" : "")
         }
       >
         <span
           class={
-            "inline-block h-5 w-5 translate-y-0.5 rounded-full bg-white transition-transform " +
-            (on ? "translate-x-5" : "translate-x-0.5")
+            "inline-block h-4 w-4 translate-y-[3px] transition-transform " +
+            (on ? "translate-x-[25px] bg-white" : "translate-x-[3px] bg-ink")
           }
         />
       </button>
@@ -127,31 +127,31 @@ export function SettingsView() {
   const managedHint = (base: string, k: string) => (isManaged(k) ? base + " · Set in friendo.toml." : base);
 
   return (
-    <div class="mx-auto max-w-3xl px-4 py-8">
+    <div class="mx-auto max-w-[960px] px-4 py-8">
       <h1 class="mb-6 text-xl font-bold">Settings</h1>
-      {error && <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+      {error && <div class="mb-4 border border-crimson bg-tint px-3 py-2 text-sm text-crimson">{error}</div>}
       {s && s.managed.length > 0 && (
-        <div class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
-          Some settings are defined in <code class="rounded bg-amber-100 px-1.5 py-0.5">friendo.toml</code> and
+        <div class="mb-4 bg-manila px-3 py-2 text-sm text-ink">
+          Some settings are defined in <code class="bg-white px-1.5 py-0.5">friendo.toml</code> and
           are read-only here. Edit the file to change them.
         </div>
       )}
 
-      <h2 class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase">Site</h2>
-      <div class="mb-8 rounded-lg bg-white p-6 shadow-sm">
+      <h2 class="mb-3 text-sm font-bold text-dim">Site</h2>
+      <div class="mb-8 bg-white p-6 border border-ink">
         <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Stat label="Name" value={s ? s.site.name : "…"} />
           <Stat label="Collections" value={s ? s.collections : "…"} />
           <Stat label="Users" value={s ? s.users : "…"} />
         </dl>
-        <p class="mt-4 text-xs text-gray-400">
-          Site name and content types are configured in <code class="rounded bg-gray-100 px-1.5 py-0.5">friendo.toml</code>.
+        <p class="mt-4 text-xs text-dim">
+          Site name and content types are configured in <code class="bg-tint px-1.5 py-0.5">friendo.toml</code>.
         </p>
       </div>
 
-      <h2 class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase">Access &amp; roles</h2>
-      <div class="mb-8 rounded-lg bg-white p-6 shadow-sm">
-        <p class="mb-3 text-xs text-gray-400">Pick a preset, or fine-tune the settings below.</p>
+      <h2 class="mb-3 text-sm font-bold text-dim">Access &amp; roles</h2>
+      <div class="mb-8 bg-white p-6 border border-ink">
+        <p class="mb-3 text-xs text-dim">Pick a preset, or fine-tune the settings below.</p>
         <div class="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-3">
           {PRESETS.map((p) => (
             <button
@@ -160,21 +160,21 @@ export function SettingsView() {
               disabled={!s || saving || accessManaged}
               onClick={() => patch({ access: p.access })}
               class={
-                "rounded-lg border p-3 text-left " +
-                (activePreset === p.key ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:bg-gray-50")
+                " border p-3 text-left " +
+                (activePreset === p.key ? "border-link bg-tint" : "border-ink hover:bg-tint")
               }
             >
-              <span class="block text-sm font-medium">{p.label}</span>
-              <span class="mt-1 block text-xs text-gray-400">{p.hint}</span>
+              <span class="block text-sm font-bold">{p.label}</span>
+              <span class="mt-1 block text-xs text-dim">{p.hint}</span>
             </button>
           ))}
         </div>
 
-        <div class="space-y-4 border-t border-gray-100 pt-4">
+        <div class="space-y-4 border-t border-ink pt-4">
           <label class="flex items-center justify-between gap-4">
             <span>
-              <span class="text-sm font-medium">New members can post</span>
-              <span class="mt-1 block text-xs text-gray-400">
+              <span class="text-sm font-bold">New members can post</span>
+              <span class="mt-1 block text-xs text-dim">
                 {managedHint("What a visitor becomes when they sign up.", MK.defaultRole)}
               </span>
             </span>
@@ -182,7 +182,7 @@ export function SettingsView() {
               disabled={!s || saving || isManaged(MK.defaultRole)}
               value={s?.access.default_role}
               onChange={(e) => patch({ access: { default_role: (e.target as HTMLSelectElement).value as AccessSettings["default_role"] } })}
-              class="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
+              class="border border-ink px-2 py-1 text-sm disabled:opacity-50"
             >
               <option value="member">Member — comment &amp; react only</option>
               <option value="contributor">Contributor — can post their own</option>
@@ -219,8 +219,8 @@ export function SettingsView() {
         </div>
       </div>
 
-      <h2 class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase">Signing in</h2>
-      <div class="mb-8 rounded-lg bg-white p-6 shadow-sm">
+      <h2 class="mb-3 text-sm font-bold text-dim">Signing in</h2>
+      <div class="mb-8 bg-white p-6 border border-ink">
         {s && (
           <Toggle
             label="Allow signing in with a password"
@@ -232,8 +232,8 @@ export function SettingsView() {
         )}
       </div>
 
-      <h2 class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase">Comments</h2>
-      <div class="mb-8 rounded-lg bg-white p-6 shadow-sm">
+      <h2 class="mb-3 text-sm font-bold text-dim">Comments</h2>
+      <div class="mb-8 bg-white p-6 border border-ink">
         {s && (
           <Toggle
             label="Auto-approve comments"
@@ -245,19 +245,19 @@ export function SettingsView() {
         )}
       </div>
 
-      <h2 class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase">Your account</h2>
-      <div class="rounded-lg bg-white p-6 shadow-sm">
+      <h2 class="mb-3 text-sm font-bold text-dim">Your account</h2>
+      <div class="bg-white p-6 border border-ink">
         <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Stat label="Name" value={user.name} />
           <Stat label="Email" value={user.email} />
           <div>
-            <dt class="text-xs font-medium text-gray-400 uppercase">Role</dt>
+            <dt class="text-xs font-bold text-dim">Role</dt>
             <dd class="mt-1"><RoleBadge role={user.role} /></dd>
           </div>
         </dl>
-        <div class="mt-6 border-t border-gray-100 pt-4">
+        <div class="mt-6 border-t border-ink pt-4">
           <button onClick={logout}
-            class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            class="border border-ink px-4 py-2 text-sm font-bold text-dim hover:bg-tint">
             Log out
           </button>
         </div>

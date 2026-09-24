@@ -41,7 +41,7 @@ export function App() {
 
   if (loading) {
     return (
-      <div class="flex min-h-screen items-center justify-center text-sm text-gray-400">
+      <div class="flex min-h-screen items-center justify-center text-sm text-dim">
         Loading…
       </div>
     );

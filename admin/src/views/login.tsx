@@ -2,9 +2,9 @@ import { useState } from "preact/hooks";
 import { api, type SetupStatus, type User } from "../api";
 
 const field =
-  "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none";
+  "mt-1 block w-full border border-ink px-3 py-2 text-sm focus:border-link focus:ring-1 focus:ring-link focus:outline-none";
 const primary =
-  "w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50";
+  "w-full bg-ink px-4 py-2 text-sm font-bold text-white hover:bg-link disabled:opacity-50";
 
 // Sign in with a code sent to your email — the default everywhere. A site that
 // allows passwords (Settings → Signing in) also gets a "use a password" link.
@@ -70,21 +70,21 @@ export function Login({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
 
   return (
     <div class="mx-auto mt-16 max-w-md px-4">
-      <div class="rounded-lg bg-white p-6 shadow-sm">
+      <div class="bg-white p-6 border border-ink">
         <h1 class="mb-6 text-xl font-bold">Sign in</h1>
         {ssoFailed && !error && (
-          <div class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          <div class="mb-4 bg-manila px-3 py-2 text-sm text-ink">
             Couldn't sign you in from your network account — that link may have expired. Press
             “Open admin” again, or sign in below.
           </div>
         )}
         {error && (
-          <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>
+          <div class="mb-4 border border-crimson bg-tint px-3 py-2 text-sm text-crimson">{error}</div>
         )}
 
         {mode === "email" && (
           <form onSubmit={sendCode}>
-            <label class="mb-5 block text-sm font-medium">
+            <label class="mb-5 block text-sm font-bold">
               Email
               <input type="email" required autofocus value={email}
                 onInput={(e) => setEmail((e.target as HTMLInputElement).value)} class={field} />
@@ -94,7 +94,7 @@ export function Login({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
             </button>
             {status.passwordLogin && (
               <button type="button" onClick={() => setMode("password")}
-                class="mt-3 block w-full text-center text-xs text-gray-500 hover:text-gray-700">
+                class="mt-3 block w-full text-center text-xs text-dim hover:text-dim">
                 Use a password instead
               </button>
             )}
@@ -103,10 +103,10 @@ export function Login({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
 
         {mode === "code" && (
           <form onSubmit={verify}>
-            <p class="mb-4 text-sm text-gray-500">
-              {devNote || <>We sent a 6-digit code to <span class="font-medium text-gray-700">{email}</span>.</>}
+            <p class="mb-4 text-sm text-dim">
+              {devNote || <>We sent a 6-digit code to <span class="font-bold text-dim">{email}</span>.</>}
             </p>
-            <label class="mb-5 block text-sm font-medium">
+            <label class="mb-5 block text-sm font-bold">
               Code
               <input type="text" inputMode="numeric" autocomplete="one-time-code" required autofocus
                 value={code} maxLength={6}
@@ -116,7 +116,7 @@ export function Login({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
               {busy ? "Signing in…" : "Sign in"}
             </button>
             <button type="button" onClick={() => { setMode("email"); setCode(""); setDevNote(""); }}
-              class="mt-3 block w-full text-center text-xs text-gray-500 hover:text-gray-700">
+              class="mt-3 block w-full text-center text-xs text-dim hover:text-dim">
               Use a different email
             </button>
           </form>
@@ -124,12 +124,12 @@ export function Login({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
 
         {mode === "password" && (
           <form onSubmit={loginWithPassword}>
-            <label class="mb-4 block text-sm font-medium">
+            <label class="mb-4 block text-sm font-bold">
               Email
               <input type="email" required autofocus value={email}
                 onInput={(e) => setEmail((e.target as HTMLInputElement).value)} class={field} />
             </label>
-            <label class="mb-5 block text-sm font-medium">
+            <label class="mb-5 block text-sm font-bold">
               Password
               <input type="password" required value={password}
                 onInput={(e) => setPassword((e.target as HTMLInputElement).value)} class={field} />
@@ -138,7 +138,7 @@ export function Login({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
               {busy ? "Signing in…" : "Sign in"}
             </button>
             <button type="button" onClick={() => setMode("email")}
-              class="mt-3 block w-full text-center text-xs text-gray-500 hover:text-gray-700">
+              class="mt-3 block w-full text-center text-xs text-dim hover:text-dim">
               Email me a code instead
             </button>
           </form>

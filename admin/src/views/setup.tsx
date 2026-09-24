@@ -2,9 +2,9 @@ import { useState } from "preact/hooks";
 import { api, type SetupStatus, type User } from "../api";
 
 const field =
-  "mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none";
+  "mt-1 block w-full border border-ink px-3 py-2 text-sm focus:border-link focus:ring-1 focus:ring-link focus:outline-none";
 const primary =
-  "w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50";
+  "w-full bg-ink px-4 py-2 text-sm font-bold text-white hover:bg-link disabled:opacity-50";
 
 // First-run setup: prove the owner's email with a code, then the account is
 // created. If friendo.toml turned password sign-in on for this site, a password
@@ -63,38 +63,38 @@ export function Setup({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
 
   return (
     <div class="mx-auto mt-16 max-w-md px-4">
-      <div class="rounded-lg bg-white p-6 shadow-sm">
+      <div class="bg-white p-6 border border-ink">
         <h1 class="mb-1 text-xl font-bold">Set up Friendo</h1>
-        <p class="mb-6 text-sm text-gray-500">
+        <p class="mb-6 text-sm text-dim">
           {step === "details"
             ? "Create the owner account for this site."
-            : devNote || <>We sent a 6-digit code to <span class="font-medium text-gray-700">{email}</span>.</>}
+            : devNote || <>We sent a 6-digit code to <span class="font-bold text-dim">{email}</span>.</>}
         </p>
-        {error && <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+        {error && <div class="mb-4 border border-crimson bg-tint px-3 py-2 text-sm text-crimson">{error}</div>}
 
         {step === "details" ? (
           <form onSubmit={submitDetails}>
-            <label class="mb-4 block text-sm font-medium">
+            <label class="mb-4 block text-sm font-bold">
               Email
               <input type="email" required autofocus value={email}
                 onInput={(e) => setEmail((e.target as HTMLInputElement).value)} class={field} />
             </label>
-            <label class="mb-4 block text-sm font-medium">
-              Name <span class="font-normal text-gray-400">(optional)</span>
+            <label class="mb-4 block text-sm font-bold">
+              Name <span class="font-normal text-dim">(optional)</span>
               <input type="text" value={name} placeholder="Defaults to email prefix"
                 onInput={(e) => setName((e.target as HTMLInputElement).value)} class={field} />
             </label>
             {usePassword ? (
               <>
-                <label class="mb-1 block text-sm font-medium">
+                <label class="mb-1 block text-sm font-bold">
                   Password
                   <input type="password" required minLength={8} value={password}
                     onInput={(e) => setPassword((e.target as HTMLInputElement).value)} class={field} />
                 </label>
-                <p class="mb-5 text-xs text-gray-400">Minimum 8 characters</p>
+                <p class="mb-5 text-xs text-dim">Minimum 8 characters</p>
               </>
             ) : (
-              <p class="mb-5 text-xs text-gray-400">
+              <p class="mb-5 text-xs text-dim">
                 No password needed — we'll email you a code to confirm it's you.
               </p>
             )}
@@ -104,7 +104,7 @@ export function Setup({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
           </form>
         ) : (
           <form onSubmit={submitCode}>
-            <label class="mb-5 block text-sm font-medium">
+            <label class="mb-5 block text-sm font-bold">
               Code
               <input type="text" inputMode="numeric" autocomplete="one-time-code" required autofocus
                 value={code} maxLength={6}
@@ -114,7 +114,7 @@ export function Setup({ status, onLogin }: { status: SetupStatus; onLogin: (u: U
               {busy ? "Creating…" : "Create account"}
             </button>
             <button type="button" onClick={() => { setStep("details"); setCode(""); setDevNote(""); }}
-              class="mt-3 block w-full text-center text-xs text-gray-500 hover:text-gray-700">
+              class="mt-3 block w-full text-center text-xs text-dim hover:text-dim">
               Use a different email
             </button>
           </form>

@@ -3,15 +3,26 @@
 /* Scan the SPA source for class usage. */
 @source "./";
 
+/* The friendo house style, as Tailwind tokens: white paper, black ink, a
+   lightyellow tint, manila for notices, blue for links, crimson for danger.
+   Liberation Sans (Arial where it isn't installed) and Courier. No rounded
+   corners, no shadows, nothing in uppercase. */
 @theme {
-  --color-friendo-primary: #2563eb;
-  --color-friendo-primary-hover: #1d4ed8;
-  --color-friendo-danger: #dc2626;
-  --color-friendo-danger-hover: #b91c1c;
+  --font-sans: "Liberation Sans", Arial, Helvetica, sans-serif;
+  --font-mono: Courier, "Courier New", monospace;
 
-  --color-role-owner: #7c3aed;
-  --color-role-admin: #2563eb;
-  --color-role-editor: #059669;
-  --color-role-contributor: #0d9488;
-  --color-role-member: #6b7280;
+  --color-paper: white;
+  --color-tint: lightyellow;
+  --color-manila: navajowhite;
+  --color-ink: black;
+  --color-dim: dimgray;
+  --color-link: blue;
+  --color-crimson: crimson;
+}
+
+@layer base {
+  ::selection { background: navajowhite; color: black; }
+  a { text-underline-offset: 2px; }
+  button, input, select, textarea { border-radius: 0; }
+  code, pre, kbd { font-family: var(--font-mono); }
 }

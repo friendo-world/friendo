@@ -43,17 +43,18 @@ export function Moderation() {
   }
 
   return (
-    <div class="mx-auto max-w-3xl px-4 py-8">
+    <div class="mx-auto max-w-[960px] px-4 py-8">
       <div class="mb-6 flex items-center justify-between">
         <h1 class="text-xl font-bold">Comments</h1>
-        <div class="flex gap-1 rounded-lg bg-gray-100 p-1">
-          {TABS.map((t) => (
+        <div class="flex border border-ink">
+          {TABS.map((t, i) => (
             <button
               key={t.key}
               onClick={() => setStatus(t.key)}
               class={
-                "rounded px-3 py-1 text-sm font-medium " +
-                (status === t.key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900")
+                "px-3 py-1 text-sm font-bold " +
+                (i > 0 ? "border-l border-ink " : "") +
+                (status === t.key ? "bg-ink text-white" : "text-dim hover:bg-tint hover:text-ink")
               }
             >
               {t.label}
@@ -62,25 +63,25 @@ export function Moderation() {
         </div>
       </div>
 
-      {error && <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+      {error && <div class="mb-4 border border-crimson bg-tint px-3 py-2 text-sm text-crimson">{error}</div>}
 
       {comments === null && !error ? (
-        <p class="text-sm text-gray-400">Loading…</p>
+        <p class="text-sm text-dim">Loading…</p>
       ) : comments && comments.length > 0 ? (
         <ul class="space-y-3">
           {comments.map((c) => (
-            <li key={c.id} class="rounded-lg bg-white p-4 shadow-sm">
-              <div class="mb-2 flex items-center gap-2 text-sm text-gray-500">
-                <span class="font-medium text-gray-900">{c.author_name || "Anonymous"}</span>
+            <li key={c.id} class="bg-white p-4 border border-ink">
+              <div class="mb-2 flex items-center gap-2 text-sm text-dim">
+                <span class="font-bold text-ink">{c.author_name || "Anonymous"}</span>
                 <span>·</span>
                 <span>{c.created?.replace("T", " ").replace("Z", "")}</span>
               </div>
-              <p class="mb-3 whitespace-pre-wrap text-sm text-gray-800">{c.body}</p>
+              <p class="mb-3 whitespace-pre-wrap text-sm text-dim">{c.body}</p>
               <div class="flex justify-end gap-2">
                 {status !== "approved" && (
                   <button
                     onClick={() => moderate(c.id, "approved")}
-                    class="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700"
+                    class="bg-ink px-2 py-1 text-xs font-bold text-white hover:bg-link"
                   >
                     Approve
                   </button>
@@ -88,14 +89,14 @@ export function Moderation() {
                 {status !== "rejected" && (
                   <button
                     onClick={() => moderate(c.id, "rejected")}
-                    class="rounded bg-yellow-600 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-700"
+                    class="bg-dim px-2 py-1 text-xs font-bold text-white hover:bg-ink"
                   >
                     Reject
                   </button>
                 )}
                 <button
                   onClick={() => remove(c.id)}
-                  class="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700"
+                  class="bg-crimson px-2 py-1 text-xs font-bold text-white hover:bg-ink"
                 >
                   Delete
                 </button>
@@ -104,8 +105,8 @@ export function Moderation() {
           ))}
         </ul>
       ) : (
-        <div class="rounded-lg bg-white p-6 text-center shadow-sm">
-          <p class="text-sm text-gray-500">No {status} comments.</p>
+        <div class="bg-white p-6 text-center border border-ink">
+          <p class="text-sm text-dim">No {status} comments.</p>
         </div>
       )}
     </div>
