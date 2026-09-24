@@ -5,36 +5,57 @@
 {% block content %}
 <article class="doc">
   <div class="hero">
-    <h1>Friendo Documentation</h1>
-    <p class="lead">A local-first website builder. Your site is a folder — build it
-      locally, publish it anywhere.</p>
-    <a class="cta" href="/docs/installation">Get started &rarr;</a>
+    <span class="doc-kicker label">Documentation</span>
+    <h1>Your site is a folder.</h1>
+    <p class="lead">friendo is a local-first website builder. Build the folder on your machine,
+      publish it anywhere. These pages cover everything from the first <code>friendo init</code>
+      to running a network of your own.</p>
+    <a class="button" href="/docs/installation">Get started</a>
   </div>
 
-  <div class="cards">
-    <a class="card" href="/docs/installation">
+  <div class="rule-head label">
+    <span>Start here</span>
+    <span class="right">about ten minutes</span>
+  </div>
+  <div class="start">
+    <a href="/docs/installation">
+      <span class="n label">01</span>
       <h3>Install</h3>
       <p>Get the <code>friendo</code> command on your machine.</p>
     </a>
-    <a class="card" href="/docs/first-site">
+    <a href="/docs/first-site">
+      <span class="n label">02</span>
       <h3>Your first site</h3>
-      <p><code>init</code> → <code>serve</code> → a running site in a minute.</p>
+      <p><code>init</code>, then <code>serve</code>. A running site in a minute.</p>
     </a>
-    <a class="card" href="/docs/deploy">
+    <a href="/docs/deploy">
+      <span class="n label">03</span>
       <h3>Deploy</h3>
-      <p>One command to put your site on the internet.</p>
-    </a>
-    <a class="card" href="/docs/site-is-a-folder">
-      <h3>Concepts</h3>
-      <p>How Friendo thinks about sites, content, and templates.</p>
-    </a>
-    <a class="card" href="/docs/run-a-network">
-      <h3>Host it yourself</h3>
-      <p>One site on your own server, or a whole network of them.</p>
+      <p>One command to put the folder on the internet.</p>
     </a>
   </div>
 
-  <p class="meta">This site is itself a Friendo site — dogfooded, rendered from
-    markdown, and deployed to <code>docs.friendo.world</code>.</p>
+  <section class="guide">
+    {# Every page, grouped, straight from content/docs/*.md. #}
+    <div class="group">
+      <div class="rule-head label"><span>Getting started</span><span class="right">the path</span></div>
+      <ol>{% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Getting started" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+    </div>
+    <div class="group">
+      <div class="rule-head label"><span>Concepts</span><span class="right">how friendo thinks</span></div>
+      <ol>{% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Concepts" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+    </div>
+    <div class="group">
+      <div class="rule-head label"><span>Reference</span><span class="right">look it up</span></div>
+      <ol>{% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Reference" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+    </div>
+    <div class="group">
+      <div class="rule-head label"><span>Hosting</span><span class="right">your server, or a network</span></div>
+      <ol>{% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Hosting" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+    </div>
+  </section>
+
+  <p class="meta">This site is itself a friendo site: rendered from markdown in a folder, and deployed
+    to <code>docs.friendo.world</code> with <code>friendo deploy</code>.</p>
 </article>
 {% endblock %}

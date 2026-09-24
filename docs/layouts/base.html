@@ -4,31 +4,32 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site.name }}{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='lightyellow'/%3E%3Ctext x='16' y='24' font-size='24' text-anchor='middle' fill='black'%3E%E2%9C%BF%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
   <a class="skip" href="#content">Skip to content</a>
-  <header class="topbar">
-    <a href="/" class="brand">Friendo <span>Docs</span></a>
-    <a href="https://friendo.world" class="topbar-link">friendo.world &rarr;</a>
+  <header class="masthead">
+    <a href="/" class="brand"><span class="flower">&#10047;</span> <span class="word">friendo</span> <span class="label">Docs</span></a>
+    <a href="https://friendo.world" class="home label">friendo.world &rarr;</a>
   </header>
 
   <div class="layout">
     <input type="checkbox" id="navtoggle" class="navtoggle">
-    <label for="navtoggle" class="navtoggle-btn" aria-label="Toggle navigation">☰ Menu</label>
+    <label for="navtoggle" class="navtoggle-btn label" aria-label="Toggle navigation">&#9776; Contents</label>
     <aside class="sidebar">
       <nav>
         {# Nav generated from content/docs/*.md — group order editorial, links/order from data.group/data.weight. Active link is marked client-side (see script) to keep the template free of nested tags. #}
-        <p class="nav-group">Getting started</p>
+        <p class="nav-group label">Getting started</p>
         {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Getting started" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
 
-        <p class="nav-group">Concepts</p>
+        <p class="nav-group label">Concepts</p>
         {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Concepts" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
 
-        <p class="nav-group">Reference</p>
+        <p class="nav-group label">Reference</p>
         {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Reference" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
 
-        <p class="nav-group">Hosting</p>
+        <p class="nav-group label">Hosting</p>
         {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Hosting" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
       </nav>
       <script>

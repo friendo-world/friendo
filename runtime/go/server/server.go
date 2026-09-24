@@ -243,9 +243,9 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 	// stream from object storage while static assets still come from disk.
 	assetsDir := filepath.Join(siteDir, "assets")
 	if store != nil {
-		r.Handle("/assets/*", assetHandler(assetsDir, store))
+		r.Handle("/assets/*", freshAssets(assetHandler(assetsDir, store)))
 	} else if _, err := os.Stat(assetsDir); err == nil {
-		r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir))))
+		r.Handle("/assets/*", freshAssets(http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir)))))
 	}
 
 	// Catch-all: template rendering.
@@ -255,6 +255,24 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 
 	built.Handler = r
 	return built, nil
+}
+
+// freshAssets sets the cache policy for /assets/*. A deploy replaces files in
+// place under the same names, so by default browsers and CDNs must check back
+// with the site on every request ("max-age=0, must-revalidate"): the file
+// server answers an unchanged file with a tiny 304, and a changed one shows up
+// immediately instead of after a CDN's default TTL (Cloudflare's is four
+// hours). A URL that carries a version, like /assets/style.css?v=3, is treated
+// as immutable and cached for a year, for sites that want that.
+func freshAssets(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("v") != "" {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // assetHandler serves /assets/*: managed media (assets/uploads/* + galleries/*)

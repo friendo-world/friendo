@@ -5,25 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site.name }} — your site is a folder{% endblock %}</title>
   <meta name="description" content="friendo is a local-first website builder. Your site is a folder: build it on your machine, publish it with one command.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='white'/%3E%3Ctext x='16' y='24' font-size='24' text-anchor='middle' fill='black'%3E%E2%9C%BF%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/assets/style.css">
   <script src="/friendo.js" defer></script>
 </head>
 <body>
-  <header class="topbar">
-    <a href="/" class="brand">friendo</a>
-    <nav class="topnav">
-      <a href="https://docs.friendo.world">Docs</a>
-      <a href="https://github.com/friendo-world/friendo">GitHub</a>
-      <a href="/account" class="button">Your sites</a>
+  <header class="masthead">
+    <a href="/" class="brand"><span class="flower">&#10047;</span> friendo</a>
+    <nav class="label">
+      <a href="https://docs.friendo.world">docs</a> &middot;
+      <a href="https://github.com/friendo-world/friendo">github</a> &middot;
+      <a href="/account" class="here">your sites</a>
     </nav>
   </header>
 
-  <main class="content">
+  <main class="page">
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="footer">
-    <p>friendo is open source (MIT). This page is itself a friendo site — the network's <em>home site</em>,
+  <footer class="page footer">
+    <p class="label"><span class="flower">&#10047;</span> friendo.world</p>
+    <p>Open source, MIT. This page is itself a friendo site — the network's <em>home site</em>,
       served at the bare domain. <a href="https://docs.friendo.world/docs/run-a-network">Run your own network.</a></p>
   </footer>
 </body>

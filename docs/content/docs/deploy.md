@@ -62,6 +62,14 @@ them). Either way these work the same wherever the site is hosted:
 | `friendo pull --data` | Pull remote records back into your local database |
 | `friendo pull --users` | Pull user accounts back down |
 
+## Changes show up right away
+
+Files in `assets/` are served so that browsers and CDNs check back with your
+site on every request. A changed stylesheet or image is live as soon as you
+push it, and an unchanged one costs only a tiny "not modified" reply. If you
+want a file cached for a long time instead, give it a version in the URL,
+`/assets/style.css?v=2`, and bump the number when it changes.
+
 ## Export instead
 
 Don't want a server at all? Export to static HTML:

@@ -2,8 +2,9 @@
 {% block title %}Not found — {{ site.name }}{% endblock %}
 {% block content %}
 <article class="doc">
-  <h1>Page not found</h1>
-  <p>There's nothing at <code>{{ request.path }}</code>. Try the sidebar, or
+  <span class="doc-kicker label">404</span>
+  <h1 class="doc-title">Page not found</h1>
+  <p>There's nothing at <code>{{ request.path }}</code>. Try the contents, or
     <a href="/">start from the beginning</a>.</p>
 </article>
 {% endblock %}

@@ -2,50 +2,140 @@
 
 {% block content %}
 <section class="hero">
-  <h1>Your site is a folder.</h1>
-  <p class="lead">Build it on your machine. Publish it with one command. Take it anywhere —
-    friendo is a local-first website builder with no lock-in and no magic you can't see.</p>
-  <pre class="install"><code>curl -fsSL https://raw.githubusercontent.com/friendo-world/friendo/main/scripts/install.sh | sh
-friendo init my-site
-cd my-site &amp;&amp; friendo serve</code></pre>
-  <p class="hero-links">
-    <a class="cta" href="https://docs.friendo.world/docs/first-site">Make your first site &rarr;</a>
-    <a class="quiet" href="/account">Already have one? Sign in.</a>
-  </p>
-</section>
-
-<section class="cards">
-  <a class="card" href="https://docs.friendo.world/docs/site-is-a-folder">
-    <h3>A folder you own</h3>
-    <p>Templates, pages, assets and a SQLite database, sitting in a directory. Check it into git.
-      Export it to plain HTML. It outlives any tool — including this one.</p>
-  </a>
-  <a class="card" href="https://docs.friendo.world/docs/community">
-    <h3>Community, one tag at a time</h3>
-    <p>Comments, reactions, polls, chat, maps and forms are each a single tag:
-      <code>&lt;friendo-comments&gt;</code>. No JavaScript to write.</p>
-  </a>
-  <a class="card" href="https://docs.friendo.world/docs/deploy">
-    <h3>Publish in one command</h3>
-    <p><code>friendo deploy</code> puts your folder at <code>my-site.friendo.world</code>. Sign in with a
-      code sent to your email — there's no password to make up.</p>
-  </a>
-  <a class="card" href="https://docs.friendo.world/docs/run-a-network">
-    <h3>Or host it yourself</h3>
-    <p>The same binary serves one site on a server you own, or a whole <em>network</em> of them by
-      subdomain. friendo.world is just the reference network.</p>
-  </a>
-</section>
-
-<section class="how">
-  <h2>How it feels</h2>
-  <div class="steps">
-    <div><span class="n">1</span><p><b>Write pages</b> as plain HTML with a little template logic.
-      <code>{{ "{{ post.title }}" }}</code> is a post's title. That's most of it.</p></div>
-    <div><span class="n">2</span><p><b>Write content</b> in the admin, or as markdown files in <code>content/</code>. Either way it
-      lands in the same little database.</p></div>
-    <div><span class="n">3</span><p><b>Publish</b> with <code>friendo deploy</code>. Open the admin from
-      <a href="/account">your account page</a>, invite people, connect your own domain.</p></div>
+  {# Hover (or tab to) a line in the tree and the copy on the right explains it. CSS only: see the .hero:has() rules in style.css. #}
+  <div class="folder-wrap">
+    <div class="folder">
+      <span class="tab t" data-k="root" tabindex="0">my-site/</span>
+      <div class="tree" aria-label="The files in a friendo site">
+        <span class="t" data-k="toml" tabindex="0">├── friendo.toml</span>
+        <span class="t" data-k="layouts" tabindex="0">├── layouts/</span>
+        <span class="t" data-k="base" tabindex="0">│   └── base.html</span>
+        <span class="t" data-k="pages" tabindex="0">├── pages/</span>
+        <span class="t" data-k="index" tabindex="0">│   ├── index.html</span>
+        <span class="t" data-k="blog" tabindex="0">│   └── blog/</span>
+        <span class="t" data-k="slug" tabindex="0">│       └── [slug].html</span>
+        <span class="t" data-k="content" tabindex="0">├── content/</span>
+        <span class="t" data-k="data" tabindex="0">└── data/</span>
+        <span class="t" data-k="db" tabindex="0">    └── friendo.db</span>
+      </div>
+    </div>
+    <p class="label dim hint">&#10047; point at a file to see what it does, or click one to keep it</p>
+  </div>
+  <div class="hero-copy">
+    <div class="x" data-k="root">
+      <span class="label kicker"><code>A local-first website builder</code></span>
+      <h1 class="hero-h">Your site is a folder.</h1>
+      <p class="lead">Build it on your machine. Publish it with one command. Take it anywhere.
+        No lock-in, and no magic you can't see.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world">explore the docs</a>
+    </div>
+    <div class="x" data-k="toml">
+      <span class="label kicker"><code>friendo.toml</code></span>
+      <h2 class="hero-h">One small config file.</h2>
+      <p class="lead">The site's name, which content collections it has, and where <code>friendo deploy</code>
+        sends it. About ten lines. You will rarely open it.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/config">read about friendo.toml</a>
+    </div>
+    <div class="x" data-k="layouts">
+      <span class="label kicker"><code>layouts/</code></span>
+      <h2 class="hero-h">The frame around every page.</h2>
+      <p class="lead">A layout is the HTML that wraps a page: the head, the header, the footer.
+        Pages extend a layout and fill in the middle.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/templates">read about layouts</a>
+    </div>
+    <div class="x" data-k="base">
+      <span class="label kicker"><code>layouts/base.html</code></span>
+      <h2 class="hero-h">The one layout most sites need.</h2>
+      <p class="lead">Your stylesheet, your nav, your footer, and a <code>{{ "{% block content %}" }}</code>
+        where each page goes. Add more layouts when you want a different frame.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/templates">read about layouts and blocks</a>
+    </div>
+    <div class="x" data-k="pages">
+      <span class="label kicker"><code>pages/</code></span>
+      <h2 class="hero-h">Each file is a URL.</h2>
+      <p class="lead"><code>pages/about.html</code> is <code>/about</code>. Pages are plain HTML with a little
+        template logic: <code>{{ "{{ post.title }}" }}</code> is a post's title. That's most of it.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/templates">read about pages and URLs</a>
+    </div>
+    <div class="x" data-k="index">
+      <span class="label kicker"><code>pages/index.html</code></span>
+      <h2 class="hero-h">The front door.</h2>
+      <p class="lead">Your home page, served at <code>/</code>. Write it like any HTML file, and loop over
+        a collection to list your posts.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/first-site">read about your first site</a>
+    </div>
+    <div class="x" data-k="blog">
+      <span class="label kicker"><code>pages/blog/</code></span>
+      <h2 class="hero-h">A folder is a path.</h2>
+      <p class="lead">Everything in <code>pages/blog/</code> lives under <code>/blog</code>. Nest folders as
+        deep as you like; the URLs follow.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/templates">read about pages and URLs</a>
+    </div>
+    <div class="x" data-k="slug">
+      <span class="label kicker"><code>pages/blog/[slug].html</code></span>
+      <h2 class="hero-h">One file, a page for every post.</h2>
+      <p class="lead">The square brackets mean: render this once per record in the blog collection, at
+        <code>/blog/its-slug</code>. Add a post and its page just exists.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/content">read about collections</a>
+    </div>
+    <div class="x" data-k="content">
+      <span class="label kicker"><code>content/</code></span>
+      <h2 class="hero-h">Posts as markdown files.</h2>
+      <p class="lead">Drop <code>hello.md</code> in <code>content/blog/</code> and it's a post. Or write in the
+        admin. Either way it lands in the same little database.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/content">read about authoring in files</a>
+    </div>
+    <div class="x" data-k="data">
+      <span class="label kicker"><code>data/</code></span>
+      <h2 class="hero-h">The site's memory.</h2>
+      <p class="lead">Created the first time you run <code>friendo serve</code>. Holds the database. Not
+        something you edit by hand, but yours to back up or move.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/site-is-a-folder">read about portability</a>
+    </div>
+    <div class="x" data-k="db">
+      <span class="label kicker"><code>data/friendo.db</code></span>
+      <h2 class="hero-h">Everything, in one SQLite file.</h2>
+      <p class="lead">Posts, comments, members, reactions, poll votes. One file you can copy, check into
+        git, or open with any SQLite tool. No server to lose it in.</p>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/site-is-a-folder">read about portability</a>
+    </div>
   </div>
 </section>
+
+<section class="install">
+  <div class="install-cmd">
+    <span class="label kicker">Make your first site</span>
+    <div class="cmd">
+      <pre><code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/friendo-world/friendo/main/scripts/install.sh | sh
+friendo init my-site
+cd my-site &amp;&amp; friendo serve</code></pre>
+    </div>
+    <p class="copy-line label dim" hidden><button class="copy" type="button" data-copy="install-cmd">&#10047; copy these three lines</button>, then run them in your terminal.</p>
+  </div>
+</section>
+
+<script>
+  // Choosing a file in the tree: a click or keyboard focus on a line records it
+  // on the hero as data-k, and the stylesheet shows that file's copy until you
+  // choose another. (Hovering still previews without changing the choice.)
+  var hero = document.querySelector(".hero");
+  hero.querySelectorAll(".t").forEach(function (line) {
+    var choose = function () { hero.dataset.k = line.dataset.k; };
+    line.addEventListener("click", choose);
+    line.addEventListener("focus", choose);
+  });
+
+  // The copy link needs the clipboard, so it only appears once this has run.
+  document.querySelectorAll("[data-copy]").forEach(function (btn) {
+    var code = document.getElementById(btn.dataset.copy);
+    if (!code || !navigator.clipboard) return;
+    btn.closest(".copy-line").hidden = false;
+    btn.addEventListener("click", function () {
+      navigator.clipboard.writeText(code.textContent).then(function () {
+        btn.textContent = "\u273f copied";
+        setTimeout(function () { btn.textContent = "\u273f copy these three lines"; }, 1500);
+      });
+    });
+  });
+</script>
 {% endblock %}
