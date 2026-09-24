@@ -13,7 +13,7 @@ provides managed hosting**:
 |---|---|---|
 | **CLI** | The `friendo` command — init, serve, deploy, push, pull, export. A thin client that talks to any running site over its REST API. | `cli/` |
 | **Runtime** | The thing that actually runs a site: serves pages, stores data, hosts the admin UI and API. One implementation — the Go runtime. | `runtime/go/` |
-| **Network mode** | friendo.world managed hosting: the same Go binary in `friendo network serve`, dispatching many sites by subdomain. Optional — a single site never needs it. | `runtime/go/network/` |
+| **Network mode** | friendo.world managed hosting: the same Go binary in `friendo network serve`, dispatching many sites by subdomain, with the network's own account + operator surface built from `<friendo-*>` tags. Optional — a single site never needs it. | `runtime/go/network/` |
 
 A **site is a folder**: `friendo.toml`, `layouts/`, `pages/`, `assets/`, and a
 `data/` database. It's portable, checkable into git, and outlives any single tool.
@@ -78,7 +78,7 @@ the actor's *own* rows unless they hold the `.any` variant.
 
 | Area | Endpoints | Capability |
 |---|---|---|
-| Bootstrap | `GET /me`, `POST /auth/login`, `POST /auth/logout`, `GET/POST /setup`, `POST /migrate`, `POST /auth/request-code`, `POST /auth/verify-code` | public |
+| Bootstrap | `GET /me`, `POST /auth/request-code`, `POST /auth/verify-code` (the default sign-in, any role), `POST /auth/login` (password — only when `access.password_login` is on), `POST /auth/logout`, `GET /setup`, `POST /setup/request-code`, `POST /setup`, `POST /migrate` (gated on the legacy password) | public |
 | Personas | `GET/POST /me/personas`, `POST /me/personas/:id/default` — an account's author profiles + which one attribution uses | authenticated member (own personas) |
 | Content | `GET /collections`, CRUD under `/collections/:c/records` and `/records/:id`; `GET /records`, `PUT /records/:id/status` (review queue) | `content.create` (own); `content.edit.any` / `content.publish` for others' posts + publishing |
 | Community | `GET/POST /posts/:id/comments`, `PUT/DELETE /comments/:id` (moderation); `POST/DELETE /reactions`; `GET/POST /polls`, `POST /polls/:id/vote` | authenticated baseline (comment/react/vote); `comment.moderate.own/any` to moderate; `content.edit.any` to author a poll |
@@ -158,8 +158,9 @@ testsite.friendo.world
 |---|---|
 | **Dispatcher** (`runtime/go/network`) | Reads `r.Host`, resolves the site, serves its cached handler from `BuildSiteHandler`. Opens each site's DB on demand; LRU-caches handlers and closes idle ones. Per-request panic recovery isolates one tenant's failure from the rest. |
 | **Registry** | A small SQLite DB mapping `subdomain → site folder + display name + owner account`. |
-| **Operator console + API** (apex) | The web console + `/api/*` an operator uses to create / list / destroy sites and manage accounts, invites, and the signup policy. |
-| **Accounts store** | Network accounts + sessions + device-auth + OTP; `operator` is a capability. |
+| **Apex** | The bare domain serves the operator's chosen **home site** (a normal tenant site), with the network's own surface layered over it: `/api/*` always, and four **default pages** — `/account` + `/login` (`<friendo-account>`), `/network` (`<friendo-console>`), `/activate` (`<friendo-activate>`) — unless the home site defines that page itself. `www.` redirects to the apex. |
+| **Account + operator API** | `/api/account/*` (your sites, domains, the one-time "Open admin" link) and `/api/network/*` (every operator lever), reachable by the account cookie (browser) or a Bearer token (CLI). |
+| **Accounts store** | Network accounts + sessions + device-auth + OTP; `operator` is a capability; network settings (signup policy, site limit, home site). |
 
 **One process, many tenants.** A tenant is "a folder + a SQLite file opened on
 demand," so an idle site costs about a file handle and cold start is near-zero.
@@ -174,18 +175,28 @@ instantly) plus TLS/CDN, with a Cloudflare Origin cert on the box (SSL Full-stri
 above). Full runbook in [DEPLOY.md](DEPLOY.md).
 
 **Provisioning is a folder op.** Creating a site scaffolds its folder, opens its DB
-(auto-migrates), inserts the registry row, and creates the owner user linked to the
-deploying account. Teardown reverses it. There is no per-site Worker, no per-site
-DNS, and no runtime bundle to publish — deploying the network updates every site at
-once (bulk rollout is automatic).
+(auto-migrates), records its owner account, and creates the owner user inside it
+(a code-only account) — whether a tenant claimed it or an operator provisioned it,
+so no site is ever left with its first-run setup open. Teardown reverses it. There
+is no per-site Worker, no per-site DNS, and no runtime bundle to publish — deploying
+the network updates every site at once (bulk rollout is automatic).
+
+**Into a site's admin.** Cookies are per host, so the network can't sign a browser
+into `sub.<base>` directly. `POST /api/account/sites/{sub}/admin-link` mints the site
+session (as the CLI's `/api/sso/exchange` does) and parks it behind a one-time code;
+the browser lands on `https://sub.<base>/_/sso?code=…`, which the dispatcher redeems
+into a `friendo_session` cookie before the site ever sees the request. Owners only —
+operators are not exempt.
 
 **Accounts & deploy.** `friendo login` runs a browser device-auth against the
-network and caches an account token. `friendo deploy [subdomain]` claims a subdomain
-your account owns, exchanges an in-process SSO session for the site, and pushes.
-Operators (accounts with the `operator` capability) manage the fleet via
-`friendo network *` and the apex console; the first console sign-in claims operator
-when none exists, and `FRIENDO_OPERATOR_EMAIL` designates the bootstrap operator.
-Full design in [design/network-accounts.md](design/network-accounts.md).
+network (approved on `/activate`) and caches an account token. `friendo deploy
+[subdomain]` claims a subdomain your account owns (reserved names refused), exchanges
+an in-process SSO session for the site, and pushes. Operators (accounts with the
+`operator` capability) manage the fleet via `friendo network *` — on the box or over
+`/api/network/*` from anywhere — and the `/network` page; the first sign-in claims
+operator when none exists, and `FRIENDO_OPERATOR_EMAIL` designates the bootstrap
+operator. Full design in [design/network-accounts.md](design/network-accounts.md)
+and [design/v0.5-roadmap.md](design/v0.5-roadmap.md).
 
 ## Schema migrations
 
@@ -199,8 +210,8 @@ place.
 
 | Scope | What | Where |
 |---|---|---|
-| **Site** | Per-site **accounts** (`users`) with roles (owner > admin > editor > contributor > member), bcrypt passwords, DB-stored sessions. | site SQLite |
-| **Network** | **Network accounts** (`runtime/go/network`) for signing in to a friendo network and provisioning sites — passwordless email OTP + browser device-auth. `operator` is a capability (no operator password), separate from per-site roles. | network accounts DB |
+| **Site** | Per-site **accounts** (`users`) with roles (owner > admin > editor > contributor > member). Sign-in is an emailed code for every role; a bcrypt password is optional and only usable when `access.password_login` is on. DB-stored sessions. On localhost with no email provider, `friendo serve` skips sign-in for same-machine requests. | site SQLite |
+| **Network** | **Network accounts** (`runtime/go/network`) for signing in to a friendo network and owning sites — the same email-code sign-in (cookie in a browser, Bearer token from the CLI via device-auth). `operator` is a capability (no operator password), separate from per-site roles. | network accounts DB |
 
 **Capabilities, not just ranks.** Authorization is capability-based: roles are
 named bundles of capabilities (`content.create`, `content.edit.own` vs
@@ -227,8 +238,7 @@ the switcher.
 (`/auth/request-code` → `/auth/verify-code`, backed by `otp_codes`) to get a
 passwordless `member` account. They share the same session/cookie and role gate,
 so they authenticate but can't reach admin endpoints. See the Phase 3 design in
-[docs/content/docs/phase-3-community.md](docs/content/docs/phase-3-community.md)
-(also published at `docs.friendo.world/docs/phase-3-community`).
+[design/phase-3-community.md](design/phase-3-community.md).
 
 Bcrypt hashes are portable, so `friendo push --users` carries accounts to a
-deployed site unchanged — the same password works everywhere.
+deployed site unchanged (a blank incoming hash never overwrites a real one).

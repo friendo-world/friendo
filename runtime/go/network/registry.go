@@ -21,8 +21,9 @@ import (
 // Registry is the set of sites that make up a network. For this first cut the
 // filesystem IS the registry: each immediate subdirectory of Root is a site
 // whose folder name is its subdomain ("your site is a folder", one level up).
-// Per-site metadata — owner, quotas, suspended state — arrives with operator
-// accounts in Phase 2; today a site simply exists or it doesn't.
+// Per-site metadata — owner, quotas, suspended state, custom domains — lives in
+// the Accounts store (account.go), keyed by subdomain; the registry only knows
+// whether a site exists and where its folder is.
 type Registry struct {
 	Root string
 }
@@ -30,7 +31,7 @@ type Registry struct {
 // Site is one tenant on the network.
 type Site struct {
 	Subdomain string `json:"subdomain"`
-	Dir       string `json:"-"` // server-side path; never exposed to API clients
+	Dir       string `json:"-"`    // server-side path; never exposed to API clients
 	Name      string `json:"name"` // display name from friendo.toml (falls back to the subdomain)
 }
 
@@ -48,6 +49,19 @@ var subdomainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // ValidSubdomain reports whether s is a usable subdomain/site name.
 func ValidSubdomain(s string) bool { return subdomainRe.MatchString(s) }
+
+// ReservedSubdomains are names a self-service account can't claim: the ones
+// the network itself uses or might (www, api, the console), and the ones
+// people expect to belong to whoever runs the domain (docs, mail, cdn). An
+// operator can still provision them — the network's own sites live here.
+var ReservedSubdomains = map[string]bool{
+	"www": true, "api": true, "admin": true, "mail": true, "origin": true,
+	"network": true, "console": true, "account": true, "login": true,
+	"activate": true, "docs": true, "static": true, "cdn": true,
+}
+
+// IsReserved reports whether a subdomain is kept for the network's own use.
+func IsReserved(s string) bool { return ReservedSubdomains[strings.ToLower(strings.TrimSpace(s))] }
 
 // Dir resolves a subdomain to its site directory, reporting false if the
 // subdomain is invalid or no site folder is present. A valid site has a pages/

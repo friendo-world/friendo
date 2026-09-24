@@ -22,7 +22,8 @@ startup and re-imports on every edit.
 | Flag | Default | What |
 |---|---|---|
 | `--port`, `-p` | `3000` | Port to serve on |
-| `--open-admin` | `false` | Skip admin auth (local convenience) |
+| `--require-login` | `false` | Ask for a sign-in even on localhost. By default the admin opens without one for requests from your own machine when no email provider is configured |
+| `--open-admin` | `false` | Skip admin auth for every request (never on a public site) |
 
 ### `friendo build`
 Compile the [`content/`](/docs/content) folder (markdown files) into the site
@@ -72,16 +73,25 @@ Show the account you're signed in as.
 ### `friendo logout`
 Sign out — clear the cached network token and site sessions.
 
+### `friendo open-admin [subdomain]`
+Open a site's admin in your browser, signed in from your network account — the
+terminal twin of the **Open admin** button on your [account page](/docs/network-account).
+Defaults to the site in the current folder; `--network <url>` for another network.
+
 ### `friendo network …`
 Operator commands for running a network yourself — one host serving many sites by
-subdomain. These need the **operator** capability on your account.
+subdomain. These need the **operator** capability on your account. Every one of
+them works two ways: on the box (`--root`, or `FRIENDO_NETWORK_ROOT`) or from
+anywhere with `--network <url>` after `friendo login <url>`. The same levers are in
+the browser at `/network` — see [Run a network](/docs/run-a-network).
 
 | Command | What |
 |---|---|
 | `friendo network serve` | Serve every site on the network by subdomain |
-| `friendo network sites` | List the sites on the network |
-| `friendo network provision <sub>` | Create a new site |
-| `friendo network deploy <sub>` | Provision + push the current folder in one step |
+| `friendo network home [sub]` | Show or set the site served at the bare domain (`--clear` for the built-in page) |
+| `friendo network sites` | List the sites on the network, with owners and status |
+| `friendo network provision <sub>` | Create a new site (`--owner <email>`, `--name`) |
+| `friendo network deploy <sub>` | Provision + push the current folder in one step (`--owner`) |
 | `friendo network sites suspend <sub>` | Show visitors a hold notice instead of the site (`--reason`) |
 | `friendo network sites resume <sub>` | Put a site on hold back on the air |
 | `friendo network destroy <sub>` | Delete a site and all its data (`--yes` to confirm) |
@@ -129,7 +139,9 @@ you can check on it from a browser as well as with `friendo domain list`.
 
 ## Config & auth
 
-Deploy credentials are cached in `~/.friendo/config`. Site sync authenticates with
-your **site admin** login (cached per site); signing in to a network is
-passwordless — `friendo login` runs a browser device-auth flow, no platform
-password. See [Auth & users](/docs/auth) for the distinction.
+Credentials are cached in `~/.friendo/config`. Site sync (`push`/`pull`) signs in
+to the **site** — a code sent to your email, or a password where the site allows
+one — and caches the session per site; `deploy` skips that by minting the session
+from your network sign-in. Signing in to a **network** is `friendo login`: a
+browser device-auth flow, always passwordless. See [Auth & users](/docs/auth)
+for the distinction.

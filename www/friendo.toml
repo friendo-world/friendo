@@ -1,0 +1,12 @@
+[site]
+name = "friendo"
+
+[content]
+types = []
+
+# friendo.world's home site: the operator serves it at the bare domain with
+#   friendo network home www --network https://friendo.world
+# Publish changes with:  npm run deploy:www
+
+[deploy]
+target = "https://www.friendo.world"

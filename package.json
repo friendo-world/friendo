@@ -9,7 +9,7 @@
     "check": "go vet ./... && go build ./... && npm test",
     "test": "npm run test:go",
     "test:go": "go test ./...",
-    "test:sdk": "go build -o bin/friendo ./cli/cmd/friendo/ && node tests/sdk-persona.mjs && node tests/sdk-map.mjs && node tests/sdk-map-aggregate.mjs && node tests/sdk-form.mjs",
+    "test:sdk": "go build -o bin/friendo ./cli/cmd/friendo/ && node tests/sdk-persona.mjs && node tests/sdk-map.mjs && node tests/sdk-map-aggregate.mjs && node tests/sdk-form.mjs && node tests/sdk-network.mjs",
     "build": "npm run admin && npm run sdk && go build -o bin/friendo ./cli/cmd/friendo/",
     "release": "node scripts/release.mjs",
     "serve": "npm run build && cd testsite && ../bin/friendo serve",
@@ -19,6 +19,8 @@
     "init": "npm run build && ./bin/friendo init",
     "export": "npm run build && cd testsite && ../bin/friendo export --mode static",
     "deploy:dry": "npm run build && cd testsite && ../bin/friendo push --dry-run",
+    "deploy:www": "npm run build && cd www && ../bin/friendo deploy www --network https://friendo.world",
+    "deploy:docs": "npm run build && cd docs && ../bin/friendo deploy docs --network https://friendo.world",
     "dev": "bash dev.sh"
   },
   "devDependencies": {

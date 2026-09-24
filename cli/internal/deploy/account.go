@@ -242,6 +242,30 @@ func RunNetworkDeploy(subdomain, networkURL string) error {
 	return nil
 }
 
+// RunOpenAdmin opens your browser signed in to a site's admin, from your
+// network account — the terminal twin of the "Open admin" button on the
+// account page. The site defaults to the one in the current folder.
+func RunOpenAdmin(subdomain, networkURL string) error {
+	token, _, sub, url, err := domainContext(subdomain, networkURL)
+	if err != nil {
+		return err
+	}
+	var out struct {
+		URL   string `json:"url"`
+		Error string `json:"error"`
+	}
+	status, err := accountPost(url+"/api/account/sites/"+sub+"/admin-link", token, map[string]string{}, &out)
+	if err != nil {
+		return err
+	}
+	if status >= 300 || out.URL == "" {
+		return fmt.Errorf("could not open the admin for %q: %s", sub, orDefault(out.Error, "request failed"))
+	}
+	fmt.Printf("Opening %s in your browser (the link works once, for the next minute).\n", out.URL)
+	openBrowser(out.URL)
+	return nil
+}
+
 // ensureAccountToken returns a valid account token for the network, running the
 // device-auth login (and caching it) when there isn't a working cached one.
 func ensureAccountToken(networkURL string) (token, email string, err error) {

@@ -51,8 +51,8 @@ export function App() {
     if (setup.needsSetup && setup.hasLegacyAdmin) {
       return <Migrate onDone={() => setSetup(NO_SETUP)} />;
     }
-    if (setup.needsSetup) return <Setup onLogin={setUser} />;
-    return <Login onLogin={setUser} />;
+    if (setup.needsSetup) return <Setup status={setup} onLogin={setUser} />;
+    return <Login status={setup} onLogin={setUser} />;
   }
 
   const logout = async () => {

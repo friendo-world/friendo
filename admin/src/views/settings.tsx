@@ -56,7 +56,8 @@ function Toggle({
 
 // Presets set the access policy in one click. They're just bundles of the same
 // three settings a site owner can also flip individually below.
-const PRESETS: { key: string; label: string; hint: string; access: AccessSettings }[] = [
+type AccessPreset = Pick<AccessSettings, "default_role" | "signups_enabled" | "require_approval">;
+const PRESETS: { key: string; label: string; hint: string; access: AccessPreset }[] = [
   {
     key: "personal",
     label: "Personal",
@@ -77,7 +78,7 @@ const PRESETS: { key: string; label: string; hint: string; access: AccessSetting
   },
 ];
 
-function matchesPreset(a: AccessSettings, p: AccessSettings) {
+function matchesPreset(a: AccessSettings, p: AccessPreset) {
   return (
     a.default_role === p.default_role &&
     a.signups_enabled === p.signups_enabled &&
@@ -119,6 +120,7 @@ export function SettingsView() {
     signups: "access.signups_enabled",
     approval: "content.require_approval",
     submissions: "content.accept_submissions",
+    passwordLogin: "access.password_login",
   };
   const isManaged = (k: string) => s?.managed?.includes(k) ?? false;
   const accessManaged = isManaged(MK.defaultRole) || isManaged(MK.signups) || isManaged(MK.approval);
@@ -215,6 +217,19 @@ export function SettingsView() {
             />
           )}
         </div>
+      </div>
+
+      <h2 class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase">Signing in</h2>
+      <div class="mb-8 rounded-lg bg-white p-6 shadow-sm">
+        {s && (
+          <Toggle
+            label="Allow signing in with a password"
+            hint={managedHint("Everyone can always sign in with a code emailed to them. Turn this on to also allow passwords — you'll be able to set one when adding or editing a user.", MK.passwordLogin)}
+            on={s.access.password_login}
+            disabled={saving || isManaged(MK.passwordLogin)}
+            onToggle={() => patch({ access: { password_login: !s.access.password_login } })}
+          />
+        )}
       </div>
 
       <h2 class="mb-3 text-sm font-semibold tracking-wide text-gray-500 uppercase">Comments</h2>

@@ -40,13 +40,26 @@ export type UserInput = {
   password?: string;
 };
 
-export type SetupStatus = { needsSetup: boolean; hasLegacyAdmin: boolean };
+// What a cold client needs to know: does the site still need its first owner, is
+// an old single-admin password waiting to be upgraded, may people sign in with a
+// password here, and will a sign-in code actually be emailed (else it's shown /
+// printed for local dev).
+export type SetupStatus = {
+  needsSetup: boolean;
+  hasLegacyAdmin: boolean;
+  passwordLogin?: boolean;
+  emailConfigured?: boolean;
+};
 
 export type AccessSettings = {
   default_role: "member" | "contributor";
   signups_enabled: boolean;
   require_approval: boolean;
+  password_login: boolean;
 };
+
+// A request-code response: the code is only present in local dev (echo mode).
+export type CodeSent = { sent: boolean; emailed?: boolean; code?: string };
 
 export type Settings = {
   site: { name: string };
@@ -147,6 +160,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  // Passwordless sign-in: ask for a code, then verify it.
+  requestCode: (email: string) =>
+    req<CodeSent>("/auth/request-code", { method: "POST", body: JSON.stringify({ email }) }),
+  verifyCode: (email: string, code: string) =>
+    req<{ user: User }>("/auth/verify-code", {
+      method: "POST",
+      body: JSON.stringify({ email, code }),
+    }),
   logout: () => req<void>("/auth/logout", { method: "POST" }),
 
   collections: () => req<{ collections: Collection[] }>("/collections"),
@@ -176,13 +197,22 @@ export const api = {
     }),
 
   setupStatus: () => req<SetupStatus>("/setup"),
+  // First-run setup: a code proves the owner's email; no account exists until
+  // it verifies. Setting a password instead also turns password sign-in on.
+  setupRequestCode: (email: string) =>
+    req<CodeSent>("/setup/request-code", { method: "POST", body: JSON.stringify({ email }) }),
+  setupWithCode: (email: string, name: string, code: string) =>
+    req<{ user: User }>("/setup", {
+      method: "POST",
+      body: JSON.stringify({ email, name, code }),
+    }),
   setup: (email: string, name: string, password: string) =>
     req<{ user: User }>("/setup", {
       method: "POST",
       body: JSON.stringify({ email, name, password }),
     }),
-  migrate: (email: string) =>
-    req<{ ok: boolean }>("/migrate", { method: "POST", body: JSON.stringify({ email }) }),
+  migrate: (email: string, password: string) =>
+    req<{ ok: boolean }>("/migrate", { method: "POST", body: JSON.stringify({ email, password }) }),
 
   users: () => req<{ users: User[] }>("/users"),
   createUser: (input: UserInput) =>

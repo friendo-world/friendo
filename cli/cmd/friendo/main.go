@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -68,19 +69,26 @@ func main() {
 
 	// --- serve ---
 	var port int
-	var openAdmin bool
+	var openAdmin, requireLogin bool
 	var serveCmd = &cobra.Command{
 		Use:   "serve",
 		Short: "Start the local dev server",
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := server.Start(port, openAdmin); err != nil {
+			if !cmd.Flags().Changed("require-login") {
+				switch strings.ToLower(os.Getenv("FRIENDO_REQUIRE_LOGIN")) {
+				case "1", "true", "yes", "on":
+					requireLogin = true
+				}
+			}
+			if err := server.Start(port, openAdmin, requireLogin); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
 		},
 	}
 	serveCmd.Flags().IntVarP(&port, "port", "p", 3000, "Port to run the server on")
-	serveCmd.Flags().BoolVar(&openAdmin, "open-admin", false, "Skip admin UI authentication")
+	serveCmd.Flags().BoolVar(&openAdmin, "open-admin", false, "Skip admin UI authentication for every request")
+	serveCmd.Flags().BoolVar(&requireLogin, "require-login", false, "Ask for a sign-in even on localhost (by default the admin opens without one when no email provider is configured)")
 
 	// --- export ---
 	var exportMode string
@@ -254,7 +262,26 @@ claims the subdomain, and pushes your content.
 		},
 	}
 
-	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, pushCmd, pullCmd, loginCmd, whoamiCmd, logoutCmd, newNetworkCommand(), newDomainCommand())
+	// --- open-admin ---
+	var openAdminNet string
+	var openAdminCmd = &cobra.Command{
+		Use:   "open-admin [subdomain]",
+		Short: "Open your site's admin in the browser, signed in from your network account",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			sub := ""
+			if len(args) > 0 {
+				sub = args[0]
+			}
+			if err := deploy.RunOpenAdmin(sub, openAdminNet); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
+	openAdminCmd.Flags().StringVar(&openAdminNet, "network", "", "Network URL (defaults to friendo.world)")
+
+	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, pushCmd, pullCmd, loginCmd, whoamiCmd, logoutCmd, openAdminCmd, newNetworkCommand(), newDomainCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

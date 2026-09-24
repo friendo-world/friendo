@@ -26,6 +26,9 @@ my-site/
 │   ├── 404.html
 │   └── blog/
 │       └── [slug].html # dynamic route for a single blog post
+├── content/            # optional: posts as markdown files
+│   └── blog/
+│       └── hello-world.md
 ├── assets/
 │   └── style.css
 └── data/               # created on first run (SQLite)
@@ -45,11 +48,15 @@ and the browser refreshes.
 | `http://localhost:3000` | Your site |
 | `http://localhost:3000/_/` | The admin UI (content + users) |
 
-## Create the admin account
+## Open the admin
 
-Open `http://localhost:3000/_/` and create the first account (email + password).
-This is your site's **owner** — see [Auth & users](/docs/auth). From the admin UI
-you can write posts, manage collections, and add users.
+Open `http://localhost:3000/_/`. On your own machine there's nothing to sign in
+to — the admin just opens, and you're the owner. From here you can write posts,
+manage collections, and add people.
+
+(Sign-in only appears once the site is somewhere other people can reach: on a
+server, you'll be asked to confirm your email with a code the first time. See
+[Auth & users](/docs/auth).)
 
 ## Edit a page
 

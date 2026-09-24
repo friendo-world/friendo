@@ -1,0 +1,51 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<section class="hero">
+  <h1>Your site is a folder.</h1>
+  <p class="lead">Build it on your machine. Publish it with one command. Take it anywhere —
+    friendo is a local-first website builder with no lock-in and no magic you can't see.</p>
+  <pre class="install"><code>curl -fsSL https://raw.githubusercontent.com/friendo-world/friendo/main/scripts/install.sh | sh
+friendo init my-site
+cd my-site &amp;&amp; friendo serve</code></pre>
+  <p class="hero-links">
+    <a class="cta" href="https://docs.friendo.world/docs/first-site">Make your first site &rarr;</a>
+    <a class="quiet" href="/account">Already have one? Sign in.</a>
+  </p>
+</section>
+
+<section class="cards">
+  <a class="card" href="https://docs.friendo.world/docs/site-is-a-folder">
+    <h3>A folder you own</h3>
+    <p>Templates, pages, assets and a SQLite database, sitting in a directory. Check it into git.
+      Export it to plain HTML. It outlives any tool — including this one.</p>
+  </a>
+  <a class="card" href="https://docs.friendo.world/docs/community">
+    <h3>Community, one tag at a time</h3>
+    <p>Comments, reactions, polls, chat, maps and forms are each a single tag:
+      <code>&lt;friendo-comments&gt;</code>. No JavaScript to write.</p>
+  </a>
+  <a class="card" href="https://docs.friendo.world/docs/deploy">
+    <h3>Publish in one command</h3>
+    <p><code>friendo deploy</code> puts your folder at <code>my-site.friendo.world</code>. Sign in with a
+      code sent to your email — there's no password to make up.</p>
+  </a>
+  <a class="card" href="https://docs.friendo.world/docs/run-a-network">
+    <h3>Or host it yourself</h3>
+    <p>The same binary serves one site on a server you own, or a whole <em>network</em> of them by
+      subdomain. friendo.world is just the reference network.</p>
+  </a>
+</section>
+
+<section class="how">
+  <h2>How it feels</h2>
+  <div class="steps">
+    <div><span class="n">1</span><p><b>Write pages</b> as plain HTML with a little template logic.
+      <code>{{ "{{ post.title }}" }}</code> is a post's title. That's most of it.</p></div>
+    <div><span class="n">2</span><p><b>Write content</b> in the admin, or as markdown files in <code>content/</code>. Either way it
+      lands in the same little database.</p></div>
+    <div><span class="n">3</span><p><b>Publish</b> with <code>friendo deploy</code>. Open the admin from
+      <a href="/account">your account page</a>, invite people, connect your own domain.</p></div>
+  </div>
+</section>
+{% endblock %}

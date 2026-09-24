@@ -35,7 +35,7 @@ themselves, so nothing else is needed.
 | `<friendo-comments>` | `post-id` | Lists approved comments and, for signed-in members, a compose box. |
 | `<friendo-reactions>` | `target-type`, `target-id`, `emojis` (optional, comma-separated; default `👍,❤️,🎉`) | Emoji reactions with live counts; click toggles yours. |
 | `<friendo-poll>` | `poll-slug` (or `poll-id`) | Renders a poll; signed-in members vote once and see the tally. |
-| `<friendo-channel>` | `channel-id` | A **realtime** message feed; signed-in members post and delete their own, and new messages stream in live. |
+| `<friendo-channel>` | `channel-id` | A **realtime** message feed; signed-in members post and delete their own, and new messages stream in live. See [Channels](/docs/channels). |
 | `<friendo-map>` | `target-type`, `target-id` | An interactive [Leaflet](https://leafletjs.com/) map of a record's [locations](#tagging-a-location), one marker per pin. Public — no sign-in needed. |
 | `<friendo-form>` | `collection`, `redirect` (optional), `status` (optional) | A create-a-post form: the author's own inputs (plus rich `<friendo-input>` types) become a new post, submitted from the page. See [Submitting posts from a page](#submitting-posts-from-a-page). |
 
@@ -47,7 +47,7 @@ dependency-free.
 
 The components above are interactive and load client-side. For content that should
 be readable **without JavaScript** — approved comments, reaction tallies, a poll's
-results — both runtimes also attach the public data straight to the post's `record`,
+results — the runtime also attaches the public data straight to the post's `record`,
 so a template can render it inline:
 
 ```html
@@ -64,7 +64,7 @@ so a template can render it inline:
 ```
 
 `record.comments` is the **approved** comments only; `record.poll` is present when
-the post declares one in front matter. These render the same bytes on both runtimes.
+the post declares one in front matter.
 The template form and the `<friendo-*>` component are two spellings of the same data
 — use whichever a page needs (often the server-rendered list for readers/SEO *and* a
 component for signing in and posting). See [Templates](/docs/templates#community-relations)

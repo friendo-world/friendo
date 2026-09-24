@@ -21,7 +21,7 @@ friendo/
 │   └── go/               # Go runtime — THE runtime (local dev = self-host = friendo.world)
 │       ├── server/       # HTTP server, routing, hot reload (`friendo serve` — one site)
 │       ├── network/      # Network mode (`friendo network serve` — many sites by subdomain):
-│       │                 #   dispatcher, site registry, operator console, account auth
+│       │                 #   dispatcher, site registry, apex pages, account + operator API
 │       ├── storage/      # Media storage — R2/S3 (FRIENDO_S3_*) or local disk (default)
 │       ├── admin/        # Serves the embedded admin SPA bundle
 │       │   └── spa/      # Built admin SPA (committed, embedded via go:embed)
@@ -69,17 +69,23 @@ runs friendo.world. See [DEPLOY.md](DEPLOY.md) and the network mode below.
 ### 2. Network mode (many sites, one operator)
 
 `friendo network serve` is the same binary hosting many tenant sites by
-subdomain, each its own folder + database, with an operator console at the apex.
-It's what friendo.world runs; you can run it locally too:
+subdomain, each its own folder + database, with the network's own pages at the
+apex. It's what friendo.world runs; you can run it locally too:
 
 ```bash
-friendo network serve --base-domain localhost   # sites at <subdomain>.localhost:3000
+FRIENDO_OTP_ECHO=1 friendo network serve --base-domain localhost   # sites at <subdomain>.localhost:3000
 ```
 
 | URL | What |
 |---|---|
-| `http://localhost:3000` | Operator console (apex) + device-auth for the CLI |
+| `http://localhost:3000` | The home site (once one is set), else the landing page |
+| `http://localhost:3000/account` | Your sites — `<friendo-account>`; the first sign-in claims operator |
+| `http://localhost:3000/network` | The operator's page — `<friendo-console>` |
+| `http://localhost:3000/activate` | Approving `friendo login` from the terminal |
 | `http://demo.localhost:3000` | The `demo` tenant site |
+
+With `FRIENDO_OTP_ECHO=1` and no email provider the sign-in code is shown on the
+page. `npm run dev` sets that up for you.
 
 Media offloads to R2/S3 when `FRIENDO_S3_*` is set (disk by default). See
 [DEPLOY.md](DEPLOY.md) for the full network deploy (Coolify + Cloudflare + R2).
@@ -89,13 +95,14 @@ Media offloads to R2/S3 when `FRIENDO_S3_*` is set (disk by default). See
 | Command | Description |
 |---|---|
 | `friendo init [name]` | Scaffold a new site |
-| `friendo serve` | Start the local dev server (compiles `content/`, hot reload) |
+| `friendo serve` | Start the local dev server (compiles `content/`, hot reload; the admin opens without sign-in on localhost — `--require-login` to test signing in) |
 | `friendo build` | Compile the `content/` folder (markdown) into the site database |
 | `friendo export` | Export as static HTML or bundle |
 | `friendo deploy [subdomain] [--network URL]` | Publish this folder to a friendo network (friendo.world by default): browser device-auth → claim the subdomain → push |
 | `friendo login [url]` | Sign in to a network in your browser (device auth; default friendo.world) |
 | `friendo whoami [url]` | Show the account you're signed in as |
 | `friendo logout` | Sign out — clear the cached token and site sessions |
+| `friendo open-admin [subdomain]` | Open a site's admin in the browser, signed in from your network account |
 | `friendo push` | Push templates + assets to deployed site |
 | `friendo push --data` | Also push records |
 | `friendo push --users` | Also push user accounts |
@@ -104,20 +111,24 @@ Media offloads to R2/S3 when `FRIENDO_S3_*` is set (disk by default). See
 
 ### `friendo network *` — run or manage a network
 
-The network group operates on a network you run on this box (`--root`, default
-`./network`, or `FRIENDO_NETWORK_ROOT`) or on a remote network (`--network URL`,
-after `friendo login`).
+Every command in the group works on a network you run on this box (`--root`,
+default `./network`, or `FRIENDO_NETWORK_ROOT`) or on a remote network
+(`--network URL`, after `friendo login URL`). The same levers are in the browser
+at `/network`.
 
 | Command | Description |
 |---|---|
 | `friendo network serve` | Serve every site on the network by subdomain (the friendo.world dev server) |
-| `friendo network sites` | List the sites on the network |
-| `friendo network provision <subdomain>` | Create a new site |
+| `friendo network home [subdomain]` | Show or set the site served at the bare domain (`--clear`) |
+| `friendo network sites` | List the sites on the network (`sites suspend/resume <sub>` to hold / release one) |
+| `friendo network provision <subdomain>` | Create a new site (`--owner <email>`, `--name`) |
 | `friendo network deploy <subdomain> --network URL` | Provision + push this folder in one command |
 | `friendo network destroy <subdomain> --yes` | Delete a site and all its data (irreversible) |
-| `friendo network invite <email>` | Pre-create an account so they can sign in when signups are invite-only |
+| `friendo network accounts` | List accounts (`accounts suspend/resume/signout <email>`) |
+| `friendo network quota [email] [limit]` | Show or set how many sites an account may make (`--default`) |
+| `friendo network invite <email>` | Invite someone (`--days`); `invites` lists, `invites revoke/prune` |
 | `friendo network signups <open\|invite>` | Set who may create an account (anyone / operator-invited) |
-| `friendo network operator grant <email>` | Grant an account the operator capability (on-box) |
+| `friendo network operator grant\|revoke <email>` | Give or take the operator capability |
 
 ## Scripts
 
@@ -138,6 +149,8 @@ after `friendo login`).
 | `npm run init` | Build + scaffold a new site (`friendo init`) |
 | `npm run export` | Build + export testsite as static HTML |
 | `npm run deploy:dry` | Build + dry-run `friendo push` for testsite |
+| `npm run deploy:docs` | Publish `docs/` to docs.friendo.world (from your laptop, as an operator — `docs` is a reserved name) |
+| `npm run deploy:www` | Publish `www/` — friendo.world's home site (`friendo network home www` once to serve it at the apex) |
 | `npm run release -- v0.2.0` | Cut a release: guard + bundle-check + `go test` + tag/push. Add `--dry-run` to stop before anything irreversible |
 | `npm run clean` | Remove build artifacts |
 
@@ -149,9 +162,13 @@ the runtime, network mode, and API. A **CLI push/pull round-trip** lives in
 
 `npm run test:sdk` is a separate **browser check** (Playwright): it boots the Go
 runtime over a throwaway site and drives Chromium to confirm the `friendo.js` Web
-Components render — `<friendo-map>` paints its markers and the `<friendo-auth>`
-persona switcher works. It needs network (the map loads Leaflet + OSM tiles from a
-CDN).
+Components render — `<friendo-map>` paints its markers, the `<friendo-auth>`
+persona switcher works, `<friendo-form>` submits — and boots a throwaway
+**network** to walk the whole self-service story (`tests/sdk-network.mjs`): sign
+in, create + home a site from `<friendo-console>`, override `/account` from the
+home site, and "Open admin" into the site. It needs network (the map loads
+Leaflet + OSM tiles from a CDN) and a Playwright Chromium (`npx playwright install
+chromium` once).
 
 [tests/](tests/) holds the **Go regression suite** — shared fixtures
 (`scenarios.json` REST steps, `render-scenarios.json` golden renders,
@@ -167,7 +184,7 @@ actually run:
 | Mode | What you're testing | Internet required? | Port |
 |---|---|---|---|
 | **`friendo serve`** | Site templates, data, admin UI (one site) | No | `:3000` |
-| **`friendo network serve`** | Subdomain dispatch, operator console, provisioning (many sites) | No | `:3000` |
+| **`friendo network serve`** | Subdomain dispatch, the home site + network pages, provisioning (many sites) | No | `:3000` |
 
 Both are the same Go binary against local storage (SQLite on disk; media on disk
 by default, or R2/S3 when `FRIENDO_S3_*` is set). For hosting a live network, see
@@ -198,16 +215,19 @@ the runtime only serves the bundle and the REST API.
 
 ## Auth
 
-**Site owner:** Create the site owner account (email + password) on first run at
-`/_/setup`. This is unchanged — a single site's admin still logs in with a
-password, and `friendo push --users` moves users to a deployed site.
+**Site sign-in** is a code sent to your email, for every role; passwords are
+opt-in per site (`access.password_login`, Settings → *Allow signing in with a
+password*). On localhost with no email provider, `friendo serve` opens the admin
+with no sign-in (`--require-login` to test the screens). On a server, the first
+visitor to `/_/` confirms their email with a code and becomes the owner.
+`friendo push --users` moves users (hashes included) to a deployed site.
 
-**Network account:** Signing in to a network is **passwordless** — email OTP for
-the operator console, plus **device auth** for the CLI (`friendo login`). Being an
+**Network account:** the same email-code sign-in at `/account`, plus **device
+auth** for the CLI (`friendo login`, approved at `/activate`). Being an
 **operator** is a capability on an account, not a separate login. Bootstrapping:
 
 - `FRIENDO_OPERATOR_EMAIL` grants the first operator on boot; otherwise the first
-  sign-in at the apex console claims it.
+  sign-in at `/account` claims it.
 - `RESEND_API_KEY` + `FRIENDO_EMAIL_FROM` deliver the OTP by email on a live
   network. In local dev without them, `FRIENDO_OTP_ECHO` prints the code to the
   server log instead (auto-enabled by `friendo serve` when no email is configured).

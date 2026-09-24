@@ -12,8 +12,9 @@ git, and outlives any single tool — including Friendo.
 ```
 my-site/
 ├── friendo.toml     # config: name, content types, deploy target
-├── layouts/       # shared layouts and partials
+├── layouts/         # shared layouts and partials
 ├── pages/           # page templates — file path maps to URL path
+├── content/         # optional: content as markdown files (compiled into data/)
 ├── assets/          # static assets (CSS, JS, images)
 └── data/            # the SQLite database
 ```

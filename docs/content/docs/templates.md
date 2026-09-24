@@ -6,9 +6,9 @@ weight: 6
 ---
 
 Friendo templates are [Pongo2](https://github.com/flosch/pongo2) — a
-Jinja2-compatible language — as plain `.html` files with logic. The edge runtime
-uses a matching Jinja2-compatible engine, so templates render the same way
-locally and when deployed.
+Jinja2-compatible language — as plain `.html` files with logic. One runtime
+renders them everywhere, so a template looks the same on your laptop, on a
+server you run, and on friendo.world.
 
 ## Layouts and blocks
 
@@ -85,11 +85,11 @@ so you can render it server-side with no JavaScript (the interactive
 {% for img in record.gallery %}<img src="{{ img.url }}" alt="">{% endfor %}
 ```
 
-Both runtimes attach these at the same point, so they render identically.
+These are attached before the template runs, so they're plain values to loop over.
 
 ## Control flow
 
-Both runtimes support the same tags, and they **nest** — a loop inside a loop, an
+The usual tags are all there, and they **nest** — a loop inside a loop, an
 `if` inside a loop, and so on:
 
 ```html
@@ -112,8 +112,7 @@ Both runtimes support the same tags, and they **nest** — a loop inside a loop,
 
 ### Loop variables
 
-Inside a `{% for %}`, `forloop` describes the iteration (these are the portable
-names — they work in both runtimes):
+Inside a `{% for %}`, `forloop` describes the iteration:
 
 | Variable | Value |
 |---|---|

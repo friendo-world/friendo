@@ -31,24 +31,30 @@ friendo push --data     # also push your records
 friendo push --users    # also push user accounts
 ```
 
+Once it's up, **[friendo.world/account](https://friendo.world/account)** lists
+your sites: open a site's admin from there (no separate sign-in), connect
+[your own domain](/docs/custom-domains), or make another site. See
+[Your network account](/docs/network-account).
+
 friendo.world is convenient, not required — everything it does, you can do
 yourself on your own infrastructure.
 
 ## Self-host it yourself
 
 friendo.world runs the same `friendo` binary you already have. Serve one site
-directly with `friendo serve`, or run your own **network** — one host serving
-many sites by subdomain — with `friendo network serve`, then
-`friendo deploy my-club --network https://sites.example.com` to publish to it.
+directly on a server you own ([Self-host a site](/docs/self-host-a-site)), or run
+your own **network** — one host serving many sites by subdomain
+([Run a network](/docs/run-a-network)) — then
+`friendo deploy my-club --network https://sites.example.com` publishes to it.
 `friendo push --target https://your-site.example.com` syncs to any site
 afterward.
 
 ## Keeping in sync
 
 All sync goes through your site's own API. `deploy` signs you into the network
-and mints the site's admin session for you (device auth + in-process SSO); for a
-self-hosted or custom-domain site you sign in with its admin email and password.
-Either way these work the same wherever the site is hosted:
+and mints the site's admin session for you; for a self-hosted site the CLI asks
+for your email and the code it sends you (or a password, if the site allows
+them). Either way these work the same wherever the site is hosted:
 
 | Command | What |
 |---|---|

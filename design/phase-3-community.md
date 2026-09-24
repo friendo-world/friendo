@@ -1,9 +1,7 @@
----
-title: Phase 3 — Community
-slug: phase-3-community
-group: Roadmap
-weight: 10
----
+> **Status: shipped design record.** Phase 3 (community features) shipped across v0.2–v0.3;
+> the "two runtimes"/parity language below describes the world at the time — friendo has
+> run on the single Go runtime since the single-runtime pivot. Kept for the reasoning.
+
 
 Activating the visitor-facing half of the data model: comments, reactions, and
 polls, written by verified visitors. See [Auth & users](/docs/auth) for the

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/friendo-world/friendo/runtime/go/api"
 	"github.com/friendo-world/friendo/runtime/go/content"
 	"github.com/friendo-world/friendo/runtime/go/data"
 	"github.com/friendo-world/friendo/runtime/go/server"
@@ -19,7 +20,8 @@ import (
 // right tenant by subdomain and serves it with the exact single-site handler
 // that `friendo serve` builds — so managed hosting and self-hosting run byte-for-
 // byte the same code path. Site handlers are built lazily and cached; the apex
-// (bare base domain) serves a minimal operator view.
+// (bare base domain) serves the operator's chosen home site, with the network's
+// own pages and API layered over it.
 //
 // Tenancy is in-process and cheap: an idle site costs about a file handle, and
 // there is no per-site process or cold-start. The honest cost — blast-radius
@@ -34,9 +36,19 @@ type Dispatcher struct {
 	order     []string // LRU: least-recent first, most-recent last
 	maxCached int
 
-	// apexHandler serves the bare base domain (the operator console). When nil,
-	// the apex falls back to a minimal site listing (serveApex).
+	// apexHandler serves the network's own surface on the bare base domain:
+	// /api/*, the default pages (/login, /account, …) and, with no home site,
+	// the landing page. When nil the apex shows a bare landing page.
 	apexHandler http.Handler
+
+	// homeSite names the site served at the bare base domain ("" for none).
+	// Set by the running network (see SetHomeSite); a function, like the other
+	// hooks, so the dispatcher never learns about the accounts store.
+	homeSite func() string
+
+	// ssoExchange redeems an "Open admin" code at a site's /_/sso landing for a
+	// site session token. Set by the running network (see SetSSOExchange).
+	ssoExchange func(code, sub string) (string, bool)
 
 	// suspended reports whether a site is on hold, and why. Set by the running
 	// network (see SetSuspendedCheck); nil means nothing is suspended, which
@@ -79,6 +91,7 @@ const maxDomainCache = 1024
 type siteHandler struct {
 	handler http.Handler
 	db      *data.DB
+	hasPage func(path string) bool
 }
 
 // NewDispatcher builds a dispatcher over reg. baseDomain is the host suffix under
@@ -96,8 +109,18 @@ func NewDispatcher(reg *Registry, baseDomain string, maxCached int) *Dispatcher 
 	}
 }
 
-// HandleApex sets the handler for the bare base domain — the operator console.
+// HandleApex sets the handler for the network's own surface on the bare base
+// domain (see ApexRouter).
 func (d *Dispatcher) HandleApex(h http.Handler) { d.apexHandler = h }
+
+// SetHomeSite tells the dispatcher which site serves at the bare base domain —
+// normally Accounts.HomeSite. Nil or "" means the apex handler's landing page.
+func (d *Dispatcher) SetHomeSite(fn func() string) { d.homeSite = fn }
+
+// SetSSOExchange tells the dispatcher how to redeem an "Open admin" code —
+// normally AccountAuth.ExchangeSSOCode. Without it /_/sso on a site is just a
+// path the site answers (404).
+func (d *Dispatcher) SetSSOExchange(fn func(code, sub string) (string, bool)) { d.ssoExchange = fn }
 
 // SetSuspendedCheck tells the dispatcher how to spot a suspended site — normally
 // Accounts.SiteSuspension. A suspended site serves a hold page instead of the
@@ -149,10 +172,21 @@ func (d *Dispatcher) ForgetDomain(host string) {
 
 func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sub := d.subdomain(r.Host)
+
+	// www is the apex under another name. Redirect it — except for a www site's
+	// own /_/ paths (its admin, API, and SSO landing), which have to answer at
+	// that host so `friendo deploy www` and "Open admin" keep working.
+	if sub == "www" {
+		if _, exists := d.reg.Dir("www"); !exists || !strings.HasPrefix(r.URL.Path, "/_/") {
+			d.redirectToApex(w, r)
+			return
+		}
+	}
+
 	// Not under the base domain — it may be a tenant's own domain. Only verified
 	// ones resolve, so an unverified claim can never take someone else's traffic.
 	// Any other real-looking hostname gets a page saying so (serveNotConnected)
-	// rather than the operator console: the person looking is almost always the
+	// rather than the network's pages: the person looking is almost always the
 	// tenant, mid-setup, checking whether it works yet. A bare IP or single-label
 	// host (health checks, `curl localhost`) can't be anyone's domain and still
 	// reaches the apex.
@@ -166,12 +200,34 @@ func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sub = s
 		}
 	}
+
+	// The apex. /api/* is always the network's. Everything else goes to the home
+	// site if the operator chose one — including the network's default pages
+	// when the home site defines a page at that path itself (that's how a home
+	// site brands /account: a page with <friendo-account> in it). Only the
+	// default pages the home site leaves undefined fall back to the network's.
 	if sub == "" {
-		if d.apexHandler != nil {
-			d.apexHandler.ServeHTTP(w, r)
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			d.serveApexHandler(w, r)
 			return
 		}
-		d.serveApex(w, r)
+		home := d.currentHomeSite()
+		if home == "" {
+			d.serveApexHandler(w, r)
+			return
+		}
+		if DefaultPage(r.URL.Path) && !d.siteHasPage(home, r.URL.Path) {
+			d.serveApexHandler(w, r)
+			return
+		}
+		sub = home
+	}
+
+	// A site's /_/sso landing: redeem an "Open admin" code for a session cookie
+	// on this host, then into the admin. Handled before the site so the site's
+	// own routes never see it.
+	if r.URL.Path == "/_/sso" && d.ssoExchange != nil {
+		d.serveSSO(w, r, sub)
 		return
 	}
 
@@ -200,6 +256,72 @@ func (d *Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	handler.ServeHTTP(w, r)
+}
+
+// serveApexHandler runs the network's own handler, or a bare landing page when
+// none is wired (tests, or a dispatcher used on its own).
+func (d *Dispatcher) serveApexHandler(w http.ResponseWriter, r *http.Request) {
+	if d.apexHandler != nil {
+		d.apexHandler.ServeHTTP(w, r)
+		return
+	}
+	serveLanding(w, d.baseDomain)
+}
+
+// currentHomeSite returns the home site if one is set and actually exists.
+func (d *Dispatcher) currentHomeSite() string {
+	if d.homeSite == nil {
+		return ""
+	}
+	sub := strings.ToLower(strings.TrimSpace(d.homeSite()))
+	if sub == "" {
+		return ""
+	}
+	if _, ok := d.reg.Dir(sub); !ok {
+		return ""
+	}
+	return sub
+}
+
+// siteHasPage asks a site (building it if needed) whether its pages answer path.
+func (d *Dispatcher) siteHasPage(sub, path string) bool {
+	if _, err := d.siteHandler(sub); err != nil {
+		return false
+	}
+	d.mu.Lock()
+	sh := d.cache[sub]
+	d.mu.Unlock()
+	return sh != nil && sh.hasPage != nil && sh.hasPage(path)
+}
+
+// redirectToApex sends www.<base> to the bare domain, keeping the path.
+func (d *Dispatcher) redirectToApex(w http.ResponseWriter, r *http.Request) {
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	host := d.baseDomain
+	if i := strings.IndexByte(r.Host, ':'); i >= 0 {
+		host += r.Host[i:]
+	}
+	http.Redirect(w, r, scheme+"://"+host+r.URL.RequestURI(), http.StatusMovedPermanently)
+}
+
+// serveSSO is a site's /_/sso landing. A valid, single-use code becomes the
+// site's own session cookie and the browser lands in the admin; anything else
+// lands on the sign-in screen with a note that the link didn't work.
+func (d *Dispatcher) serveSSO(w http.ResponseWriter, r *http.Request, sub string) {
+	code := r.URL.Query().Get("code")
+	token, ok := "", false
+	if code != "" {
+		token, ok = d.ssoExchange(code, sub)
+	}
+	if !ok {
+		http.Redirect(w, r, "/_/?error=sso", http.StatusSeeOther)
+		return
+	}
+	api.SetSessionCookie(w, r, token)
+	http.Redirect(w, r, "/_/", http.StatusSeeOther)
 }
 
 // subdomain extracts the tenant label from a request host. Returns "" for the
@@ -271,13 +393,14 @@ func (d *Dispatcher) siteHandler(sub string) (http.Handler, error) {
 	if _, err := content.Import(dir, db); err != nil {
 		log.Printf("[network] content import failed for %s: %v", sub, err)
 	}
-	h, err := server.BuildSiteHandler(dir, db, false)
+	built, err := server.BuildSite(dir, db, false)
 	if err != nil {
 		db.Conn.Close()
 		return nil, fmt.Errorf("building site handler: %w", err)
 	}
+	h := built.Handler
 
-	d.cache[sub] = &siteHandler{handler: h, db: db}
+	d.cache[sub] = &siteHandler{handler: h, db: db, hasPage: built.HasPage}
 	d.order = append(d.order, sub)
 	d.trimLocked()
 	return h, nil
@@ -347,7 +470,7 @@ func (d *Dispatcher) Close() {
 func (d *Dispatcher) ListenAndServe(port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("friendo network serving on http://localhost%s (base domain %q)", addr, d.baseDomain)
-	log.Printf("  apex / operator view:  http://%s%s/", d.baseDomain, addr)
+	log.Printf("  apex / home site:      http://%s%s/  (sign in at /account, console at /network)", d.baseDomain, addr)
 	log.Printf("  a site:                http://<subdomain>.%s%s/", d.baseDomain, addr)
 	return http.ListenAndServe(addr, d)
 }
@@ -410,28 +533,4 @@ func (d *Dispatcher) serveNotConnected(w http.ResponseWriter, host, sub string, 
 		`<p><code>friendo domain add %s</code></p>`+
 		`<p class="muted">Not expecting this page? The domain's DNS points at this server, but nobody has connected it — check with whoever manages the domain.</p>`,
 		h, h)
-}
-
-// serveApex renders the operator view: a minimal listing of the network's sites.
-// This is the placeholder for the full operator console (Phase 2).
-func (d *Dispatcher) serveApex(w http.ResponseWriter, r *http.Request) {
-	sites, err := d.reg.Sites()
-	if err != nil {
-		http.Error(w, "network error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><title>friendo network</title>`+
-		`<style>body{font-family:system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;line-height:1.5}`+
-		`h1{margin-bottom:.25rem}.muted{color:#6b7280}li{margin:.35rem 0}</style>`+
-		`<h1>friendo network</h1><p class="muted">%d site(s) &middot; operator console (placeholder)</p><ul>`, len(sites))
-	for _, s := range sites {
-		host := s.Subdomain + "." + d.baseDomain
-		fmt.Fprintf(w, `<li><a href="//%s/">%s</a> &mdash; %s</li>`,
-			html.EscapeString(host), html.EscapeString(host), html.EscapeString(s.Name))
-	}
-	if len(sites) == 0 {
-		fmt.Fprint(w, `<li class="muted">No sites yet. Create one with <code>friendo network provision &lt;subdomain&gt;</code>.</li>`)
-	}
-	fmt.Fprint(w, `</ul>`)
 }

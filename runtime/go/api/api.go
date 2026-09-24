@@ -50,6 +50,7 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Post("/auth/login", handleLogin(db))
 		r.Post("/auth/logout", handleLogout(db))
 		r.Get("/setup", handleSetupStatus(db))
+		r.Post("/setup/request-code", handleSetupRequestCode(db))
 		r.Post("/setup", handleSetupCreate(db))
 		r.Post("/migrate", handleMigrate(db))
 		r.Post("/auth/request-code", handleRequestCode(db))
@@ -1331,6 +1332,13 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	})
 }
 
+// SetSessionCookie issues the site session cookie with the runtime's standard
+// attributes. Exported for the network's browser "Open admin" landing, which
+// mints a site session out of process from this package's handlers.
+func SetSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+	setSessionCookie(w, r, token)
+}
+
 // requestIsHTTPS reports whether the request arrived over TLS (directly or via a
 // terminating proxy).
 func requestIsHTTPS(r *http.Request) bool {
@@ -1458,7 +1466,13 @@ func handleLogin(db *data.DB) http.HandlerFunc {
 			return
 		}
 
-		email := strings.TrimSpace(body.Email)
+		email := data.NormalizeEmail(body.Email)
+		// Passwords are opt-in: a site signs in with an emailed code unless its
+		// owner turned passwords on (or set one up with a password to begin with).
+		if !db.GetBoolSetting(settingPasswordLogin, false) {
+			jsonError(w, "password sign-in is turned off for this site — sign in with a code sent to your email instead", http.StatusForbidden)
+			return
+		}
 		// Brute-force guard: lock out after too many failed attempts per account.
 		bucket := "login-fail:" + email
 		if db.RateLimitExceeded(bucket, loginFailLimit, loginFailWindow) {
@@ -1702,9 +1716,10 @@ func handlePushUsers(db *data.DB) http.HandlerFunc {
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(id) DO UPDATE SET
 				   email=excluded.email, phone=excluded.phone, name=excluded.name,
-				   avatar=excluded.avatar, password_hash=excluded.password_hash,
+				   avatar=excluded.avatar,
+				   password_hash=CASE WHEN excluded.password_hash = '' THEN users.password_hash ELSE excluded.password_hash END,
 				   role=excluded.role, auth_methods=excluded.auth_methods, updated=excluded.updated`,
-				id, db.SiteID, str("email"), str("phone"), str("name"),
+				id, db.SiteID, data.NormalizeEmail(str("email")), str("phone"), str("name"),
 				str("avatar"), str("password_hash"),
 				func() string {
 					if r := str("role"); r != "" {
@@ -1716,7 +1731,10 @@ func handlePushUsers(db *data.DB) http.HandlerFunc {
 					if a := str("auth_methods"); a != "" {
 						return a
 					}
-					return `["password"]`
+					if str("password_hash") == "" {
+						return `["otp"]`
+					}
+					return `["password","otp"]`
 				}(),
 				func() string {
 					if c := str("created"); c != "" {
@@ -1910,15 +1928,71 @@ func handlePullUsers(db *data.DB) http.HandlerFunc {
 
 // --- First-run setup / migrate ---
 
+// handleSetupStatus tells a cold client (SPA, CLI) what to do: whether the site
+// still needs its first owner, whether an old single-admin password is waiting
+// to be upgraded, whether passwords are allowed here, and whether a real email
+// provider will deliver the sign-in code (else it's echoed / logged for dev).
 func handleSetupStatus(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, map[string]any{
-			"needsSetup":     !db.IsSetupDone(),
-			"hasLegacyAdmin": db.HasLegacyAdmin(),
+			"needsSetup":      !db.IsSetupDone(),
+			"hasLegacyAdmin":  db.HasLegacyAdmin(),
+			"passwordLogin":   db.GetBoolSetting(settingPasswordLogin, false),
+			"emailConfigured": emailConfigured(),
 		})
 	}
 }
 
+// handleSetupRequestCode emails the code that proves who the first owner is.
+// Public, but only while the site has no owner. No user row exists yet — the
+// code is keyed on the email itself (data.SetupOTPKey) and the owner is created
+// only when it verifies. The code is also written to the server log, so a
+// self-hoster with no email provider can finish setup from the terminal.
+func handleSetupRequestCode(db *data.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if db.IsSetupDone() {
+			jsonError(w, "setup already complete", http.StatusConflict)
+			return
+		}
+		var in struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		email := data.NormalizeEmail(in.Email)
+		if email == "" || !strings.Contains(email, "@") {
+			jsonError(w, "a valid email is required", http.StatusBadRequest)
+			return
+		}
+		key := data.SetupOTPKey(email)
+		if db.HasFreshOTP(key, otpResendWindow) {
+			jsonError(w, "a code was already sent — please wait before requesting another", http.StatusTooManyRequests)
+			return
+		}
+		code := generateOTP()
+		if err := db.CreateOTP(key, code, 10*time.Minute); err != nil {
+			jsonError(w, "could not issue code", http.StatusInternalServerError)
+			return
+		}
+		sendOTPEmail(email, code)
+		if !emailConfigured() {
+			log.Printf("Setup code for %s: %s  (no email provider configured — enter this code to create the owner account)", email, code)
+		}
+		resp := map[string]any{"sent": true, "emailed": emailConfigured()}
+		if otpEchoEnabled() {
+			resp["code"] = code
+		}
+		jsonResponse(w, resp)
+	}
+}
+
+// handleSetupCreate creates the site's first owner. Two ways in:
+//   - {email, name, code}     — the code from /setup/request-code (the default).
+//   - {email, name, password} — sets a password too; choosing this at setup is
+//     the opt-in, so it also turns access.password_login on. Older CLIs only know
+//     this shape, and it keeps working.
 func handleSetupCreate(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db.IsSetupDone() {
@@ -1929,18 +2003,15 @@ func handleSetupCreate(db *data.DB) http.HandlerFunc {
 			Email    string `json:"email"`
 			Name     string `json:"name"`
 			Password string `json:"password"`
+			Code     string `json:"code"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		email := strings.TrimSpace(in.Email)
+		email := data.NormalizeEmail(in.Email)
 		if email == "" {
 			jsonError(w, "email is required", http.StatusBadRequest)
-			return
-		}
-		if len(in.Password) < 8 {
-			jsonError(w, "password must be at least 8 characters", http.StatusBadRequest)
 			return
 		}
 		name := strings.TrimSpace(in.Name)
@@ -1948,7 +2019,36 @@ func handleSetupCreate(db *data.DB) http.HandlerFunc {
 			name = strings.Split(email, "@")[0]
 		}
 
-		user, err := db.CreateUser(email, name, in.Password, "owner")
+		var user *data.User
+		var err error
+		switch {
+		case in.Code != "":
+			key := data.SetupOTPKey(email)
+			bucket := "otp-fail:" + key
+			if db.RateLimitExceeded(bucket, loginFailLimit, loginFailWindow) {
+				jsonError(w, "too many wrong codes — request a new one later", http.StatusTooManyRequests)
+				return
+			}
+			if !db.VerifyOTP(key, strings.TrimSpace(in.Code)) {
+				db.RateLimitHit(bucket, loginFailWindow)
+				jsonError(w, "invalid or expired code", http.StatusUnauthorized)
+				return
+			}
+			db.RateLimitClear(bucket)
+			user, err = db.CreateMember(email, name, "owner")
+		case in.Password != "":
+			if len(in.Password) < 8 {
+				jsonError(w, "password must be at least 8 characters", http.StatusBadRequest)
+				return
+			}
+			user, err = db.CreateUser(email, name, in.Password, "owner")
+			if err == nil {
+				db.SetSetting(settingPasswordLogin, "true")
+			}
+		default:
+			jsonError(w, "enter the code we sent to your email (POST /setup/request-code first)", http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			jsonError(w, "could not create account: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1961,6 +2061,9 @@ func handleSetupCreate(db *data.DB) http.HandlerFunc {
 	}
 }
 
+// handleMigrate upgrades a legacy single-admin password into the first owner
+// account. It runs before any owner exists, so no session can gate it; the
+// legacy password itself is the proof, checked with the same lockout as login.
 func handleMigrate(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !db.HasLegacyAdmin() {
@@ -1968,17 +2071,31 @@ func handleMigrate(db *data.DB) http.HandlerFunc {
 			return
 		}
 		var in struct {
-			Email string `json:"email"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		email := strings.TrimSpace(in.Email)
+		email := data.NormalizeEmail(in.Email)
 		if email == "" {
 			jsonError(w, "email is required", http.StatusBadRequest)
 			return
 		}
+		const bucket = "migrate-fail"
+		if db.RateLimitExceeded(bucket, loginFailLimit, loginFailWindow) {
+			jsonError(w, "too many failed attempts — try again later", http.StatusTooManyRequests)
+			return
+		}
+		if !db.VerifyLegacyAdminPassword(in.Password) {
+			db.RateLimitHit(bucket, loginFailWindow)
+			jsonError(w, "that isn't the existing admin password", http.StatusUnauthorized)
+			return
+		}
+		db.RateLimitClear(bucket)
+		// The upgraded owner only knows a password, so passwords stay allowed.
+		db.SetSetting(settingPasswordLogin, "true")
 		if err := db.MigrateAdminToUsers(email); err != nil {
 			jsonError(w, "migration failed: "+err.Error(), http.StatusBadRequest)
 			return
@@ -1999,15 +2116,10 @@ func emailConfigured() bool {
 }
 
 // otpEchoEnabled reports whether request-code may return the login code in its
-// response — a DEV-ONLY affordance, off by default so a production/managed site
-// never leaks codes. Enabled only by explicitly setting FRIENDO_OTP_ECHO (which
-// `friendo serve` does for local dev; the friendo.world provisioner never does).
+// response — the shared DEV-ONLY rule in the email package (explicit
+// FRIENDO_OTP_ECHO and no real provider configured).
 func otpEchoEnabled() bool {
-	switch strings.ToLower(os.Getenv("FRIENDO_OTP_ECHO")) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
+	return email.EchoEnabled()
 }
 
 // sendOTPEmail delivers a login code via the shared email package (Resend).
@@ -2031,7 +2143,7 @@ func handleRequestCode(db *data.DB) http.HandlerFunc {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		email := strings.TrimSpace(in.Email)
+		email := data.NormalizeEmail(in.Email)
 		if email == "" {
 			jsonError(w, "email is required", http.StatusBadRequest)
 			return
@@ -2068,17 +2180,19 @@ func handleRequestCode(db *data.DB) http.HandlerFunc {
 		}
 		sendOTPEmail(email, code)
 
-		resp := map[string]any{"sent": true}
+		resp := map[string]any{"sent": true, "emailed": emailConfigured()}
 		// Echo the code only in explicit dev mode and only when no real email
 		// provider is configured — never on a production/managed site.
-		if !emailConfigured() && otpEchoEnabled() {
+		if otpEchoEnabled() {
 			resp["code"] = code
 		}
 		jsonResponse(w, resp)
 	}
 }
 
-// handleVerifyCode validates a one-time code and starts a session.
+// handleVerifyCode validates a one-time code and starts a session. Wrong
+// guesses are capped per account (same lockout as password login) so a
+// six-digit code can't be brute-forced inside its ten-minute life.
 func handleVerifyCode(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -2089,11 +2203,19 @@ func handleVerifyCode(db *data.DB) http.HandlerFunc {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		user, err := db.GetUserByEmail(strings.TrimSpace(in.Email))
-		if err != nil || !db.VerifyOTP(user.ID, in.Code) {
+		email := data.NormalizeEmail(in.Email)
+		bucket := "otp-fail:" + email
+		if db.RateLimitExceeded(bucket, loginFailLimit, loginFailWindow) {
+			jsonError(w, "too many wrong codes — request a new one later", http.StatusTooManyRequests)
+			return
+		}
+		user, err := db.GetUserByEmail(email)
+		if err != nil || !db.VerifyOTP(user.ID, strings.TrimSpace(in.Code)) {
+			db.RateLimitHit(bucket, loginFailWindow)
 			jsonError(w, "invalid or expired code", http.StatusUnauthorized)
 			return
 		}
+		db.RateLimitClear(bucket)
 		token, err := db.CreateSession(user.ID, r.RemoteAddr, r.UserAgent())
 		if err != nil {
 			jsonError(w, "could not create session", http.StatusInternalServerError)
@@ -2146,12 +2268,14 @@ func handleCreateUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		email := strings.TrimSpace(in.Email)
+		email := data.NormalizeEmail(in.Email)
 		if email == "" {
 			jsonError(w, "email is required", http.StatusBadRequest)
 			return
 		}
-		if len(in.Password) < 8 {
+		// A password is optional: everyone can sign in with an emailed code, so
+		// an account without one is complete. If one is given it must be usable.
+		if in.Password != "" && len(in.Password) < 8 {
 			jsonError(w, "password must be at least 8 characters", http.StatusBadRequest)
 			return
 		}
@@ -2167,7 +2291,13 @@ func handleCreateUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 			jsonError(w, "you cannot assign that role", http.StatusForbidden)
 			return
 		}
-		user, err := db.CreateUser(email, name, in.Password, role)
+		var user *data.User
+		var err error
+		if in.Password == "" {
+			user, err = db.CreateMember(email, name, role)
+		} else {
+			user, err = db.CreateUser(email, name, in.Password, role)
+		}
 		if err != nil {
 			jsonError(w, "could not create user: "+err.Error(), http.StatusBadRequest)
 			return
@@ -2273,6 +2403,9 @@ const (
 	settingSignupsEnabled    = "access.signups_enabled"
 	settingRequireApproval   = "content.require_approval"
 	settingAcceptSubmissions = "content.accept_submissions"
+	// settingPasswordLogin turns password sign-in on for the site. Off by
+	// default: everyone can always sign in with a code emailed to them.
+	settingPasswordLogin = "access.password_login"
 )
 
 // tomlSettingsConfig mirrors the [settings] block of friendo.toml. Pointer fields
@@ -2285,6 +2418,7 @@ type tomlSettingsConfig struct {
 		SignupsEnabled    *bool   `toml:"signups_enabled"`
 		RequireApproval   *bool   `toml:"require_approval"`
 		AcceptSubmissions *bool   `toml:"accept_submissions"`
+		PasswordLogin     *bool   `toml:"password_login"`
 	} `toml:"settings"`
 }
 
@@ -2324,6 +2458,9 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 	if s.AcceptSubmissions != nil {
 		set(settingAcceptSubmissions, boolSetting(*s.AcceptSubmissions))
 	}
+	if s.PasswordLogin != nil {
+		set(settingPasswordLogin, boolSetting(*s.PasswordLogin))
+	}
 	if s.DefaultRole != nil {
 		if *s.DefaultRole == "member" || *s.DefaultRole == "contributor" {
 			set(settingDefaultRole, *s.DefaultRole)
@@ -2337,7 +2474,7 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 // managedList returns the managed setting keys in a stable order for the API, so the
 // admin SPA can render those controls read-only.
 func managedList(managed map[string]bool) []string {
-	order := []string{settingAutoApprove, settingDefaultRole, settingSignupsEnabled, settingRequireApproval, settingAcceptSubmissions}
+	order := []string{settingAutoApprove, settingDefaultRole, settingSignupsEnabled, settingRequireApproval, settingAcceptSubmissions, settingPasswordLogin}
 	out := []string{}
 	for _, k := range order {
 		if managed[k] {
@@ -2368,6 +2505,7 @@ func settingsPayload(db *data.DB, siteName string, managed map[string]bool) map[
 			"default_role":     db.GetSetting(settingDefaultRole, "member"),
 			"signups_enabled":  db.GetBoolSetting(settingSignupsEnabled, true),
 			"require_approval": db.GetBoolSetting(settingRequireApproval, false),
+			"password_login":   db.GetBoolSetting(settingPasswordLogin, false),
 		},
 		"content": map[string]any{
 			"accept_submissions": db.GetBoolSetting(settingAcceptSubmissions, false),
@@ -2397,6 +2535,7 @@ func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool)
 				DefaultRole     *string `json:"default_role"`
 				SignupsEnabled  *bool   `json:"signups_enabled"`
 				RequireApproval *bool   `json:"require_approval"`
+				PasswordLogin   *bool   `json:"password_login"`
 			} `json:"access"`
 			Content *struct {
 				AcceptSubmissions *bool `json:"accept_submissions"`
@@ -2423,6 +2562,9 @@ func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool)
 			}
 			if in.Access.RequireApproval != nil && !managed[settingRequireApproval] {
 				db.SetSetting(settingRequireApproval, boolSetting(*in.Access.RequireApproval))
+			}
+			if in.Access.PasswordLogin != nil && !managed[settingPasswordLogin] {
+				db.SetSetting(settingPasswordLogin, boolSetting(*in.Access.PasswordLogin))
 			}
 		}
 		if in.Content != nil && in.Content.AcceptSubmissions != nil && !managed[settingAcceptSubmissions] {

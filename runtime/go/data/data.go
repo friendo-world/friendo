@@ -1536,11 +1536,19 @@ func (db *DB) CountOwners() int {
 	return n
 }
 
-// CreateUser creates a new user with the given details.
-// The password is hashed with bcrypt before storing.
+// NormalizeEmail is how every email lands in the users table and how lookups
+// compare: trimmed and lowercased, so "Me@Example.com" and "me@example.com" are
+// one account whichever way it was typed.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// CreateUser creates a new user with a password (hashed with bcrypt). A code
+// emailed to the account also signs it in, so auth_methods records both.
 func (db *DB) CreateUser(email, name, password, role string) (*User, error) {
 	id := GenerateID()
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	email = NormalizeEmail(email)
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -1548,8 +1556,8 @@ func (db *DB) CreateUser(email, name, password, role string) (*User, error) {
 	}
 
 	_, err = db.Conn.Exec(
-		`INSERT INTO users (id, site_id, email, name, password_hash, role, created, updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO users (id, site_id, email, name, password_hash, role, auth_methods, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, '["password","otp"]', ?, ?)`,
 		id, db.SiteID, email, name, string(hash), role, now, now,
 	)
 	if err != nil {
@@ -1561,13 +1569,15 @@ func (db *DB) CreateUser(email, name, password, role string) (*User, error) {
 	}
 
 	return &User{
-		ID:      id,
-		SiteID:  db.SiteID,
-		Email:   email,
-		Name:    name,
-		Role:    role,
-		Created: now,
-		Updated: now,
+		ID:           id,
+		SiteID:       db.SiteID,
+		Email:        email,
+		Name:         name,
+		PasswordHash: string(hash),
+		Role:         role,
+		AuthMethods:  `["password","otp"]`,
+		Created:      now,
+		Updated:      now,
 	}, nil
 }
 
@@ -1714,13 +1724,14 @@ func (db *DB) SetDefaultPersona(userID, authorID string) error {
 	return err
 }
 
-// GetUserByEmail returns the account for an email, or sql.ErrNoRows.
+// GetUserByEmail returns the account for an email (case-insensitive), or
+// sql.ErrNoRows.
 func (db *DB) GetUserByEmail(email string) (*User, error) {
 	u := &User{}
 	err := db.Conn.QueryRow(
 		`SELECT id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated
-		 FROM users WHERE site_id = ? AND email = ?`,
-		db.SiteID, email,
+		 FROM users WHERE site_id = ? AND LOWER(email) = ?`,
+		db.SiteID, NormalizeEmail(email),
 	).Scan(&u.ID, &u.SiteID, &u.Email, &u.Phone, &u.Name, &u.Avatar, &u.PasswordHash, &u.Role, &u.AuthMethods, &u.Created, &u.Updated)
 	if err != nil {
 		return nil, err
@@ -1736,6 +1747,7 @@ func (db *DB) CreateMember(email, name, role string) (*User, error) {
 	}
 	id := GenerateID()
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	email = NormalizeEmail(email)
 	if name == "" {
 		name = strings.Split(email, "@")[0]
 	}
@@ -1750,7 +1762,14 @@ func (db *DB) CreateMember(email, name, role string) (*User, error) {
 	if _, err := db.createDefaultAuthor(id, name, email); err != nil {
 		return nil, fmt.Errorf("creating default author: %w", err)
 	}
-	return &User{ID: id, SiteID: db.SiteID, Email: email, Name: name, Role: role, Created: now, Updated: now}, nil
+	return &User{ID: id, SiteID: db.SiteID, Email: email, Name: name, Role: role, AuthMethods: `["otp"]`, Created: now, Updated: now}, nil
+}
+
+// SetupOTPKey is the otp_codes user_id used for the one code a first-run setup
+// sends before any user row exists. The owner is only created once the code
+// verifies, so an unclaimed site never holds a half-made account.
+func SetupOTPKey(email string) string {
+	return "setup:" + NormalizeEmail(email)
 }
 
 // CreateOTP stores a hashed one-time code for an account.
@@ -1808,8 +1827,8 @@ func (db *DB) AuthenticateUser(email, password string) (*User, error) {
 	u := &User{}
 	err := db.Conn.QueryRow(
 		`SELECT id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated
-		 FROM users WHERE site_id = ? AND email = ?`,
-		db.SiteID, email,
+		 FROM users WHERE site_id = ? AND LOWER(email) = ?`,
+		db.SiteID, NormalizeEmail(email),
 	).Scan(&u.ID, &u.SiteID, &u.Email, &u.Phone, &u.Name, &u.Avatar, &u.PasswordHash, &u.Role, &u.AuthMethods, &u.Created, &u.Updated)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -1818,7 +1837,9 @@ func (db *DB) AuthenticateUser(email, password string) (*User, error) {
 		return nil, err
 	}
 
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+	// A code-only account has no password to match — never let an empty hash
+	// through bcrypt (which would reject anyway, but be explicit).
+	if u.PasswordHash == "" || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
@@ -1841,8 +1862,10 @@ func (db *DB) GetUserByID(id string) (*User, error) {
 
 // ListUsers returns all users for this site.
 func (db *DB) ListUsers() ([]*User, error) {
+	// password_hash rides along so /pull/users can carry accounts to another
+	// site intact — it's never rendered by the admin UI (see api.userJSON).
 	rows, err := db.Conn.Query(
-		`SELECT id, site_id, email, phone, name, avatar, role, auth_methods, created, updated
+		`SELECT id, site_id, email, phone, name, avatar, password_hash, role, auth_methods, created, updated
 		 FROM users WHERE site_id = ? ORDER BY created ASC`,
 		db.SiteID,
 	)
@@ -1854,7 +1877,7 @@ func (db *DB) ListUsers() ([]*User, error) {
 	var users []*User
 	for rows.Next() {
 		u := &User{}
-		if err := rows.Scan(&u.ID, &u.SiteID, &u.Email, &u.Phone, &u.Name, &u.Avatar, &u.Role, &u.AuthMethods, &u.Created, &u.Updated); err != nil {
+		if err := rows.Scan(&u.ID, &u.SiteID, &u.Email, &u.Phone, &u.Name, &u.Avatar, &u.PasswordHash, &u.Role, &u.AuthMethods, &u.Created, &u.Updated); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -1879,8 +1902,9 @@ func (db *DB) UpdateUserPassword(id, password string) error {
 		return fmt.Errorf("hashing password: %w", err)
 	}
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	// Setting a password on a code-only account makes both methods valid.
 	_, err = db.Conn.Exec(
-		`UPDATE users SET password_hash = ?, updated = ? WHERE id = ? AND site_id = ?`,
+		`UPDATE users SET password_hash = ?, auth_methods = '["password","otp"]', updated = ? WHERE id = ? AND site_id = ?`,
 		string(hash), now, id, db.SiteID,
 	)
 	return err
@@ -1978,11 +2002,22 @@ func (db *DB) MigrateAdminToUsers(email string) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
 	_, err = db.Conn.Exec(
-		`INSERT INTO users (id, site_id, email, name, password_hash, role, created, updated)
-		 VALUES (?, ?, ?, ?, ?, 'owner', ?, ?)`,
-		id, db.SiteID, email, "Admin", hash, now, now,
+		`INSERT INTO users (id, site_id, email, name, password_hash, role, auth_methods, created, updated)
+		 VALUES (?, ?, ?, ?, ?, 'owner', '["password","otp"]', ?, ?)`,
+		id, db.SiteID, NormalizeEmail(email), "Admin", hash, now, now,
 	)
 	return err
+}
+
+// VerifyLegacyAdminPassword checks a password against the old single-admin
+// table. It's the proof /migrate demands: the upgrade runs before any owner
+// exists, so knowing the legacy password is the only thing that can gate it.
+func (db *DB) VerifyLegacyAdminPassword(password string) bool {
+	var hash string
+	if err := db.Conn.QueryRow(`SELECT password_hash FROM admin WHERE id = 'admin'`).Scan(&hash); err != nil || hash == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
 // HasLegacyAdmin returns true if there's a password in the old admin table

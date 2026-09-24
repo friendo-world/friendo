@@ -11,6 +11,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
 | **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
 | **v0.4** | Open the network — quotas, account management, custom domains | ✅ Shipped |
+| **v0.5** | One obvious sign-in; the network as a friendo site (home site + `<friendo-account>` / `<friendo-console>`); docs + landing | ✅ Shipped |
 
 ---
 
@@ -52,6 +53,23 @@ explanatory page at any domain that isn't live yet). Custom-domain TLS goes thro
 DNS TXT check. All of it was verified live on friendo.world before the tag: a real domain
 end to end through Cloudflare, Resend OTP delivery, a quota hit, and suspend/resume.
 Scope and decisions: [design/v0.4-roadmap.md](design/v0.4-roadmap.md).
+
+**v0.5 — shipped (2026-09):** sign-in became one obvious thing and the network became
+self-service end to end, built the friendo way. **Sign-in:** an emailed code for every role,
+everywhere — setup, the admin, adding people, the CLI — with passwords opt-in per site
+(`access.password_login`); `friendo serve` opens the admin without a sign-in on localhost;
+first-run setup creates no account until the code verifies. Along the way the audit's bugs
+went: `push --users` no longer blanks passwords, operator-provisioned sites get an owner,
+`/migrate` needs the legacy password, code guesses are capped. **The apex is a home site:**
+`friendo network home <sub>` serves a tenant site at the bare domain; the network's own
+pages (`/account`, `/network`, `/activate`, `/login`) are thin shells around new SDK tags —
+`<friendo-account>` (your sites, domains, **Open admin** into a site), `<friendo-console>`
+(every operator lever, incl. the ones the old console lacked), `<friendo-activate>` — and a
+home site takes a page over by defining it. The Go-template console is gone; every operator
+action is JSON under `/api/network/*`, so `friendo network …` works from anywhere. **Docs +
+landing:** `www/` (friendo.world's home site) and a refreshed docs site with Hosting pages,
+published by hand with `npm run deploy:www|docs`. Scope and decisions:
+[design/v0.5-roadmap.md](design/v0.5-roadmap.md).
 
 ---
 
@@ -109,8 +127,7 @@ Brings the rest of the data model to life: comments, reactions, and polls
 written by site **visitors**. Visitors become passwordless `member` accounts by
 verifying their email (OTP). Slices 3a–3e are shipped (deferred items noted per
 slice below). Full design + slices in
-[docs/content/docs/phase-3-community.md](docs/content/docs/phase-3-community.md)
-(also published at `docs.friendo.world/docs/phase-3-community`).
+[design/phase-3-community.md](design/phase-3-community.md).
 
 - **3a — Identity foundation** ✅ — a shared migration mechanism; the
   accounts/profiles split (`users` = accounts, `authors` = profiles linked by
@@ -175,7 +192,11 @@ drives the SDK components in a browser.
 Network mode's v0.4 surface has unit coverage throughout: quota enforcement at the claim
 path, account and site suspension (including that suspension kills sessions issued before
 it), invite lifecycle, custom-domain routing and verification, and the Cloudflare client
-against a stub API.
+against a stub API. v0.5 added the code-sign-in flows (`tests/auth_code_test.go`), the
+users-sync password fix, the migration seed, the localhost open rule
+(`runtime/go/admin/admin_test.go`), the operator JSON API, browser sign-in + bootstrap,
+reserved names, the apex/home-site/override routing, the `www` redirect, the "Open admin"
+SSO hand-off — and a Playwright walk of the whole network story (`tests/sdk-network.mjs`).
 
 Still without *automated* coverage (each was exercised by hand on friendo.world before
 the v0.4 tag): the live `friendo deploy` device-auth path against a running network, the

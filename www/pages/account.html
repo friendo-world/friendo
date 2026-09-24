@@ -1,0 +1,14 @@
+{% extends "layouts/base.html" %}
+{# A home site takes over a network default page by defining the same path. #}
+{# This wraps <friendo-account> in the site's own chrome, so friendo.world/account #}
+{# looks like friendo.world rather than the network's plain default page. #}
+{% block title %}Your sites — {{ site.name }}{% endblock %}
+
+{% block content %}
+<section class="narrow">
+  <h1>Your sites</h1>
+  <p class="lead">Sign in with a code sent to your email. Open a site's admin, connect your own domain,
+    or make a new site.</p>
+  <friendo-account></friendo-account>
+</section>
+{% endblock %}

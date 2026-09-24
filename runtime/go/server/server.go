@@ -53,11 +53,19 @@ var liveReload = &reloadBroadcaster{
 }
 
 // Start opens the database, builds routes, and starts the HTTP server.
-// If openAdmin is true, the admin UI skips password authentication.
-func Start(port int, openAdmin bool) error {
+// If openAdmin is true, the admin UI skips authentication entirely. Otherwise,
+// unless requireLogin is set, the admin still opens without a login for requests
+// from this machine when no email provider is configured (the everyday local
+// dev case — there'd be nowhere to send a sign-in code anyway).
+func Start(port int, openAdmin, requireLogin bool) error {
 	siteDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
+	}
+
+	admin.LocalOpen(!openAdmin && !requireLogin)
+	if !openAdmin && !requireLogin && os.Getenv("RESEND_API_KEY") == "" {
+		log.Printf("Admin opens without a sign-in for requests from this machine (use --require-login to test signing in).")
 	}
 
 	// Local dev convenience: unless a real email provider is configured (or the
@@ -102,12 +110,47 @@ func Start(port int, openAdmin bool) error {
 	return http.ListenAndServe(addr, handler)
 }
 
+// BuiltSite is a site ready to serve, plus what the network needs to know about
+// it beyond the handler: whether the site's own pages answer a given path (so a
+// home site can deliberately take over one of the network's default pages).
+type BuiltSite struct {
+	Handler  http.Handler
+	routes   []route
+	pagesDir string
+}
+
+// HasPage reports whether the site's pages/ folder defines urlPath — either a
+// routed page (including dynamic ones) or a direct pages/<path>.html file. It
+// mirrors handleTemplate's matching without rendering anything.
+func (s *BuiltSite) HasPage(urlPath string) bool {
+	if urlPath == "" {
+		urlPath = "/"
+	}
+	for i := range s.routes {
+		if s.routes[i].pattern.MatchString(urlPath) {
+			return true
+		}
+	}
+	direct := filepath.Join(s.pagesDir, filepath.Clean(urlPath)+".html")
+	_, err := os.Stat(direct)
+	return err == nil
+}
+
 // BuildSiteHandler assembles the site-serving HTTP handler: the admin UI + REST/sync
 // API at /_/, the community SDK at /friendo.js, static /assets/*, and the catch-all
 // template renderer. Start wraps it with a listener and a file watcher; the parity
 // tests mount it directly over a temp site + DB, so both drive the exact same
 // rendering path. Callers own content import and (for dev) the reload watcher.
 func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler, error) {
+	s, err := BuildSite(siteDir, db, openAdmin)
+	if err != nil {
+		return nil, err
+	}
+	return s.Handler, nil
+}
+
+// BuildSite is BuildSiteHandler plus the page table (see BuiltSite).
+func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) {
 	pagesDir := filepath.Join(siteDir, "pages")
 
 	// Load site configuration from friendo.toml (or use directory name).
@@ -163,7 +206,7 @@ func BuildSiteHandler(siteDir string, db *data.DB, openAdmin bool) (http.Handler
 		handleTemplate(w, req, db, pagesDir, tplSet, routes, siteCfg)
 	})
 
-	return r, nil
+	return &BuiltSite{Handler: r, routes: routes, pagesDir: pagesDir}, nil
 }
 
 // assetHandler serves /assets/*: managed media (assets/uploads/* + galleries/*)

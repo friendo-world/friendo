@@ -47,6 +47,7 @@ signups_enabled = true         # allow public sign-ups
 require_approval = false        # hold contributor posts for review before publishing
 accept_submissions = false      # let members submit posts via <friendo-form> (into the review queue)
 auto_approve = false            # publish new comments immediately instead of queuing them
+password_login = false          # also allow signing in with a password (everyone can always use an emailed code)
 ```
 
 | Key | What | Default |
@@ -56,9 +57,10 @@ auto_approve = false            # publish new comments immediately instead of qu
 | `require_approval` | Hold contributor posts as drafts until an editor publishes them | `false` |
 | `accept_submissions` | Let signed-in members submit posts from a [`<friendo-form>`](/docs/community#submitting-posts-from-a-page) into the review queue | `false` |
 | `auto_approve` | Publish new comments immediately instead of queuing them for moderation | `false` |
+| `password_login` | Also allow signing in with a password. Off, everyone signs in with a code sent to their email — see [Auth & users](/docs/auth) | `false` |
 
 Changes take effect on the next start (like `[site].name`). Keys you leave out are
-managed in the admin UI and travel between sites with `friendo push --settings`.
+managed in the admin UI and travel to a deployed site with `friendo push --data`.
 
 ## `[deploy]`
 

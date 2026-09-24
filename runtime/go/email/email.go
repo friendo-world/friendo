@@ -20,6 +20,23 @@ func Configured() bool {
 	return os.Getenv("RESEND_API_KEY") != "" && os.Getenv("FRIENDO_EMAIL_FROM") != ""
 }
 
+// EchoEnabled reports whether a login code may be returned in the API response
+// instead of (only) emailed — a DEV-ONLY affordance so sign-in is testable with
+// no provider. It needs an explicit FRIENDO_OTP_ECHO=1 (or true/yes/on) AND no
+// email provider: once real delivery is configured the echo is off no matter
+// what, so a production site never leaks codes. One rule, shared by a site's
+// own sign-in and the network's.
+func EchoEnabled() bool {
+	if Configured() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FRIENDO_OTP_ECHO"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 // SendLoginCode delivers a one-time login code. Best-effort: a delivery error is
 // logged, not returned, so a provider hiccup never leaks whether an email exists.
 func SendLoginCode(to, code string) {

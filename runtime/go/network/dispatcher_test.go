@@ -43,14 +43,14 @@ func TestDispatcherRoutingAndIsolation(t *testing.T) {
 	d := NewDispatcher(reg, "localhost", 0)
 	defer d.Close()
 
-	// Apex (operator view) lists both sites.
+	// Apex with no home site: the landing page, which names no tenant.
 	apex := get(t, d, "localhost", "/")
-	if apex.Code != http.StatusOK {
-		t.Fatalf("apex status = %d, want 200", apex.Code)
+	if apex.Code != http.StatusOK || !strings.Contains(apex.Body.String(), "friendo network") {
+		t.Fatalf("apex status = %d, want the landing page", apex.Code)
 	}
-	for _, want := range []string{"alice.localhost", "bob.localhost"} {
-		if !strings.Contains(apex.Body.String(), want) {
-			t.Errorf("apex view missing %q", want)
+	for _, leak := range []string{"alice.localhost", "bob.localhost"} {
+		if strings.Contains(apex.Body.String(), leak) {
+			t.Errorf("landing page must not list %q", leak)
 		}
 	}
 

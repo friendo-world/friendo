@@ -42,7 +42,7 @@ Any collection is available under `collections`:
 ```html
 {% for post in collections.blog %}
   <h2>{{ post.title }}</h2>
-  <p>{{ post.body|truncate:200 }}</p>
+  <p>{{ post.body|truncatechars:200 }}</p>
 {% endfor %}
 ```
 
@@ -122,8 +122,9 @@ each file's `weight`:
 {% endfor %}
 ```
 
-## Common schema, everywhere
+## One schema, everywhere
 
-Both runtimes use the exact same table definitions, so moving data between them
-is a copy, not a migration — the same content renders the same way locally,
-on your own Cloudflare account, or on friendo.world.
+Every friendo site uses the exact same table definitions, so moving data between
+sites (`friendo push --data`, `friendo pull --data`) is a copy, not a migration —
+the same content renders the same way locally, on a server you run, or on
+friendo.world.

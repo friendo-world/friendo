@@ -19,6 +19,13 @@ export function UserForm({ id }: { id?: string }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(editing);
   const [busy, setBusy] = useState(false);
+  // The password field only appears when the site allows password sign-in;
+  // otherwise an account is complete with just an email (they sign in with a code).
+  const [passwordLogin, setPasswordLogin] = useState(false);
+
+  useEffect(() => {
+    api.settings().then((s) => setPasswordLogin(s.access.password_login)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!editing) return;
@@ -45,7 +52,7 @@ export function UserForm({ id }: { id?: string }) {
     try {
       const input: UserInput = editing
         ? { name, role, ...(password ? { password } : {}) }
-        : { email, name, role, password };
+        : { email, name, role, ...(password ? { password } : {}) };
       if (editing) await api.updateUser(id!, input);
       else await api.createUser(input);
       route("/_/users");
@@ -90,12 +97,22 @@ export function UserForm({ id }: { id?: string }) {
               ))}
             </select>
           </label>
-          <label class="mb-1 block text-sm font-medium">
-            Password{editing && <span class="font-normal text-gray-400"> (leave blank to keep current)</span>}
-            <input type="password" required={!editing} minLength={8} value={password}
-              onInput={(e) => setPassword((e.target as HTMLInputElement).value)} class={field} />
-          </label>
-          <p class="mb-5 text-xs text-gray-400">Minimum 8 characters</p>
+          {passwordLogin ? (
+            <>
+              <label class="mb-1 block text-sm font-medium">
+                Password <span class="font-normal text-gray-400">(optional{editing ? " — leave blank to keep current" : ""})</span>
+                <input type="password" minLength={8} value={password}
+                  onInput={(e) => setPassword((e.target as HTMLInputElement).value)} class={field} />
+              </label>
+              <p class="mb-5 text-xs text-gray-400">
+                Minimum 8 characters. They can always sign in with a code sent to their email instead.
+              </p>
+            </>
+          ) : (
+            <p class="mb-5 text-xs text-gray-400">
+              They'll sign in with a code sent to their email. (Turn on password sign-in in Settings to set passwords.)
+            </p>
+          )}
           <button type="submit" disabled={busy}
             class="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             {busy ? "Saving…" : editing ? "Save" : "Create user"}

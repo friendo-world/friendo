@@ -20,13 +20,28 @@ import (
 // The code was correct — the account just isn't allowed to be created.
 var ErrSignupsInviteOnly = errors.New("sign-ups are invite-only on this network — ask an operator to invite you")
 
+// ErrCodeAlreadySent is returned when a code was requested again inside the
+// resend window; the first one is still on its way.
+var ErrCodeAlreadySent = errors.New("a code was already sent — please wait before requesting another")
+
+// ErrTooManyWrongCodes is returned once an email has burned through its wrong
+// guesses; every outstanding code for it is discarded and a fresh one is needed.
+var ErrTooManyWrongCodes = errors.New("too many wrong codes — request a new one")
+
+// otpResendWindow is how long after sending a code another request is refused.
+const otpResendWindow = 30 * time.Second
+
+// otpMaxAttempts is how many wrong guesses an email gets before its codes are
+// discarded — enough for typos, far too few to brute-force six digits.
+const otpMaxAttempts = 5
+
 // Accounts is the network-level identity store for the two-tier model: everyday
 // users who own sites and operators (an account with the "operator" capability).
 // Login is passwordless — email + a one-time code — and the CLI links via the
 // device-auth flow. See design/network-accounts.md.
 //
-// This is the generalized successor to Operators; Operators stays for the current
-// password console until that path is retired (design Phase 3).
+// This replaced the original password-only Operators store; there is no
+// password path left anywhere on a network.
 type Accounts struct {
 	conn *sql.DB
 }
@@ -128,7 +143,34 @@ func OpenAccounts(root string) (*Accounts, error) {
 		conn.Close()
 		return nil, fmt.Errorf("applying accounts schema: %w", err)
 	}
+	// account_otp.attempts arrived in v0.5; the schema is CREATE IF NOT EXISTS, so
+	// an older store gets the column added in place.
+	if !hasColumn(conn, "account_otp", "attempts") {
+		if _, err := conn.Exec(`ALTER TABLE account_otp ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("upgrading accounts schema: %w", err)
+		}
+	}
 	return &Accounts{conn: conn}, nil
+}
+
+// hasColumn reports whether a table already has a column (for in-place upgrades).
+func hasColumn(conn *sql.DB, table, column string) bool {
+	rows, err := conn.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil && name == column {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Accounts) Close() error { return a.conn.Close() }
@@ -254,8 +296,18 @@ func (a *Accounts) List() ([]*Account, error) {
 // created until the code is verified.
 func (a *Accounts) RequestOTP(email string) (string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if email == "" {
-		return "", fmt.Errorf("email is required")
+	if email == "" || !strings.Contains(email, "@") {
+		return "", fmt.Errorf("a valid email is required")
+	}
+	// One live code at a time: a second request inside the window is refused
+	// rather than sending a stream of emails.
+	var last string
+	if err := a.conn.QueryRow(
+		`SELECT created FROM account_otp WHERE email = ? ORDER BY created DESC LIMIT 1`, email,
+	).Scan(&last); err == nil {
+		if t, err := time.Parse(rfc3339Z, last); err == nil && time.Since(t) < otpResendWindow {
+			return "", ErrCodeAlreadySent
+		}
 	}
 	code, err := numericCode(6)
 	if err != nil {
@@ -282,16 +334,19 @@ func (a *Accounts) VerifyOTP(email, code string) (string, error) {
 	// Read all candidate hashes first, then close the cursor before writing —
 	// SQLite dislikes a write on the same connection while a read cursor is open.
 	rows, err := a.conn.Query(
-		`SELECT code_hash, expires_at FROM account_otp WHERE email = ? ORDER BY created DESC`, email,
+		`SELECT code_hash, expires_at, attempts FROM account_otp WHERE email = ? ORDER BY created DESC`, email,
 	)
 	if err != nil {
 		return "", err
 	}
-	type cand struct{ hash, expiresAt string }
+	type cand struct {
+		hash, expiresAt string
+		attempts        int
+	}
 	var cands []cand
 	for rows.Next() {
 		var c cand
-		if err := rows.Scan(&c.hash, &c.expiresAt); err == nil {
+		if err := rows.Scan(&c.hash, &c.expiresAt, &c.attempts); err == nil {
 			cands = append(cands, c)
 		}
 	}
@@ -302,7 +357,12 @@ func (a *Accounts) VerifyOTP(email, code string) (string, error) {
 		if t, err := time.Parse(rfc3339Z, c.expiresAt); err != nil || now.After(t) {
 			continue
 		}
+		if c.attempts >= otpMaxAttempts {
+			continue // burned — treated as if no code were outstanding
+		}
 		if bcrypt.CompareHashAndPassword([]byte(c.hash), []byte(code)) == nil {
+			// The code was right, so it's spent — whatever the gates below say.
+			a.conn.Exec(`DELETE FROM account_otp WHERE email = ?`, email)
 			existing, exists := a.GetByEmail(email)
 			// A suspended account can't sign back in. The code was right; the
 			// account is the problem, and saying so is the only useful answer.
@@ -318,13 +378,21 @@ func (a *Accounts) VerifyOTP(email, code string) (string, error) {
 					return "", ErrSignupsInviteOnly
 				}
 			}
-			a.conn.Exec(`DELETE FROM account_otp WHERE email = ?`, email) // codes are single-use
 			id, err := a.EnsureAccount(email)
 			if err == nil && !exists {
 				a.conn.Exec(`DELETE FROM invites WHERE email = ?`, email) // the invite has done its job
 			}
 			return id, err
 		}
+	}
+	// A miss counts against every outstanding code for the email; past the cap
+	// they're all discarded so guessing has to start over with a fresh request.
+	a.conn.Exec(`UPDATE account_otp SET attempts = attempts + 1 WHERE email = ?`, email)
+	var worst int
+	a.conn.QueryRow(`SELECT COALESCE(MAX(attempts), 0) FROM account_otp WHERE email = ?`, email).Scan(&worst)
+	if worst >= otpMaxAttempts {
+		a.conn.Exec(`DELETE FROM account_otp WHERE email = ?`, email)
+		return "", ErrTooManyWrongCodes
 	}
 	return "", fmt.Errorf("invalid or expired code")
 }
@@ -506,25 +574,51 @@ func (a *Accounts) RemoveSiteOwner(subdomain string) {
 
 // --- network settings ---
 
-// Signups reports the signup policy ("open" or "invite"); defaults to "invite".
-func (a *Accounts) Signups() string {
+// Setting returns a network-wide setting, or def when unset or empty.
+func (a *Accounts) Setting(key, def string) string {
 	var v string
-	if err := a.conn.QueryRow(`SELECT value FROM network_settings WHERE key = 'signups'`).Scan(&v); err != nil || v == "" {
-		return "invite"
+	if err := a.conn.QueryRow(`SELECT value FROM network_settings WHERE key = ?`, key).Scan(&v); err != nil || v == "" {
+		return def
 	}
 	return v
 }
+
+// SetSetting stores a network-wide setting.
+func (a *Accounts) SetSetting(key, value string) error {
+	_, err := a.conn.Exec(
+		`INSERT INTO network_settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value,
+	)
+	return err
+}
+
+// Signups reports the signup policy ("open" or "invite"); defaults to "invite".
+func (a *Accounts) Signups() string { return a.Setting("signups", "invite") }
 
 // SetSignups sets the signup policy.
 func (a *Accounts) SetSignups(v string) error {
 	if v != "open" && v != "invite" {
 		return fmt.Errorf("signups must be 'open' or 'invite'")
 	}
-	_, err := a.conn.Exec(
-		`INSERT INTO network_settings (key, value) VALUES ('signups', ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, v,
-	)
-	return err
+	return a.SetSetting("signups", v)
+}
+
+// homeSiteKey names the site served at the network's bare domain.
+const homeSiteKey = "home_site"
+
+// HomeSite returns the subdomain whose site serves at the apex, or "" when the
+// network shows its built-in landing page instead.
+func (a *Accounts) HomeSite() string { return a.Setting(homeSiteKey, "") }
+
+// SetHomeSite picks the site served at the apex; "" goes back to the built-in
+// landing page. The caller checks the site exists (the registry knows, this
+// store doesn't).
+func (a *Accounts) SetHomeSite(sub string) error {
+	sub = strings.ToLower(strings.TrimSpace(sub))
+	if sub != "" && !ValidSubdomain(sub) {
+		return fmt.Errorf("invalid subdomain %q", sub)
+	}
+	return a.SetSetting(homeSiteKey, sub)
 }
 
 // numericCode returns an n-digit numeric string.

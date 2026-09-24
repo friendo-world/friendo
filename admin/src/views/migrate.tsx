@@ -7,6 +7,7 @@ const field =
 // Shown only on the Go runtime when a legacy (Phase 1) admin password exists.
 export function Migrate({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -16,7 +17,7 @@ export function Migrate({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError("");
     try {
-      await api.migrate(email);
+      await api.migrate(email, password);
       setDone(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Migration failed.");
@@ -42,8 +43,8 @@ export function Migrate({ onDone }: { onDone: () => void }) {
         ) : (
           <>
             <p class="mb-6 text-sm text-gray-500">
-              Friendo now uses email-based accounts. Enter your email to upgrade your existing admin
-              password to a full account.
+              Friendo now uses email-based accounts. Enter your email and your existing admin
+              password to upgrade it to a full owner account.
             </p>
             {error && <div class="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
             <form onSubmit={submit}>
@@ -51,6 +52,11 @@ export function Migrate({ onDone }: { onDone: () => void }) {
                 Email
                 <input type="email" required autofocus value={email}
                   onInput={(e) => setEmail((e.target as HTMLInputElement).value)} class={field} />
+              </label>
+              <label class="mb-5 block text-sm font-medium">
+                Existing admin password
+                <input type="password" required value={password}
+                  onInput={(e) => setPassword((e.target as HTMLInputElement).value)} class={field} />
               </label>
               <button type="submit" disabled={busy}
                 class="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">

@@ -23,12 +23,12 @@ import (
 )
 
 type step struct {
-	Name    string                 `json:"name"`
-	Method  string                 `json:"method"`
-	Path    string                 `json:"path"`
-	Body    map[string]any         `json:"body"`
-	Expect  expectation            `json:"expect"`
-	Capture map[string]string      `json:"capture"`
+	Name    string            `json:"name"`
+	Method  string            `json:"method"`
+	Path    string            `json:"path"`
+	Body    map[string]any    `json:"body"`
+	Expect  expectation       `json:"expect"`
+	Capture map[string]string `json:"capture"`
 }
 
 type expectation struct {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/friendo-world/friendo/runtime/go/data"
@@ -76,6 +77,31 @@ func TestCLIPushPullRoundTrip(t *testing.T) {
 	}
 	if rec["title"] != "Hello" || rec["slug"] != "hello" || rec["status"] != "published" {
 		t.Fatalf("record round-trip mismatch: %#v", rec)
+	}
+
+	// Users round-trip with their password hash intact — the thing `push --users`
+	// promises ("the same password works everywhere").
+	gotUsers, _, err := client.PullUsers()
+	if err != nil {
+		t.Fatalf("PullUsers: %v", err)
+	}
+	var adminRow map[string]any
+	for _, u := range gotUsers {
+		if u["email"] == "admin@test.com" {
+			adminRow = u
+		}
+	}
+	if adminRow == nil {
+		t.Fatalf("pulled users missing admin: %#v", gotUsers)
+	}
+	if h, _ := adminRow["password_hash"].(string); !strings.HasPrefix(h, "$2") {
+		t.Fatalf("pulled admin has no bcrypt hash: %#v", adminRow)
+	}
+	if err := client.PushUsers(gotUsers, nil); err != nil {
+		t.Fatalf("PushUsers: %v", err)
+	}
+	if _, err := db.AuthenticateUser("admin@test.com", "password12345"); err != nil {
+		t.Fatalf("password should survive a push of pulled users: %v", err)
 	}
 
 	gotFiles, err := client.PullFiles()

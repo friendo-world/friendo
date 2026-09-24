@@ -5,13 +5,49 @@ group: Concepts
 weight: 7
 ---
 
-Every Friendo site — local or deployed — has the same auth model, backed by the
-site's own database.
+Every friendo site — local or deployed — has the same auth model, backed by the
+site's own database. The short version: **people sign in with a code sent to
+their email.** There is no password unless you turn passwords on.
 
-## First run
+## On your own machine: nothing to sign in to
 
-The first time you open the admin UI (`/_/`), you create the site **owner** with
-an email and password. That account owns the site.
+`friendo serve` on your laptop opens the admin (`/_/`) without a sign-in at all.
+You're the owner. That's on purpose: with no email provider configured there'd
+be nowhere to send a code, and a site on `localhost` is yours.
+
+The rule is strict — the admin only opens for a request that comes from the same
+machine, to `localhost`, with nothing in front of it. Put the site behind a proxy
+or on a real hostname and sign-in is required. To see the sign-in screens locally
+anyway, run `friendo serve --require-login`.
+
+## First run on a server
+
+The first time anyone opens the admin of a site that's actually on the internet,
+they create the site **owner**: enter an email, get a 6-digit code, enter the
+code. No account exists until the code checks out, so an unclaimed site can't be
+grabbed by a bot that gets there first.
+
+If the site has no email provider yet, the code is also printed in the terminal
+running `friendo serve` — so you can finish setup from the server.
+
+A site you publish with `friendo deploy` never shows this screen: the network
+already made you its owner.
+
+## Signing in
+
+The admin's sign-in screen asks for your email and sends a code. That's it, for
+every role — owners and editors included.
+
+**Allowing passwords.** In admin **Settings → Signing in**, turn on *Allow
+signing in with a password*. The sign-in screen then also offers "Use a password
+instead", and the user form gets an optional password field. Codes keep working
+for everyone regardless. (Setting a password at first-run setup — what an older
+CLI does — turns this on for you.)
+
+For an owner or admin who signs in by code, their email account's security *is*
+the site's security. On a production site, configure a real email provider
+(`RESEND_API_KEY` + `FRIENDO_EMAIL_FROM`) — without one, sign-in codes can only
+reach the server log.
 
 ## Roles
 
@@ -20,7 +56,7 @@ one below it:
 
 | Role | Can |
 |---|---|
-| **Owner** | Everything — manage admins and other owners, transfer ownership, destroy the site |
+| **Owner** | Everything — manage admins and other owners, transfer ownership |
 | **Admin** | Manage people (users up to editor), settings, and deploys |
 | **Editor** | Create and edit **any** content, publish, moderate all comments |
 | **Contributor** | Create and edit **their own** posts, and moderate comments on them |
@@ -29,18 +65,18 @@ one below it:
 The key distinction is **own vs. any**: a Contributor can edit only what they
 authored, while an Editor can edit anyone's content. Owners can have **co-owners**
 — the site just always keeps at least one (you can't remove the last owner; to
-step down, promote someone else first).
+step down, promote someone else first). Deleting a site altogether is an
+operator's job on the network, not a site role.
 
-## Members: passwordless visitors
+## Members: visitors who verify their email
 
-**Members** are visitors who verify their email with a one-time code — no
-password. They get a `member` account: authenticated enough to comment, react, and
-vote, but with no content of their own. This powers the community features.
+**Members** are visitors who sign in through a `<friendo-auth>` tag on your
+pages — same email code, no password. They get a `member` account: authenticated
+enough to comment, react, and vote, but with no content of their own. This
+powers the [community features](/docs/community).
 
-Passwordless works for privileged roles too: if you promote a member to
-contributor/editor/admin, they keep signing in with an email code. (For an
-admin-level account, that means their email security is the site's security —
-configure a real email provider in production.)
+Promote a member to contributor, editor or admin and nothing changes about how
+they sign in.
 
 ## Access presets
 
@@ -61,7 +97,8 @@ Three settings sit under the presets:
   go live once an Editor publishes them. (Unpublished posts never show on the
   public site.)
 
-Owners and admins add or promote accounts anytime from the admin UI.
+Owners and admins add or promote accounts anytime from the admin UI. Adding
+someone needs only their email — they sign in with a code.
 
 ## Profiles
 
@@ -71,23 +108,22 @@ Every account gets a default profile on creation.
 
 ## Portable accounts
 
-Because password hashes are portable, `friendo push --users` carries accounts to a
-deployed site unchanged — the same password works everywhere. `friendo pull
---users` brings them back.
+`friendo push --users` carries accounts to a deployed site, password hashes
+included, so a password set locally works on the deployed site too (if it allows
+passwords). `friendo pull --users` brings them back.
 
-## Site auth vs. network account auth
+## Site auth vs. your network account
 
-If you host on a **network** like friendo.world, there are two independent auth
-systems:
+If you host on a **network** like friendo.world, there are two independent things
+called "signing in":
 
-- **Site auth** — the accounts *in* your site (above), for your site's owner,
-  staff, and members. The site owner still sets an email and password at first run.
-- **Network account auth** — your account *on* the network, used to claim
-  subdomains and manage sites. It's **passwordless**: sign in with a one-time code
-  emailed to you (`friendo login` runs the same flow from your browser). Running a
-  network is an account **capability** called **operator** — it governs site
-  lifecycle (provision, destroy), separate from any per-site role.
+- **Site auth** — the accounts *in* your site (above): its owner, staff, and
+  members.
+- **Your network account** — your account *on* the network, which owns your
+  sites. Also an email code (`friendo login` runs the same flow from the
+  terminal). Running a network is an account **capability** called **operator**.
 
-They stay separate — signing into a network doesn't sign you into a site's admin.
-`friendo deploy` bridges them once, minting your site's admin session from your
-network sign-in so you don't log in twice.
+They stay separate, but the network bridges them for you: `friendo deploy` mints
+your site's admin session from your network sign-in, and the **Open admin**
+button on [your account page](/docs/network-account) does the same in the
+browser — so you sign in once, not twice.

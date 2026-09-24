@@ -42,13 +42,18 @@ Check your version with `friendo --version`.
 friendo/
 ├── cli/                # The friendo command (init, serve, push, pull, deploy, export)
 ├── admin/              # Shared admin UI — one Preact SPA, served by the runtime
+├── sdk/                # friendo.js — the <friendo-*> Web Components
 ├── runtime/
 │   └── go/             # The Go runtime — local dev, self-host, and network mode (friendo.world)
+├── docs/               # docs.friendo.world — itself a friendo site
+├── www/                # friendo.world's landing page — the network's home site
 └── testsite/           # Example site for development and testing
 ```
 
-**Docs:** [ARCHITECTURE.md](ARCHITECTURE.md) (how it's designed) ·
+**Docs:** [docs.friendo.world](https://docs.friendo.world) (building a site) ·
+[ARCHITECTURE.md](ARCHITECTURE.md) (how it's designed) ·
 [DEVELOPMENT.md](DEVELOPMENT.md) (how to build & run) ·
+[DEPLOY.md](DEPLOY.md) (hosting a network) ·
 [ROADMAP.md](ROADMAP.md) (shipped & next).
 
 ---
@@ -64,6 +69,7 @@ friendo init my-site        # scaffold a new site
 friendo serve               # start the local dev server
 friendo build               # compile content/ markdown into the site database
 friendo deploy [subdomain]  # publish this folder to a network (friendo.world by default)
+friendo open-admin          # open your deployed site's admin, signed in
 friendo push                # push updates to your deployed site
 friendo pull --data          # pull remote data into local
 friendo export              # export to static HTML
@@ -128,6 +134,8 @@ Friendo ships with built-in content types — enable the ones your site needs.
 | **Locations** | Geotag any record | `<friendo-map>` |
 | **Files** | Media, uploads, page-bundle galleries | `{{ record.gallery }}` |
 
+On a network's own domain, three more tags talk to the network rather than a site: `<friendo-account>` (your sites, domains, Open admin), `<friendo-console>` (the operator's levers) and `<friendo-activate>` (linking `friendo login`). The network serves each on a default page; a **home site** can wrap the same tag in its own design.
+
 Enable what you need in `friendo.toml`:
 
 ```toml
@@ -144,14 +152,15 @@ types = ["posts", "comments", "reactions"]
 
 Every Friendo site — local or deployed — has the same auth model:
 
-- **First run:** Create the site **owner** (email + password)
-- **Roles:** Capability-based — owner > admin > editor > contributor > member. Contributors edit only their own posts; editors edit any. Owners/admins add users via the admin UI.
+- **Sign-in is a code sent to your email** — for every role. Passwords are opt-in per site (Settings → *Allow signing in with a password*).
+- **On your laptop** `friendo serve` opens the admin with no sign-in at all (only for requests from the same machine, with no email provider configured). Use `--require-login` to see the sign-in screens.
+- **First run on a server:** the first person to open the admin confirms their email with a code and becomes the site **owner**. A site published with `friendo deploy` already has you as owner.
+- **Roles:** Capability-based — owner > admin > editor > contributor > member. Contributors edit only their own posts; editors edit any. Owners/admins add people via the admin UI (email only).
 - **Presets:** Pick a site type (Personal / Community / Blog) in Settings to set who can post and whether posts need approval.
-- **Members:** Visitors sign in passwordlessly with an email code to comment, react, and vote.
-- **Sessions:** Bcrypt passwords, token-based sessions stored in the database.
-- **Sync:** `friendo push --users` syncs accounts to the deployed site. Bcrypt hashes are portable — same password works everywhere.
+- **Members:** Visitors sign in with an email code through `<friendo-auth>` to comment, react, and vote.
+- **Sync:** `friendo push --users` carries accounts (and any password hashes) to the deployed site.
 
-Publishing to a network (friendo.world or your own) uses a separate **network account** — passwordless sign-in by email code, with browser device-auth for the CLI (`friendo login`). Hosting sites for others is just the **operator capability** on that account, not a separate password. Network accounts and per-site auth are independent.
+Publishing to a network (friendo.world or your own) uses a separate **network account** — the same email-code sign-in, with browser device-auth for the CLI (`friendo login`). Its account page (`/account`, a `<friendo-account>` tag) lists your sites with an **Open admin** button that signs you into each one. Hosting sites for others is just the **operator capability** on that account; the operator's page is `/network` (`<friendo-console>`).
 
 ---
 
@@ -199,7 +208,7 @@ All sync goes through the site's own `/_/api/*` endpoints, authenticated with si
   {% for post in collections.blog %}
     <article>
       <h2>{{ post.title }}</h2>
-      <p>{{ post.body|truncate:200 }}</p>
+      <p>{{ post.body|truncatechars:200 }}</p>
       <a href="/blog/{{ post.slug }}">Read more</a>
     </article>
   {% endfor %}

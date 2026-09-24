@@ -295,7 +295,8 @@ func RunPull(opts PullOptions) error {
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(id) DO UPDATE SET
 				   email=excluded.email, phone=excluded.phone, name=excluded.name,
-				   avatar=excluded.avatar, password_hash=excluded.password_hash,
+				   avatar=excluded.avatar,
+				   password_hash=CASE WHEN excluded.password_hash = '' THEN users.password_hash ELSE excluded.password_hash END,
 				   role=excluded.role, auth_methods=excluded.auth_methods, updated=excluded.updated`,
 				str("id"), db.SiteID, str("email"), str("phone"), str("name"),
 				str("avatar"), str("password_hash"), str("role"),

@@ -32,12 +32,12 @@ func Init(name string) error {
 	}
 
 	files := map[string]string{
-		filepath.Join(name, "friendo.toml"):                 friendoToml(name),
-		filepath.Join(name, "layouts", "base.html"):         baseHTML,
-		filepath.Join(name, "pages", "index.html"):          indexHTML,
-		filepath.Join(name, "pages", "404.html"):            notFoundHTML,
-		filepath.Join(name, "pages", "blog", "[slug].html"): blogPostHTML,
-		filepath.Join(name, "assets", "style.css"):          styleCSS,
+		filepath.Join(name, "friendo.toml"):                      friendoToml(name),
+		filepath.Join(name, "layouts", "base.html"):              baseHTML,
+		filepath.Join(name, "pages", "index.html"):               indexHTML,
+		filepath.Join(name, "pages", "404.html"):                 notFoundHTML,
+		filepath.Join(name, "pages", "blog", "[slug].html"):      blogPostHTML,
+		filepath.Join(name, "assets", "style.css"):               styleCSS,
 		filepath.Join(name, "content", "blog", "hello-world.md"): helloPostMD,
 	}
 
@@ -65,6 +65,7 @@ types = ["blog", "pages"]
 # require_approval = false        # hold contributor posts for review before publishing
 # accept_submissions = false      # let members submit posts via <friendo-form> (into the review queue)
 # auto_approve = false            # publish new comments immediately instead of queuing them
+# password_login = false          # also allow signing in with a password (everyone can always use an emailed code)
 
 [deploy]
 # domain = "mysite.com"
@@ -97,7 +98,7 @@ const indexHTML = `{% extends "layouts/base.html" %}
 {% for post in collections.blog %}
 <article>
     <h2><a href="/blog/{{ post.slug }}">{{ post.title }}</a></h2>
-    <p>{{ post.body }}</p>
+    <div>{{ post.body|markdown }}</div>
 </article>
 {% empty %}
 <p>No blog posts yet. Create one in the <a href="/_/">admin UI</a>.</p>

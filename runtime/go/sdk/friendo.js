@@ -12,6 +12,13 @@
  *   <friendo-map target-type="post" target-id="…"></friendo-map>
  *   <friendo-form collection="posts">…author inputs…</friendo-form>
  *
+ * On a friendo network's own domain, three more tags talk to the network's
+ * account API (/api/*) instead of a site's: <friendo-account> (your sites,
+ * domains, "Open admin"), <friendo-console> (the operator's levers) and
+ * <friendo-activate> (linking `friendo login` from the terminal). The
+ * network serves each on a default page (/account, /network, /activate); a
+ * home site drops the same tag into its own page to brand it.
+ *
  * Every component renders into a shadow root and exposes its internals through
  * `part` attributes, so authors style them from their own stylesheet with
  * ::part() and keep their theme — e.g.
@@ -1246,6 +1253,582 @@
     }
   }
 
+
+  // --- network: account, console, activate ----------------------------------
+  // These talk to the network's own API on its bare domain (/api/*), not a
+  // site's /_/api. The network account cookie rides along.
+  var NAPI = "/api";
+  async function napi(path, opts) {
+    var res = await fetch(NAPI + path, Object.assign({ credentials: "same-origin" }, opts));
+    var body = null;
+    try { body = await res.json(); } catch (e) { /* 204 / non-JSON */ }
+    if (!res.ok) {
+      var err = new Error((body && body.error) || res.statusText);
+      err.status = res.status;
+      err.body = body;
+      throw err;
+    }
+    return body;
+  }
+  var accountPromise = null;
+  function currentAccount(force) {
+    if (force || !accountPromise) {
+      accountPromise = napi("/account").then(function (a) { return a; }, function () { return null; });
+    }
+    return accountPromise;
+  }
+  function broadcastAccount(acct) {
+    accountPromise = Promise.resolve(acct);
+    document.dispatchEvent(new CustomEvent("friendo:account", { detail: { account: acct } }));
+  }
+  // A site address as a link from wherever this page is: same scheme, and the
+  // same port when the network runs on one (demo.localhost:3000 in dev).
+  function siteHref(address) {
+    return location.protocol + "//" + address + (location.port ? ":" + location.port : "") + "/";
+  }
+  function confirmed(msg) { return typeof window.confirm !== "function" || window.confirm(msg); }
+
+  var NET_CSS =
+    "h2{font-size:1.05em;margin:1.4em 0 .4em}h3{font-size:1em;margin:1em 0 .3em}" +
+    "table{border-collapse:collapse;width:100%;font-size:.95em}th,td{text-align:left;padding:.4em .5em;border-bottom:1px solid #e5e7eb;vertical-align:top}" +
+    "th{font-weight:600;font-size:.85em;opacity:.7}" +
+    "input,select{font:inherit;padding:.4em .5em;border:1px solid #ccc;border-radius:6px;max-width:100%}" +
+    "button{font:inherit;padding:.35em .7em;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#111;cursor:pointer}" +
+    "button.primary{background:#111;color:#fff;border-color:#111}button.danger{color:#b91c1c;border-color:#fca5a5}" +
+    "button:disabled{opacity:.5;cursor:default}" +
+    "form{display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin:.5em 0}" +
+    ".status{opacity:.75;font-size:.9em}.error{color:#b91c1c;font-size:.9em}.muted{opacity:.6;font-size:.85em}" +
+    ".card{border:1px solid #e5e7eb;border-radius:10px;padding:.8em 1em;margin:.6em 0}" +
+    ".held{color:#92400e}.row-actions{display:flex;gap:.35em;flex-wrap:wrap}" +
+    "code{background:#f3f4f6;padding:.1em .3em;border-radius:.2em;font-size:.9em}" +
+    ".dns td{font-family:ui-monospace,monospace;font-size:.85em}" +
+    "@media(prefers-color-scheme:dark){button{background:#222;color:#eee;border-color:#444}button.primary{background:#eee;color:#111;border-color:#eee}" +
+    "th,td{border-color:#333}.card{border-color:#333}input,select{background:#1a1a1a;color:#eee;border-color:#444}code{background:#222}}";
+
+  // NetworkElement: a FriendoElement that also re-renders when the network
+  // account signs in or out.
+  class NetworkElement extends FriendoElement {
+    constructor() {
+      super();
+      this._onAccount = this._onAccount.bind(this);
+    }
+    connectedCallback() {
+      document.addEventListener("friendo:account", this._onAccount);
+      super.connectedCallback();
+    }
+    disconnectedCallback() {
+      document.removeEventListener("friendo:account", this._onAccount);
+      super.disconnectedCallback();
+    }
+    _onAccount() { this.render(); }
+    css() { return NET_CSS; }
+    // paintSignIn draws the email → code form into a container. Messages from
+    // the network (invite-only, suspended, too many codes) are shown as-is:
+    // they already say what to do.
+    paintSignIn(container, intro) {
+      var self = this;
+      container.innerHTML =
+        (intro ? '<p part="intro" class="status">' + intro + "</p>" : "") +
+        '<form part="signin"><input part="email" type="email" required placeholder="you@example.com" autocomplete="email" />' +
+        '<button part="send" class="primary" type="submit">Email me a code</button></form>' +
+        '<p part="status" class="status"></p>';
+      var form = container.querySelector("form");
+      var status = container.querySelector('[part="status"]');
+      form.onsubmit = async function (e) {
+        e.preventDefault();
+        var email = container.querySelector('[part="email"]').value.trim();
+        if (!email) return;
+        status.className = "status";
+        status.textContent = "Sending…";
+        try {
+          var r = await napi("/auth/request-code", jsonBody("POST", { email: email }));
+          self.paintVerify(container, email, r && r.code, r && r.emailed === false);
+        } catch (err) {
+          status.className = "error";
+          status.textContent = err.message;
+        }
+      };
+    }
+    paintVerify(container, email, devCode, notEmailed) {
+      var self = this;
+      var note = devCode
+        ? "No email provider is set up on this network, so here's your code: <b>" + esc(devCode) + "</b>"
+        : notEmailed
+          ? "No email provider is set up — the code is in the network's server log."
+          : "We sent a 6-digit code to <b>" + esc(email) + "</b>.";
+      container.innerHTML =
+        '<p part="status" class="status">' + note + "</p>" +
+        '<form part="verify"><input part="code" inputmode="numeric" autocomplete="one-time-code" required placeholder="6-digit code" maxlength="6" />' +
+        '<button part="signin-button" class="primary" type="submit">Sign in</button>' +
+        '<button part="back" type="button">Different email</button></form>' +
+        '<p part="error" class="error"></p>';
+      var input = container.querySelector('[part="code"]');
+      if (devCode) input.value = devCode;
+      var error = container.querySelector('[part="error"]');
+      container.querySelector('[part="back"]').onclick = function () { self.paintSignIn(container); };
+      container.querySelector("form").onsubmit = async function (e) {
+        e.preventDefault();
+        error.textContent = "";
+        try {
+          var acct = await napi("/auth/verify-code", jsonBody("POST", { email: email, code: input.value.trim() }));
+          broadcastAccount(acct);
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      };
+    }
+    signedInBar(acct) {
+      return (
+        '<p part="account" class="status">Signed in as <b>' + esc(acct.email) + "</b>" +
+        (acct.operator ? " · operator" : "") +
+        ' · <button part="logout">Sign out</button></p>'
+      );
+    }
+    wireLogout() {
+      var btn = this.shadowRoot.querySelector('[part="logout"]');
+      if (btn) btn.onclick = async function () {
+        await napi("/auth/logout", { method: "POST" }).catch(function () {});
+        broadcastAccount(null);
+      };
+    }
+  }
+
+  // --- <friendo-account> ---------------------------------------------------
+  // Your sites on this network: open each one's admin, connect a domain, make
+  // a new site — and how many you can still make.
+  class FriendoAccount extends NetworkElement {
+    async render() {
+      var acct = await currentAccount();
+      if (!acct) {
+        this.paint('<div part="signin-wrap"></div>');
+        this.paintSignIn(this.shadowRoot.querySelector('[part="signin-wrap"]'), "Sign in to see your sites.");
+        return;
+      }
+      var data;
+      try {
+        data = await napi("/account/sites");
+      } catch (err) {
+        if (err.status === 401 || err.status === 403) { broadcastAccount(null); return; }
+        this.paint('<p class="error">' + esc(err.message) + "</p>");
+        return;
+      }
+      var sites = data.sites || [];
+      var q = data.quota || {};
+      var quotaLine = q.exempt
+        ? "As an operator you can make as many sites as you like."
+        : q.unlimited
+          ? "You can make as many sites as you like."
+          : (q.used || 0) + " of " + q.allowed + " sites used.";
+      var atLimit = !q.exempt && !q.unlimited && q.used >= q.allowed;
+
+      this.paint(
+        this.signedInBar(acct) +
+          '<h2 part="sites-heading">Your sites</h2>' +
+          (sites.length
+            ? '<table part="sites"><thead><tr><th>Site</th><th>Address</th><th></th></tr></thead><tbody>' +
+              sites.map(function (s) {
+                return (
+                  '<tr part="site" data-sub="' + esc(s.subdomain) + '"><td><b>' + esc(s.name) + "</b>" +
+                  (s.suspended ? '<br><span class="held">On hold' + (s.reason ? ": " + esc(s.reason) : "") + "</span>" : "") +
+                  '</td><td><a part="address" href="' + esc(siteHref(s.address)) + '">' + esc(s.address) + "</a>" +
+                  (s.domains || []).map(function (d) {
+                    return '<br><span class="muted">' + esc(d.domain) + " — " + esc(d.status) + "</span>";
+                  }).join("") +
+                  '</td><td class="row-actions"><button part="open-admin" class="primary" data-sub="' + esc(s.subdomain) + '">Open admin</button>' +
+                  '<button part="domains-toggle" data-sub="' + esc(s.subdomain) + '">Domains</button></td></tr>' +
+                  '<tr part="domains-row" data-for="' + esc(s.subdomain) + '" hidden><td colspan="3"><div part="domains" class="card"></div></td></tr>'
+                );
+              }).join("") +
+              "</tbody></table>"
+            : '<p part="empty" class="status">You don\'t have any sites here yet.</p>') +
+          '<p part="quota" class="muted">' + esc(quotaLine) + "</p>" +
+          '<h2 part="new-heading">New site</h2>' +
+          '<form part="new-site"><input part="new-subdomain" required placeholder="my-site" pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" title="lowercase letters, digits and hyphens" />' +
+          '<span class="muted">.' + esc(location.hostname) + "</span>" +
+          '<input part="new-name" placeholder="Display name (optional)" />' +
+          '<button part="create" class="primary" type="submit"' + (atLimit ? " disabled" : "") + ">Create site</button></form>" +
+          '<p part="new-status" class="error"></p>' +
+          '<p class="muted">Or from your computer: <code>friendo deploy my-site --network ' + esc(location.origin) + "</code></p>"
+      );
+      this.wireLogout();
+      var self = this;
+      var root = this.shadowRoot;
+
+      root.querySelectorAll('[part="open-admin"]').forEach(function (btn) {
+        btn.onclick = async function () {
+          btn.disabled = true;
+          btn.textContent = "Opening…";
+          try {
+            var r = await napi("/account/sites/" + encodeURIComponent(btn.dataset.sub) + "/admin-link", { method: "POST" });
+            location.assign(r.url);
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = "Open admin";
+            root.querySelector('[part="new-status"]').textContent = err.message;
+          }
+        };
+      });
+      root.querySelectorAll('[part="domains-toggle"]').forEach(function (btn) {
+        btn.onclick = function () {
+          var row = root.querySelector('[part="domains-row"][data-for="' + btn.dataset.sub + '"]');
+          row.hidden = !row.hidden;
+          if (!row.hidden) self._paintDomains(row.querySelector('[part="domains"]'), btn.dataset.sub);
+        };
+      });
+      var form = root.querySelector('[part="new-site"]');
+      form.onsubmit = async function (e) {
+        e.preventDefault();
+        var status = root.querySelector('[part="new-status"]');
+        status.textContent = "";
+        var sub = root.querySelector('[part="new-subdomain"]').value.trim().toLowerCase();
+        var name = root.querySelector('[part="new-name"]').value.trim();
+        try {
+          await napi("/account/sites", jsonBody("POST", { subdomain: sub, name: name }));
+          self.dispatchEvent(new CustomEvent("friendo:site-created", { bubbles: true, detail: { subdomain: sub } }));
+          self.render();
+        } catch (err) {
+          status.textContent = err.message;
+        }
+      };
+    }
+    // _paintDomains: the domains on one site, with add / verify / remove.
+    async _paintDomains(box, sub) {
+      var self = this;
+      box.innerHTML = '<p class="status">Loading…</p>';
+      var list = [];
+      try {
+        list = (await napi("/account/domains?site=" + encodeURIComponent(sub))).domains || [];
+      } catch (err) {
+        box.innerHTML = '<p class="error">' + esc(err.message) + "</p>";
+        return;
+      }
+      box.innerHTML =
+        "<h3>Your own domain for " + esc(sub) + "</h3>" +
+        (list.length
+          ? '<table part="domain-list">' +
+            list.map(function (d) {
+              return (
+                '<tr part="domain" data-domain="' + esc(d.domain) + '"><td>' + esc(d.domain) + "</td><td>" + esc(d.status) + "</td><td class=\"row-actions\">" +
+                (d.verified ? "" : '<button part="verify" data-domain="' + esc(d.domain) + '">Check &amp; go live</button>') +
+                '<button part="remove-domain" class="danger" data-domain="' + esc(d.domain) + '">Disconnect</button></td></tr>'
+              );
+            }).join("") +
+            "</table>"
+          : '<p class="muted">No domain connected. Your site is at its network address.</p>') +
+        '<form part="add-domain"><input part="domain-input" required placeholder="example.com" />' +
+        '<button part="add-domain-button" class="primary" type="submit">Connect</button></form>' +
+        '<div part="dns"></div><p part="domain-status" class="error"></p>';
+      var status = box.querySelector('[part="domain-status"]');
+      var dns = box.querySelector('[part="dns"]');
+      box.querySelector("form").onsubmit = async function (e) {
+        e.preventDefault();
+        status.textContent = "";
+        var domain = box.querySelector('[part="domain-input"]').value.trim();
+        try {
+          var r = await napi("/account/domains", jsonBody("POST", { domain: domain, subdomain: sub }));
+          self._paintInstructions(dns, r);
+        } catch (err) {
+          status.textContent = err.message;
+        }
+      };
+      box.querySelectorAll('[part="verify"]').forEach(function (btn) {
+        btn.onclick = async function () {
+          status.className = "status";
+          status.textContent = "Checking…";
+          try {
+            await napi("/account/domains/verify", jsonBody("POST", { domain: btn.dataset.domain }));
+            self._paintDomains(box, sub);
+          } catch (err) {
+            status.className = "error";
+            status.textContent = err.message;
+          }
+        };
+      });
+      box.querySelectorAll('[part="remove-domain"]').forEach(function (btn) {
+        btn.onclick = async function () {
+          if (!confirmed("Disconnect " + btn.dataset.domain + "? The site keeps its network address.")) return;
+          try {
+            await napi("/account/domains", jsonBody("DELETE", { domain: btn.dataset.domain }));
+            self._paintDomains(box, sub);
+          } catch (err) {
+            status.textContent = err.message;
+          }
+        };
+      });
+    }
+    _paintInstructions(dns, r) {
+      var recs = (r.instructions && r.instructions.records) || [];
+      dns.innerHTML =
+        '<div class="card"><b>' + esc(r.domain) + "</b> is connected but not live yet. Add these records with whoever you bought the domain from, then press <i>Check &amp; go live</i>:" +
+        '<table class="dns" part="dns-table"><tr><th>Type</th><th>Name</th><th>Value</th></tr>' +
+        recs.map(function (rec) {
+          return "<tr><td>" + esc(rec.type) + "</td><td>" + esc(rec.name) + "</td><td>" + esc(rec.value) + "</td></tr>" +
+            (rec.why ? '<tr><td></td><td colspan="2" class="muted">' + esc(rec.why) + "</td></tr>" : "");
+        }).join("") +
+        "</table>" + (r.instructions && r.instructions.note ? '<p class="muted">' + esc(r.instructions.note) + "</p>" : "") + "</div>";
+    }
+  }
+
+  // --- <friendo-console> ---------------------------------------------------
+  // The operator's levers: sites, who can join, limits, people, invites,
+  // domains, and which site the bare domain shows.
+  class FriendoConsole extends NetworkElement {
+    async render() {
+      var acct = await currentAccount();
+      if (!acct) {
+        this.paint('<div part="signin-wrap"></div>');
+        this.paintSignIn(this.shadowRoot.querySelector('[part="signin-wrap"]'), "Sign in to run this network.");
+        return;
+      }
+      if (!acct.operator) {
+        this.paint(
+          this.signedInBar(acct) +
+            '<p part="not-operator" class="status">Your account isn\'t an operator of this network. ' +
+            '<a href="/account">See your sites instead.</a></p>'
+        );
+        this.wireLogout();
+        return;
+      }
+      var net, sites, people, invites, domains;
+      try {
+        var all = await Promise.all([
+          napi("/network"), napi("/network/sites"), napi("/network/accounts"), napi("/network/invites"), napi("/network/domains"),
+        ]);
+        net = all[0]; sites = all[1].sites || []; people = all[2].accounts || []; invites = all[3].invites || []; domains = all[4].domains || [];
+      } catch (err) {
+        if (err.status === 401) { broadcastAccount(null); return; }
+        this.paint('<p class="error">' + esc(err.message) + "</p>");
+        return;
+      }
+      var self = this;
+      var counts = net.counts || {};
+      this.paint(
+        this.signedInBar(acct) +
+          '<p part="summary" class="muted">' + esc(net.base) + " · " + (counts.sites || 0) + " site(s) · " + (counts.accounts || 0) + " account(s)</p>" +
+          '<p part="error" class="error"></p>' +
+
+          '<h2 part="home-heading">Home site</h2>' +
+          '<p class="muted">What the bare domain (' + esc(net.base) + ") shows. A home site can take over /account, /login or /network by defining that page itself.</p>" +
+          '<form part="home-site"><select part="home-select">' +
+          '<option value=""' + (net.home_site ? "" : " selected") + ">Built-in landing page</option>" +
+          sites.map(function (s) {
+            return '<option value="' + esc(s.subdomain) + '"' + (net.home_site === s.subdomain ? " selected" : "") + ">" + esc(s.subdomain) + " — " + esc(s.name) + "</option>";
+          }).join("") +
+          '</select><button part="home-save" class="primary" type="submit">Save</button></form>' +
+
+          '<h2 part="sites-heading">Sites</h2>' +
+          '<form part="create-site"><input part="create-subdomain" required placeholder="subdomain" />' +
+          '<input part="create-name" placeholder="Display name" /><input part="create-owner" type="email" placeholder="Owner email (defaults to you)" />' +
+          '<button part="create" class="primary" type="submit">Create</button></form>' +
+          (sites.length
+            ? '<table part="sites"><thead><tr><th>Site</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>' +
+              sites.map(function (s) {
+                return (
+                  '<tr part="site" data-sub="' + esc(s.subdomain) + '"><td><a href="' + esc(siteHref(s.address)) + '">' + esc(s.subdomain) + "</a><br><span class=\"muted\">" + esc(s.name) + "</span>" +
+                  (s.domains || []).map(function (d) { return '<br><span class="muted">' + esc(d.domain) + " — " + esc(d.status) + "</span>"; }).join("") +
+                  "</td><td>" + (s.owner ? esc(s.owner) : '<span class="muted">—</span>') + "</td>" +
+                  "<td>" + (s.suspended ? '<span class="held">On hold' + (s.reason ? ": " + esc(s.reason) : "") + "</span>" : "Live") + "</td>" +
+                  '<td class="row-actions">' +
+                  (s.suspended
+                    ? '<button data-act="site-resume" data-sub="' + esc(s.subdomain) + '">Put back</button>'
+                    : '<button data-act="site-suspend" data-sub="' + esc(s.subdomain) + '">Hold</button>') +
+                  '<button data-act="site-owner" data-sub="' + esc(s.subdomain) + '">Owner</button>' +
+                  '<button class="danger" data-act="site-destroy" data-sub="' + esc(s.subdomain) + '">Delete</button></td></tr>'
+                );
+              }).join("") +
+              "</tbody></table>"
+            : '<p class="muted">No sites yet.</p>') +
+
+          '<h2 part="join-heading">Who can join</h2>' +
+          '<form part="signups"><label><input type="radio" name="signups" value="invite"' + (net.signups === "invite" ? " checked" : "") + "> Invite-only</label>" +
+          '<label><input type="radio" name="signups" value="open"' + (net.signups === "open" ? " checked" : "") + "> Anyone with an email</label></form>" +
+
+          '<h2 part="limit-heading">Site limit</h2>' +
+          '<form part="quota"><label>Each account can make <input part="quota-input" size="8" value="' + esc(net.default_quota) + '" /> site(s)</label>' +
+          '<button part="quota-save" type="submit">Save</button><span class="muted">a number, or "unlimited"</span></form>' +
+
+          '<h2 part="people-heading">People</h2>' +
+          (people.length
+            ? '<table part="people"><thead><tr><th>Email</th><th>Role</th><th>Sites</th><th>Status</th><th></th></tr></thead><tbody>' +
+              people.map(function (p) {
+                var limit = p.unlimited ? "unlimited" : p.allowed;
+                return (
+                  '<tr part="person" data-id="' + esc(p.id) + '"><td>' + esc(p.email) + "</td><td>" + (p.operator ? "operator" : "member") + "</td>" +
+                  "<td>" + p.used + (p.operator ? "" : " of " + limit + (p.override ? ' <span class="muted">(own limit)</span>' : "")) + "</td>" +
+                  "<td>" + (p.suspended ? '<span class="held">Suspended' + (p.reason ? ": " + esc(p.reason) : "") + "</span>" : "Active") + "</td>" +
+                  '<td class="row-actions">' +
+                  (p.operator
+                    ? (p.email === acct.email ? "" : '<button data-act="op-revoke" data-email="' + esc(p.email) + '">Remove operator</button>')
+                    : '<button data-act="op-grant" data-email="' + esc(p.email) + '">Make operator</button>' +
+                      '<button data-act="limit" data-id="' + esc(p.id) + '">Limit</button>' +
+                      (p.suspended
+                        ? '<button data-act="acct-resume" data-id="' + esc(p.id) + '">Let back in</button>'
+                        : '<button data-act="acct-suspend" data-id="' + esc(p.id) + '">Suspend</button>')) +
+                  '<button data-act="signout" data-id="' + esc(p.id) + '">Sign out everywhere</button></td></tr>'
+                );
+              }).join("") +
+              "</tbody></table>"
+            : '<p class="muted">No accounts yet.</p>') +
+
+          '<h2 part="invites-heading">Invites</h2>' +
+          '<form part="invite"><input part="invite-email" type="email" required placeholder="someone@example.com" />' +
+          '<label>good for <input part="invite-days" type="number" min="1" value="14" size="4" /> days</label>' +
+          '<label><input part="invite-operator" type="checkbox" /> as an operator</label>' +
+          '<button part="invite-send" class="primary" type="submit">Invite</button></form>' +
+          (invites.length
+            ? '<table part="invites">' + invites.map(function (i) {
+                return '<tr><td>' + esc(i.email) + "</td><td>" + esc(i.status) + "</td><td>" + esc(i.expires) + '</td><td><button data-act="invite-revoke" data-email="' + esc(i.email) + '">Revoke</button></td></tr>';
+              }).join("") + "</table>" +
+              '<p><button data-act="invite-prune">Forget expired invites</button></p>'
+            : '<p class="muted">No invites outstanding.</p>') +
+
+          '<h2 part="domains-heading">Custom domains</h2>' +
+          '<form part="add-domain"><input part="domain-input" required placeholder="example.com" />' +
+          '<select part="domain-site">' + sites.map(function (s) { return '<option value="' + esc(s.subdomain) + '">' + esc(s.subdomain) + "</option>"; }).join("") + "</select>" +
+          '<button part="domain-add" class="primary" type="submit">Connect</button></form><div part="dns"></div>' +
+          (domains.length
+            ? '<table part="domains">' + domains.map(function (d) {
+                return '<tr><td>' + esc(d.domain) + "</td><td>" + esc(d.site) + "</td><td>" + esc(d.status) + '</td><td class="row-actions">' +
+                  (d.verified ? "" : '<button data-act="domain-verify" data-domain="' + esc(d.domain) + '">Check</button>') +
+                  '<button class="danger" data-act="domain-remove" data-domain="' + esc(d.domain) + '">Disconnect</button></td></tr>';
+              }).join("") + "</table>"
+            : '<p class="muted">No custom domains connected. Tenants connect their own from their account page or with <code>friendo domain add</code>.</p>')
+      );
+      this.wireLogout();
+      var root = this.shadowRoot;
+      var error = root.querySelector('[part="error"]');
+      var act = async function (fn) {
+        error.textContent = "";
+        try { await fn(); self.render(); } catch (err) { error.textContent = err.message; }
+      };
+      var settings = function (patch) { return napi("/network/settings", jsonBody("PUT", patch)); };
+
+      root.querySelector('[part="home-site"]').onsubmit = function (e) {
+        e.preventDefault();
+        act(function () { return settings({ home_site: root.querySelector('[part="home-select"]').value }); });
+      };
+      root.querySelector('[part="create-site"]').onsubmit = function (e) {
+        e.preventDefault();
+        act(function () {
+          return napi("/sites", jsonBody("POST", {
+            subdomain: root.querySelector('[part="create-subdomain"]').value.trim().toLowerCase(),
+            name: root.querySelector('[part="create-name"]').value.trim(),
+            owner: root.querySelector('[part="create-owner"]').value.trim(),
+          }));
+        });
+      };
+      root.querySelectorAll('[part="signups"] input').forEach(function (radio) {
+        radio.onchange = function () { act(function () { return settings({ signups: radio.value }); }); };
+      });
+      root.querySelector('[part="quota"]').onsubmit = function (e) {
+        e.preventDefault();
+        act(function () { return settings({ default_quota: root.querySelector('[part="quota-input"]').value.trim() }); });
+      };
+      root.querySelector('[part="invite"]').onsubmit = function (e) {
+        e.preventDefault();
+        act(function () {
+          return napi("/network/invites", jsonBody("POST", {
+            email: root.querySelector('[part="invite-email"]').value.trim(),
+            days: parseInt(root.querySelector('[part="invite-days"]').value, 10) || 0,
+            operator: root.querySelector('[part="invite-operator"]').checked,
+          }));
+        });
+      };
+      root.querySelector('[part="add-domain"]').onsubmit = function (e) {
+        e.preventDefault();
+        error.textContent = "";
+        napi("/network/domains", jsonBody("POST", {
+          domain: root.querySelector('[part="domain-input"]').value.trim(),
+          site: root.querySelector('[part="domain-site"]').value,
+        })).then(function (r) {
+          FriendoAccount.prototype._paintInstructions.call(self, root.querySelector('[part="dns"]'), r);
+        }, function (err) { error.textContent = err.message; });
+      };
+
+      root.querySelectorAll("[data-act]").forEach(function (btn) {
+        var d = btn.dataset;
+        btn.onclick = function () {
+          switch (d.act) {
+            case "site-suspend": {
+              var why = window.prompt("Put " + d.sub + " on hold. Reason (shown on the hold page, optional):", "");
+              if (why === null) return;
+              return act(function () { return napi("/network/sites/" + d.sub + "/suspend", jsonBody("POST", { reason: why })); });
+            }
+            case "site-resume": return act(function () { return napi("/network/sites/" + d.sub + "/resume", { method: "POST" }); });
+            case "site-owner": {
+              var who = window.prompt("Email of the account that should own " + d.sub + ":", "");
+              if (!who) return;
+              return act(function () { return napi("/network/sites/" + d.sub + "/owner", jsonBody("PUT", { email: who })); });
+            }
+            case "site-destroy":
+              if (!confirmed("Permanently delete " + d.sub + " and all its data? This can't be undone.")) return;
+              return act(function () { return napi("/sites/" + d.sub, { method: "DELETE" }); });
+            case "op-grant": return act(function () { return napi("/network/operators", jsonBody("POST", { email: d.email })); });
+            case "op-revoke": return act(function () { return napi("/network/operators/" + encodeURIComponent(d.email), { method: "DELETE" }); });
+            case "limit": {
+              var n = window.prompt("How many sites may this account make? A number, \"unlimited\", or \"default\":", "default");
+              if (n === null) return;
+              return act(function () { return napi("/network/accounts/" + d.id + "/quota", jsonBody("PUT", { sites: n })); });
+            }
+            case "acct-suspend": {
+              var reason = window.prompt("Suspend this account. Reason (shown to them when they try to sign in, optional):", "");
+              if (reason === null) return;
+              return act(function () { return napi("/network/accounts/" + d.id + "/suspend", jsonBody("POST", { reason: reason })); });
+            }
+            case "acct-resume": return act(function () { return napi("/network/accounts/" + d.id + "/resume", { method: "POST" }); });
+            case "signout": return act(function () { return napi("/network/accounts/" + d.id + "/signout", { method: "POST" }); });
+            case "invite-revoke": return act(function () { return napi("/network/invites/" + encodeURIComponent(d.email), { method: "DELETE" }); });
+            case "invite-prune": return act(function () { return napi("/network/invites/prune", { method: "POST" }); });
+            case "domain-verify": return act(function () { return napi("/network/domains/verify", jsonBody("POST", { domain: d.domain })); });
+            case "domain-remove":
+              if (!confirmed("Disconnect " + d.domain + "?")) return;
+              return act(function () { return napi("/network/domains", jsonBody("DELETE", { domain: d.domain })); });
+          }
+        };
+      });
+    }
+  }
+
+  // --- <friendo-activate code="K7QP-2XR9"> ---------------------------------
+  // The browser half of `friendo login`: sign in (if needed), then approve the
+  // code the terminal showed.
+  class FriendoActivate extends NetworkElement {
+    async render() {
+      var acct = await currentAccount();
+      var code = (this.getAttribute("code") || "").toUpperCase();
+      if (!acct) {
+        this.paint('<div part="signin-wrap"></div>');
+        this.paintSignIn(
+          this.shadowRoot.querySelector('[part="signin-wrap"]'),
+          "Sign in to link the device that's waiting in your terminal" + (code ? " (code <b>" + esc(code) + "</b>)" : "") + "."
+        );
+        return;
+      }
+      this.paint(
+        this.signedInBar(acct) +
+          '<form part="approve"><label>Code from your terminal <input part="code" required value="' + esc(code) + '" placeholder="K7QP-2XR9" /></label>' +
+          '<button part="approve-button" class="primary" type="submit">Link this device</button></form>' +
+          '<p part="status" class="status"></p>'
+      );
+      this.wireLogout();
+      var root = this.shadowRoot;
+      var status = root.querySelector('[part="status"]');
+      root.querySelector("form").onsubmit = async function (e) {
+        e.preventDefault();
+        status.className = "status";
+        status.textContent = "Linking…";
+        try {
+          await napi("/auth/device/approve", jsonBody("POST", { user_code: root.querySelector('[part="code"]').value.trim().toUpperCase() }));
+          root.querySelector("form").hidden = true;
+          status.innerHTML = '<span part="done">Device linked as <b>' + esc(acct.email) + "</b>. You can close this tab and go back to your terminal.</span>";
+        } catch (err) {
+          status.className = "error";
+          status.textContent = err.message;
+        }
+      };
+    }
+  }
+
   var defs = {
     "friendo-auth": FriendoAuth,
     "friendo-comments": FriendoComments,
@@ -1255,6 +1838,9 @@
     "friendo-map": FriendoMap,
     "friendo-input": FriendoInput,
     "friendo-form": FriendoForm,
+    "friendo-account": FriendoAccount,
+    "friendo-console": FriendoConsole,
+    "friendo-activate": FriendoActivate,
   };
   Object.keys(defs).forEach(function (tag) {
     if (!customElements.get(tag)) customElements.define(tag, defs[tag]);

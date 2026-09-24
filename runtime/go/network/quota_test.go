@@ -192,7 +192,9 @@ func TestListSitesReportsQuota(t *testing.T) {
 		t.Fatalf("list sites = %d", rec.Code)
 	}
 	var body struct {
-		Sites []string `json:"sites"`
+		Sites []struct {
+			Subdomain string `json:"subdomain"`
+		} `json:"sites"`
 		Quota struct {
 			Used      int  `json:"used"`
 			Allowed   int  `json:"allowed"`

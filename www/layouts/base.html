@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site.name }} — your site is a folder{% endblock %}</title>
+  <meta name="description" content="friendo is a local-first website builder. Your site is a folder: build it on your machine, publish it with one command.">
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/friendo.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand">friendo</a>
+    <nav class="topnav">
+      <a href="https://docs.friendo.world">Docs</a>
+      <a href="https://github.com/friendo-world/friendo">GitHub</a>
+      <a href="/account" class="button">Your sites</a>
+    </nav>
+  </header>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <p>friendo is open source (MIT). This page is itself a friendo site — the network's <em>home site</em>,
+      served at the bare domain. <a href="https://docs.friendo.world/docs/run-a-network">Run your own network.</a></p>
+  </footer>
+</body>
+</html>

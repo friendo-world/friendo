@@ -71,15 +71,119 @@ func (c *SiteClient) Login(email, password string) error {
 	return fmt.Errorf("login succeeded but no session cookie was returned")
 }
 
+// SetupStatus is what a site reports to a cold client: whether it still needs
+// its first owner, whether passwords are allowed, and whether a sign-in code
+// will actually be emailed (else the server prints it for local dev).
+type SetupStatus struct {
+	NeedsSetup      bool  `json:"needsSetup"`
+	PasswordLogin   *bool `json:"passwordLogin"`
+	EmailConfigured *bool `json:"emailConfigured"`
+}
+
+// AllowsPassword reports whether password sign-in is on. A site older than 0.5
+// doesn't report the field at all — those only knew passwords, so absent means yes.
+func (s SetupStatus) AllowsPassword() bool { return s.PasswordLogin == nil || *s.PasswordLogin }
+
+// EmailsCodes reports whether the site will deliver sign-in codes by email.
+func (s SetupStatus) EmailsCodes() bool { return s.EmailConfigured != nil && *s.EmailConfigured }
+
+// Status fetches the site's setup status.
+func (c *SiteClient) Status() (SetupStatus, error) {
+	var result SetupStatus
+	if err := c.get("/_/api/setup", &result); err != nil {
+		return SetupStatus{}, err
+	}
+	return result, nil
+}
+
 // NeedsSetup reports whether the site has no admin account yet (first run).
 func (c *SiteClient) NeedsSetup() (bool, error) {
-	var result struct {
-		NeedsSetup bool `json:"needsSetup"`
-	}
-	if err := c.get("/_/api/setup", &result); err != nil {
+	st, err := c.Status()
+	if err != nil {
 		return false, err
 	}
-	return result.NeedsSetup, nil
+	return st.NeedsSetup, nil
+}
+
+// RequestCode asks the site to email a sign-in code to an existing account.
+// The returned code is non-empty only in local dev (the server's echo mode).
+func (c *SiteClient) RequestCode(email string) (code string, err error) {
+	return c.postCode("/_/api/auth/request-code", email)
+}
+
+// SetupRequestCode asks a first-run site to email the code that will create its
+// owner. As with RequestCode, the code comes back only in local dev.
+func (c *SiteClient) SetupRequestCode(email string) (code string, err error) {
+	return c.postCode("/_/api/setup/request-code", email)
+}
+
+func (c *SiteClient) postCode(path, email string) (string, error) {
+	body, _ := json.Marshal(map[string]string{"email": email})
+	req, err := http.NewRequest("POST", c.siteURL+path, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return "", readError(resp)
+	}
+	var result struct {
+		Code string `json:"code"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	return result.Code, nil
+}
+
+// VerifyCode signs in with an emailed code and stores the session cookie.
+func (c *SiteClient) VerifyCode(email, code string) error {
+	return c.signIn("/_/api/auth/verify-code", map[string]string{"email": email, "code": code},
+		"invalid or expired code")
+}
+
+// SetupWithCode creates the site's first owner from the code sent by
+// SetupRequestCode and stores the resulting session cookie.
+func (c *SiteClient) SetupWithCode(email, name, code string) error {
+	return c.signIn("/_/api/setup", map[string]string{"email": email, "name": name, "code": code},
+		"invalid or expired code")
+}
+
+// signIn posts credentials of some kind and keeps the friendo_session cookie.
+func (c *SiteClient) signIn(path string, payload map[string]string, unauthorizedMsg string) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest("POST", c.siteURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("sign-in request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("%s", unauthorizedMsg)
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return fmt.Errorf("this site already has an owner account")
+	}
+	if resp.StatusCode >= 300 {
+		return readError(resp)
+	}
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "friendo_session" && ck.Value != "" {
+			c.cookie = ck.Value
+			return nil
+		}
+	}
+	return fmt.Errorf("signed in but no session cookie was returned")
 }
 
 // Setup creates the site's first admin (owner) and stores the resulting

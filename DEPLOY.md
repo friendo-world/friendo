@@ -51,7 +51,7 @@ You run + secure Coolify yourself.
 ## 2. Cloudflare (DNS + wildcard TLS)
 
 1. **DNS** (both proxied / orange-cloud):
-   - `A  @  → <server IP>`   (apex → operator console)
+   - `A  @  → <server IP>`   (apex → the home site + the network's own pages)
    - `A  *  → <server IP>`   (wildcard → every tenant site, resolves instantly)
 2. **TLS** — HTTP-01 can't issue wildcard certs behind the proxy, so pick one:
    - **Recommended: Cloudflare Origin CA cert.** Create an Origin Certificate for `example.com`
@@ -72,7 +72,7 @@ Create an application from this repo (build pack: **Dockerfile**).
 - **Port:** the container listens on **3000**; let Coolify's Traefik route to it (don't publish
   the port directly).
 - **Routing (the one fiddly bit):** three kinds of hostname have to reach this app — the apex
-  (`example.com` → operator console), the wildcard (`*.example.com` → tenant sites), and
+  (`example.com` → home site + network pages), the wildcard (`*.example.com` → tenant sites), and
   **any other hostname** (a tenant's custom domain arrives with *their* domain in the Host
   header, not one of yours). Set the app's domain to your apex, then replace the generated
   Traefik labels under **Advanced → Custom Docker Labels** with this block (Traefik **v3**
@@ -136,7 +136,7 @@ FRIENDO_S3_REGION=auto
 
 # First operator — this email is granted the operator capability on boot. Sign-in is
 # passwordless (email OTP), so no password here. (If you omit this, the first person to
-# sign in at the apex console claims operator.)
+# sign in at https://example.com/account claims operator.)
 FRIENDO_OPERATOR_EMAIL=you@example.com
 
 # Email delivery — REQUIRED for sign-in (operators + members receive their OTP by email).
@@ -197,7 +197,7 @@ The same Traefik point applies **without** Cloudflare for SaaS: under the defaul
 verification, a custom domain still reaches the box with its own hostname, so the
 catch-all is required either way.
 
-> Sign-in is passwordless everywhere: the operator console, `friendo login`, and member
+> Sign-in is passwordless everywhere: the network's `/account` page, `friendo login`, and member
 > login all deliver a one-time code by email — so `RESEND_API_KEY` + `FRIENDO_EMAIL_FROM`
 > are required on a live network (without them, no one can receive a code).
 
@@ -211,10 +211,12 @@ Deploy.
 
 ## 4. Verify
 
-1. Visit **`https://example.com`** → the operator console. Sign in with your operator email;
-   it emails you a one-time code (no password). The `FRIENDO_OPERATOR_EMAIL` account is already
-   an operator; if you didn't set one, the first sign-in claims it.
-2. Create a site `demo` in the console → **`https://demo.example.com`** serves it.
+1. Visit **`https://example.com/account`** and sign in with your operator email; it emails you
+   a one-time code (no password). The `FRIENDO_OPERATOR_EMAIL` account is already an operator;
+   if you didn't set one, the first sign-in claims it. **`https://example.com/network`** is the
+   operator's page.
+2. Create a site `demo` there (it's owned by you) → **`https://demo.example.com`** serves it, and
+   **Open admin** on `/account` drops you into its admin.
 3. From your laptop, publish a real local site:
    ```sh
    friendo login https://example.com               # once — browser sign-in (device auth)
@@ -235,9 +237,29 @@ Deploy.
    Cloudflare 526 means the origin TLS mode note above applies. Finish with
    `friendo domain remove yourtest.com` so the test hostname stops billing.
 
-Add another operator from the box: `docker exec <container> friendo network --root
-/data/network operator grant someone@example.com` — they then sign in passwordless with
-`friendo login`.
+Add another operator from `/network` (People → *Make operator*), from your laptop
+(`friendo network operator grant someone@example.com --network https://example.com`), or from
+the box (`docker exec <container> friendo network --root /data/network operator grant …`) —
+they then sign in passwordless with `friendo login`.
+
+## 4½. The home site
+
+Until you pick one, `https://example.com` shows a plain "this is a friendo network" page. To
+serve a real site there, publish one and point the network at it:
+
+```sh
+cd www && friendo deploy www --network https://example.com   # any site; "www" is the convention
+friendo network home www --network https://example.com
+```
+
+`www.example.com` then redirects to the bare domain. The network's own pages (`/account`,
+`/network`, `/activate`, `/login`) keep working on the bare domain; the home site takes one over
+by defining that page itself (friendo's own `www/pages/account.html` wraps `<friendo-account>`).
+`/api/*` on the bare domain is always the network's. Reserved names (`www`, `docs`, `api`, `admin`,
+`mail`, `origin`, …) can only be created by an operator.
+
+For friendo.world: `npm run deploy:www` and `npm run deploy:docs` publish this repo's `www/` and
+`docs/` sites from a laptop signed in as an operator.
 
 ## 5. Backups
 

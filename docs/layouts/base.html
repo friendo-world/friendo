@@ -28,8 +28,8 @@
         <p class="nav-group">Reference</p>
         {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Reference" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
 
-        <p class="nav-group">Roadmap</p>
-        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Roadmap" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+        <p class="nav-group">Hosting</p>
+        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Hosting" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
       </nav>
       <script>
         (function () {
