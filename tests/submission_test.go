@@ -27,7 +27,7 @@ func TestMemberSubmissionRateLimit(t *testing.T) {
 	defer db.Close()
 
 	r := chi.NewRouter()
-	admin.Mount(r, db, false, "testsite", t.TempDir(), nil, nil)
+	admin.Mount(r, db, false, "testsite", t.TempDir(), nil, nil, nil)
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 

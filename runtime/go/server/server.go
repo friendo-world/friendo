@@ -96,27 +96,41 @@ func Start(port int, openAdmin, requireLogin bool) error {
 		log.Printf("Content: %s", res.Summary())
 	}
 
-	// Start file watcher for hot reload.
-	go watchForChanges(siteDir, db)
-
-	handler, err := BuildSiteHandler(siteDir, db, openAdmin)
+	site, err := BuildSite(siteDir, db, openAdmin)
 	if err != nil {
 		return err
 	}
 
+	// Start file watcher for hot reload. A change under pages/ also rebuilds the
+	// route table, so a new [slug].html starts routing without a restart.
+	go watchForChanges(siteDir, db, site.Reload)
+
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Serving on http://localhost%s\n", addr)
 	fmt.Printf("Admin UI on http://localhost%s/_/\n", addr)
-	return http.ListenAndServe(addr, handler)
+	return http.ListenAndServe(addr, site.Handler)
 }
 
 // BuiltSite is a site ready to serve, plus what the network needs to know about
 // it beyond the handler: whether the site's own pages answer a given path (so a
-// home site can deliberately take over one of the network's default pages).
+// home site can deliberately take over one of the network's default pages), and
+// a way to re-read pages/ after templates change.
 type BuiltSite struct {
 	Handler  http.Handler
-	routes   []route
+	table    *routeTable
 	pagesDir string
+}
+
+// Reload rebuilds the route table from pages/. Called after a templates push
+// and by the dev-server file watcher, so a page added after the site was first
+// served — a new dynamic [slug].html, say — starts routing at once. Before this
+// existed, a site deployed to a network could 404 on every article until the
+// process restarted: `friendo deploy` reaches the site's push API (which builds
+// the handler, and its routes) before the templates it's pushing exist on disk.
+func (s *BuiltSite) Reload() {
+	if err := s.table.Reload(); err != nil {
+		log.Printf("Rebuilding routes: %v", err)
+	}
 }
 
 // HasPage reports whether the site's pages/ folder defines urlPath — either a
@@ -126,14 +140,45 @@ func (s *BuiltSite) HasPage(urlPath string) bool {
 	if urlPath == "" {
 		urlPath = "/"
 	}
-	for i := range s.routes {
-		if s.routes[i].pattern.MatchString(urlPath) {
+	for _, r := range s.table.snapshot() {
+		if r.pattern.MatchString(urlPath) {
 			return true
 		}
 	}
 	direct := filepath.Join(s.pagesDir, filepath.Clean(urlPath)+".html")
 	_, err := os.Stat(direct)
 	return err == nil
+}
+
+// routeTable is the page → URL map, rebuildable at runtime. Reads take a
+// snapshot under a read lock, so a rebuild never races a request mid-match.
+type routeTable struct {
+	pagesDir string
+	mu       sync.RWMutex
+	routes   []route
+}
+
+func newRouteTable(pagesDir string) (*routeTable, error) {
+	t := &routeTable{pagesDir: pagesDir}
+	return t, t.Reload()
+}
+
+// Reload re-walks pages/ and swaps the table in one go.
+func (t *routeTable) Reload() error {
+	routes, err := buildRoutes(t.pagesDir)
+	if err != nil {
+		return err
+	}
+	t.mu.Lock()
+	t.routes = routes
+	t.mu.Unlock()
+	return nil
+}
+
+func (t *routeTable) snapshot() []route {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.routes
 }
 
 // BuildSiteHandler assembles the site-serving HTTP handler: the admin UI + REST/sync
@@ -165,11 +210,12 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 	tplSet := pongo2.NewSet("friendo", loader)
 	tplSet.Debug = true
 
-	// Build the route table from the pages directory.
-	routes, err := buildRoutes(pagesDir)
+	// Build the route table from the pages directory (live — see routeTable).
+	table, err := newRouteTable(pagesDir)
 	if err != nil {
 		return nil, fmt.Errorf("building routes: %w", err)
 	}
+	built := &BuiltSite{table: table, pagesDir: pagesDir}
 
 	r := chi.NewRouter()
 
@@ -184,7 +230,8 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 	// Admin UI + REST/sync API at /_/ (the admin package mounts the api package).
 	// The permalink resolver lets the locations API return each post's public URL
 	// so an aggregate <friendo-map> can link markers back to their posts.
-	admin.Mount(r, db, openAdmin, siteCfg.Site.Name, siteDir, permalinkResolver(routes), store)
+	// A templates push re-reads pages/ so new routes serve at once.
+	admin.Mount(r, db, openAdmin, siteCfg.Site.Name, siteDir, permalinkResolver(table.snapshot), store, built.Reload)
 
 	// Live reload SSE endpoint.
 	r.Get("/_/reload", handleReloadSSE)
@@ -203,10 +250,11 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 
 	// Catch-all: template rendering.
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-		handleTemplate(w, req, db, pagesDir, tplSet, routes, siteCfg)
+		handleTemplate(w, req, db, pagesDir, tplSet, table.snapshot(), siteCfg)
 	})
 
-	return &BuiltSite{Handler: r, routes: routes, pagesDir: pagesDir}, nil
+	built.Handler = r
+	return built, nil
 }
 
 // assetHandler serves /assets/*: managed media (assets/uploads/* + galleries/*)
@@ -294,7 +342,7 @@ func handleReloadSSE(w http.ResponseWriter, r *http.Request) {
 // watchForChanges watches the site directory for file changes and triggers
 // a browser reload via SSE. Debounced to avoid rapid-fire reloads. Changes under
 // content/ trigger a re-import into the database before the reload.
-func watchForChanges(siteDir string, db *data.DB) {
+func watchForChanges(siteDir string, db *data.DB, reloadRoutes func()) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Printf("Hot reload disabled: %v", err)
@@ -333,6 +381,11 @@ func watchForChanges(siteDir string, db *data.DB) {
 				changed := event.Name
 				debounce = time.AfterFunc(100*time.Millisecond, func() {
 					log.Printf("File changed: %s", changed)
+					// A pages/ change may add or remove a route (a new folder, a
+					// new [slug].html): rebuild the table so it serves right away.
+					if reloadRoutes != nil && strings.Contains(filepath.ToSlash(changed), "/pages/") {
+						reloadRoutes()
+					}
 					// A content/ change means a markdown edit — recompile into the DB
 					// (collections are re-queried per request, so the reload picks it up).
 					if strings.Contains(filepath.ToSlash(changed), "/content/") {
@@ -443,8 +496,9 @@ func buildRoutes(pagesDir string) ([]route, error) {
 // URL template (e.g. blog + {slug: "hello"} -> "/blog/hello"). It returns "" for
 // collections with no public page. This is why a link on the aggregate map is
 // correct even for nested pages, where a naive "/{collection}/{slug}" is wrong.
-func permalinkResolver(routes []route) data.PermalinkFunc {
+func permalinkResolver(current func() []route) data.PermalinkFunc {
 	return func(collection string, fields map[string]string) string {
+		routes := current()
 		for i := range routes {
 			r := &routes[i]
 			if r.collectionName != collection || r.urlTemplate == "" {

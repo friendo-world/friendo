@@ -218,7 +218,9 @@ the runtime only serves the bundle and the REST API.
 **Site sign-in** is a code sent to your email, for every role; passwords are
 opt-in per site (`access.password_login`, Settings → *Allow signing in with a
 password*). On localhost with no email provider, `friendo serve` opens the admin
-with no sign-in (`--require-login` to test the screens). On a server, the first
+with no sign-in (`--require-login` to test the screens) — only for the admin UI's own calls
+(it sends `X-Friendo-Admin`); the site's `<friendo-*>` tags see a real visitor, and a
+real session always wins over open mode. On a server, the first
 visitor to `/_/` confirms their email with a code and becomes the owner.
 `friendo push --users` moves users (hashes included) to a deployed site.
 

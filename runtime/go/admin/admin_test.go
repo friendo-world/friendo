@@ -24,8 +24,13 @@ func TestLocalOpenRule(t *testing.T) {
 		r := httptest.NewRequest("GET", "/_/api/me", nil)
 		r.Host = host
 		r.RemoteAddr = remote
+		r.Header.Set(adminHeader, "1") // the admin SPA identifies itself
 		for k, v := range hdr {
-			r.Header.Set(k, v)
+			if v == "" {
+				r.Header.Del(k)
+			} else {
+				r.Header.Set(k, v)
+			}
 		}
 		return r
 	}
@@ -45,6 +50,7 @@ func TestLocalOpenRule(t *testing.T) {
 		{"forwarded proto", mk("localhost:3000", "127.0.0.1:5555", map[string]string{"X-Forwarded-Proto": "https"}), nil, true, false},
 		{"email configured", mk("localhost:3000", "127.0.0.1:5555", nil), map[string]string{"RESEND_API_KEY": "k", "FRIENDO_EMAIL_FROM": "f"}, true, false},
 		{"require-login", mk("localhost:3000", "127.0.0.1:5555", nil), nil, false, false},
+		{"not from the admin UI (a <friendo-auth> call)", mk("localhost:3000", "127.0.0.1:5555", map[string]string{adminHeader: ""}), nil, true, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -59,4 +65,20 @@ func TestLocalOpenRule(t *testing.T) {
 			}
 		})
 	}
+
+	// A real session beats open mode: the signed-in member is who you are.
+	t.Run("real session wins", func(t *testing.T) {
+		LocalOpen(true)
+		defer LocalOpen(false)
+		m, err := db.CreateMember("m@test.com", "M", "member")
+		if err != nil {
+			t.Fatalf("CreateMember: %v", err)
+		}
+		tok, _ := db.CreateSession(m.ID, "", "")
+		r := mk("localhost:3000", "127.0.0.1:5555", nil)
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: tok})
+		if u := GetSessionUser(r, db); u == nil || u.ID != m.ID {
+			t.Fatalf("got %+v, want the member", u)
+		}
+	})
 }

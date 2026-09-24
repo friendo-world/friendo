@@ -33,7 +33,11 @@ import (
 //
 // Public endpoints (me, auth) carry no auth so the SPA can bootstrap and log in.
 // Everything else requires site admin authentication (session cookie).
-func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*http.Request) *data.User, permalink data.PermalinkFunc, store storage.Backend) {
+//
+// onTemplatesChanged (optional) runs after every templates push: the server
+// uses it to rebuild its route table, so a page pushed after the site was first
+// served starts routing at once.
+func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*http.Request) *data.User, permalink data.PermalinkFunc, store storage.Backend, onTemplatesChanged func()) {
 	// friendo.toml's [settings] block is the source of truth for the settings it
 	// declares: apply them to the DB now (overwriting any admin edit) and mark them
 	// so the settings API reports them read-only and refuses to change them.
@@ -134,7 +138,7 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// Settings + sync — admin+ (site.configure).
 		r.Get("/settings", capGate(authFunc, data.CapSiteConfigure, handleSettings(db, siteName, managed)))
 		r.Put("/settings", capGate(authFunc, data.CapSiteConfigure, handleUpdateSettings(db, siteName, managed)))
-		r.Post("/push/templates", capGate(authFunc, data.CapSiteConfigure, handlePushTemplates(siteDir)))
+		r.Post("/push/templates", capGate(authFunc, data.CapSiteConfigure, handlePushTemplates(siteDir, onTemplatesChanged)))
 		r.Post("/push/assets", capGate(authFunc, data.CapSiteConfigure, handlePushAssets(siteDir, store)))
 		r.Post("/push/data", capGate(authFunc, data.CapSiteConfigure, handlePushData(db)))
 		r.Post("/push/users", capGate(authFunc, data.CapSiteConfigure, handlePushUsers(db)))
@@ -1514,7 +1518,7 @@ func handleLogout(db *data.DB) http.HandlerFunc {
 
 // handlePushTemplates accepts template files and writes them to the site directory.
 // Expects JSON body: {"files": [{"path": "pages/index.html", "content": "..."}]}
-func handlePushTemplates(siteDir string) http.HandlerFunc {
+func handlePushTemplates(siteDir string, onTemplatesChanged func()) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Files []struct {
@@ -1549,6 +1553,9 @@ func handlePushTemplates(siteDir string) http.HandlerFunc {
 				continue
 			}
 			written++
+		}
+		if onTemplatesChanged != nil {
+			onTemplatesChanged()
 		}
 
 		jsonResponse(w, map[string]int{"written": written})

@@ -42,7 +42,7 @@ default_role = "contributor"
 
 	r := chi.NewRouter()
 	// Mount reads friendo.toml from siteDir and applies [settings] to the DB.
-	admin.Mount(r, db, false, "testsite", siteDir, nil, nil)
+	admin.Mount(r, db, false, "testsite", siteDir, nil, nil, nil)
 
 	// The declared keys are now the DB's values, regardless of prior state.
 	if !db.GetBoolSetting("content.accept_submissions", false) {

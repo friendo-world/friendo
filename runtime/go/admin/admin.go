@@ -28,10 +28,16 @@ var openAdminMode bool
 
 // localOpen is the everyday `friendo serve` convenience: on your own machine,
 // with no email provider to deliver a sign-in code, the admin opens without a
-// login — but only for requests that are unmistakably local (see isLocalRequest).
-// Set by server.Start alone; a site served by a network never turns it on.
-// `friendo serve --require-login` switches it off to test the sign-in screens.
+// login — but only for requests that are unmistakably local (see isLocalRequest)
+// and only from the admin UI itself (it sends adminHeader; the site's own
+// <friendo-*> tags don't, so a visitor on localhost is still a visitor and a
+// member who signs in is that member). A real session always wins over open
+// mode. Set by server.Start alone; a site served by a network never turns it
+// on. `friendo serve --require-login` switches it off to test the sign-in screens.
 var localOpen bool
+
+// adminHeader is how the admin SPA identifies its own API calls.
+const adminHeader = "X-Friendo-Admin"
 
 // LocalOpen turns the localhost convenience on or off.
 func LocalOpen(on bool) { localOpen = on }
@@ -41,15 +47,16 @@ func LocalOpen(on bool) { localOpen = on }
 //   - /_/assets/*    the built SPA assets
 //   - /_/*           the SPA app shell (client-side routing, incl. first-run setup)
 //
-// If openAdmin is true, the admin UI skips password authentication.
-func Mount(r chi.Router, db *data.DB, openAdmin bool, name, siteDir string, permalink data.PermalinkFunc, store storage.Backend) {
+// If openAdmin is true, the admin UI skips authentication. onTemplatesChanged
+// (optional) runs after a templates push, so the server can re-read pages/.
+func Mount(r chi.Router, db *data.DB, openAdmin bool, name, siteDir string, permalink data.PermalinkFunc, store storage.Backend, onTemplatesChanged func()) {
 	openAdminMode = openAdmin
 
 	authFunc := func(req *http.Request) *data.User { return GetSessionUser(req, db) }
 
 	r.Route("/_", func(r chi.Router) {
 		// REST + sync API.
-		api.Mount(r, db, siteDir, name, authFunc, permalink, store)
+		api.Mount(r, db, siteDir, name, authFunc, permalink, store, onTemplatesChanged)
 
 		// SPA bundle: built assets and the app shell.
 		r.Handle("/assets/*", http.StripPrefix("/_/", http.FileServer(http.FS(spaFS))))
@@ -77,7 +84,14 @@ const sessionCookieName = "friendo_session"
 // GetSessionUser validates the session cookie and returns the current user.
 // Returns nil if not authenticated. Exported for use by the API.
 func GetSessionUser(r *http.Request, db *data.DB) *data.User {
-	if openAdminMode || (localOpen && isLocalRequest(r) && !email.Configured()) {
+	// A real session always wins — a member who signed in on localhost is that
+	// member, not the open-mode owner.
+	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+		if user, err := db.ValidateSession(cookie.Value); err == nil {
+			return user
+		}
+	}
+	if openAdminMode || (localOpen && r.Header.Get(adminHeader) != "" && isLocalRequest(r) && !email.Configured()) {
 		// Open mode: act as an owner (all capabilities) without a session.
 		return &data.User{
 			ID:    "open-admin",
@@ -86,17 +100,7 @@ func GetSessionUser(r *http.Request, db *data.DB) *data.User {
 			Role:  "owner",
 		}
 	}
-
-	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil || cookie.Value == "" {
-		return nil
-	}
-
-	user, err := db.ValidateSession(cookie.Value)
-	if err != nil {
-		return nil
-	}
-	return user
+	return nil
 }
 
 // isLocalRequest reports whether a request could only have come from the same

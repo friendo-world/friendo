@@ -20,6 +20,12 @@ machine, to `localhost`, with nothing in front of it. Put the site behind a prox
 or on a real hostname and sign-in is required. To see the sign-in screens locally
 anyway, run `friendo serve --require-login`.
 
+It's the *admin* that opens, not the site: on your pages, `<friendo-auth>` still
+treats you as a visitor until you sign in with a code (which works locally — the
+code shows on the page), and once you're signed in as a member that's who you
+are, even in the admin. So community features are testable locally as they'll
+behave for real people.
+
 ## First run on a server
 
 The first time anyone opens the admin of a site that's actually on the internet,

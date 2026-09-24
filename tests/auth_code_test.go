@@ -29,7 +29,7 @@ type apiClient struct {
 func newAPIClient(t *testing.T, db *data.DB, siteDir string) *apiClient {
 	t.Helper()
 	r := chi.NewRouter()
-	admin.Mount(r, db, false, "testsite", siteDir, nil, nil)
+	admin.Mount(r, db, false, "testsite", siteDir, nil, nil, nil)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 	jar, _ := cookiejar.New(nil)

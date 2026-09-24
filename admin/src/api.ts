@@ -89,7 +89,10 @@ export class ApiError extends Error {
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch("/_/api" + path, {
     credentials: "same-origin",
-    headers: opts.body ? { "Content-Type": "application/json" } : {},
+    // The admin identifies itself: on localhost with no email provider, the
+    // runtime opens the admin without a sign-in for these calls only — a site's
+    // own <friendo-*> tags never send this, so visitors stay visitors.
+    headers: { "X-Friendo-Admin": "1", ...(opts.body ? { "Content-Type": "application/json" } : {}) },
     ...opts,
   });
   if (!res.ok) {
