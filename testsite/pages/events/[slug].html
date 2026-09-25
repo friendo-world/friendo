@@ -1,0 +1,48 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<article>
+    <h1>{{ record.title }}</h1>
+    {# A photo attached through the form's media input lands in data.photo as the
+       uploaded file's URL, the same way the blog's cover image does. #}
+    {% if record.data.photo %}
+    <img class="cover" src="{{ record.data.photo }}" alt="">
+    {% endif %}
+    <p class="post-meta">
+        {{ record.when|when }}
+        {% if record.when.repeats %}&middot; {{ record.when.repeats }}{% endif %}
+    </p>
+    {% if record.when.repeats and record.when.next %}
+    <p>Next: {{ record.when.next|when }}</p>
+    {% endif %}
+    {{ record.body|markdown }}
+    <p>
+        <!-- One tag = a menu of calendar apps; the plain link beside it is the no-JS
+             version (Google's pre-filled form, built by the google_calendar_url filter). -->
+        <friendo-add-to-calendar post-id="{{ record.id }}"></friendo-add-to-calendar>
+        <a href="{{ record|google_calendar_url }}" target="_blank" rel="noopener">Add to Google Calendar</a> &middot;
+        <a href="/events/">All events</a>
+    </p>
+</article>
+
+<!-- RSVP. The tally line renders server-side from record.rsvps (readable with
+     JS off); the component asks the question and lets a signed-in member answer
+     for the next date. `names` shows who answered to the post's author and
+     moderators. -->
+<section class="community">
+    <div class="signin">
+        <h2>Sign in to answer</h2>
+        <p class="post-meta">So far: {{ record.rsvps.going }} going &middot; {{ record.rsvps.maybe }} maybe &middot; {{ record.rsvps.not_going }} can't go</p>
+        <friendo-auth></friendo-auth>
+    </div>
+    <friendo-rsvp post-id="{{ record.id }}" names></friendo-rsvp>
+
+    <div>
+        <h2>Map</h2>
+        <friendo-map target-type="post" target-id="{{ record.id }}"></friendo-map>
+    </div>
+</section>
+
+<style>
+    friendo-rsvp::part(button)[aria-pressed="true"] { background: #efeaff; border-color: var(--accent); }
+</style>
+{% endblock %}

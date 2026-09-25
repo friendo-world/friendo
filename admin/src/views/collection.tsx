@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type Record } from "../api";
+import { formatWhen } from "../when";
 
 export function CollectionView({ collection }: { collection?: string }) {
   const name = collection || "";
@@ -52,6 +53,7 @@ export function CollectionView({ collection }: { collection?: string }) {
                 <th class="px-4 py-3 text-left text-xs font-bold text-dim">Title</th>
                 <th class="px-4 py-3 text-left text-xs font-bold text-dim">Slug</th>
                 <th class="px-4 py-3 text-left text-xs font-bold text-dim">Status</th>
+                <th class="px-4 py-3 text-left text-xs font-bold text-dim">When</th>
                 <th class="px-4 py-3 text-left text-xs font-bold text-dim">Created</th>
                 <th class="px-4 py-3"></th>
               </tr>
@@ -64,9 +66,26 @@ export function CollectionView({ collection }: { collection?: string }) {
                     <code class="bg-tint px-1.5 py-0.5 text-xs">{r.slug}</code>
                   </td>
                   <td class="px-4 py-3 text-sm">{r.status}</td>
+                  <td class="px-4 py-3 text-xs text-dim">
+                    {r.when ? (
+                      <span title={r.when.repeats ? `Next: ${formatWhen(r.when, { next: true })}` : undefined}>
+                        {formatWhen(r.when)}
+                      </span>
+                    ) : (
+                      ""
+                    )}
+                  </td>
                   <td class="px-4 py-3 text-xs text-dim">{r.created}</td>
                   <td class="px-4 py-3">
                     <div class="flex justify-end gap-2">
+                      {r.when && (
+                        <a
+                          href={`/_/records/${encodeURIComponent(r.id)}/attendees`}
+                          class="bg-tint px-2 py-1 text-xs font-bold text-dim hover:bg-manila"
+                        >
+                          Attendees
+                        </a>
+                      )}
                       <a
                         href={`/_/records/${encodeURIComponent(r.id)}/edit`}
                         class="bg-ink px-2 py-1 text-xs font-bold text-white hover:bg-link"

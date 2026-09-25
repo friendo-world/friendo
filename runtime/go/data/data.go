@@ -43,6 +43,9 @@ var migrationFiles embed.FS
 type DB struct {
 	Conn   *sql.DB
 	SiteID string
+	// Location is the site's timezone ([site] timezone in friendo.toml, else
+	// UTC): the zone a `when` without one is read in.
+	Location *time.Location
 }
 
 // Open creates or opens the SQLite database at <siteDir>/data/friendo.db,
@@ -64,7 +67,11 @@ func Open(siteDir string) (*DB, error) {
 		return nil, fmt.Errorf("applying migrations: %w", err)
 	}
 
-	return &DB{Conn: conn, SiteID: "local"}, nil
+	loc, tzErr := LoadSiteLocation(siteDir)
+	if tzErr != nil {
+		fmt.Fprintln(os.Stderr, "Warning:", tzErr)
+	}
+	return &DB{Conn: conn, SiteID: "local", Location: loc}, nil
 }
 
 type migrationDef struct {
@@ -494,7 +501,8 @@ func (db *DB) UpsertRecordBySlug(collection, slug, title, body, status, publishe
 	return id, err
 }
 
-// DeleteRecord removes a post by id, scoped to the site.
+// DeleteRecord removes a post by id, scoped to the site, along with its
+// calendar series.
 func (db *DB) DeleteRecord(id string) error {
 	res, err := db.Conn.Exec(`DELETE FROM posts WHERE id = ? AND site_id = ?`, id, db.SiteID)
 	if err != nil {
@@ -503,6 +511,7 @@ func (db *DB) DeleteRecord(id string) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return sql.ErrNoRows
 	}
+	db.DeleteEventsForTarget("post", id)
 	return nil
 }
 

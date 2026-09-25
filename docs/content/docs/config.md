@@ -10,6 +10,7 @@ weight: 9
 ```toml
 [site]
 name = "My Site"
+timezone = "America/Los_Angeles"
 
 [content]
 types = ["posts", "comments", "reactions"]
@@ -20,6 +21,7 @@ types = ["posts", "comments", "reactions"]
 | Key | What |
 |---|---|
 | `name` | The site's display name, available in templates as `{{ site.name }}` |
+| `timezone` | The zone an [event's](/docs/calendar) `when` is read in, as an IANA name (`America/Los_Angeles`, `Europe/Paris`). `friendo init` fills in your machine's. Unset means UTC |
 
 ## `[content]`
 

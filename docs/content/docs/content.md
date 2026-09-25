@@ -28,6 +28,7 @@ types = ["posts", "comments", "reactions"]
 | **Polls** | Polls attached to a post | `{{ record.poll }}` or `<friendo-poll>` |
 | **Authors** | People (personas) who create content | `{{ record.author_name }}` |
 | **Locations** | Geotag any record | `<friendo-map>` |
+| **Events** | A post with a `when` — listed by date, subscribable at `/calendar.ics` | `{{ record.when }}`, `collections.events\|upcoming` |
 | **Files** | Media and uploads (incl. galleries) | `{{ record.gallery }}` |
 
 Community relations (`record.comments` / `.reactions` / `.poll` / `.gallery`) render
@@ -69,8 +70,11 @@ content/
 ```
 
 The **folder under `content/` is the collection**; the filename is the slug. Each
-file has YAML front matter, and any keys beyond `title`/`slug`/`status`/`date`
-become the record's `data`, readable in templates as `record.data.<field>`:
+file has YAML front matter. `title`, `slug`, `status` and `date` are the record's
+own fields; `location` becomes a [map pin](/docs/maps); `when` (with `ends`,
+`timezone`, `repeats`, `except`) makes the post a [calendar event](/docs/calendar);
+and any other key becomes the record's `data`, readable in templates as
+`record.data.<field>`:
 
 ```markdown
 ---

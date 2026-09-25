@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/friendo-world/friendo/runtime/go/admin"
+	"github.com/friendo-world/friendo/runtime/go/calendar"
 	"github.com/friendo-world/friendo/runtime/go/content"
 	"github.com/friendo-world/friendo/runtime/go/data"
 	"github.com/friendo-world/friendo/runtime/go/renderer" // also registers filters + gate tags
@@ -242,6 +243,28 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 
 	// The community SDK (Web Components) at /friendo.js — public.
 	r.Get("/friendo.js", sdk.Handler())
+
+	// Calendar feeds: /calendar.ics (subscribe in a calendar app) and
+	// /calendar.json (<friendo-calendar>). Published posts with a `when`, minus
+	// any collection whose page is members-only. A page the site defines at the
+	// same path wins — the same rule as the network's default pages.
+	feed := calendar.Feed{
+		DB:        db,
+		SiteName:  siteCfg.Site.Name,
+		Visible:   collectionVisibility(table.snapshot, siteCfg),
+		Permalink: permalinkResolver(table.snapshot),
+	}
+	feedOrPage := func(serve http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, req *http.Request) {
+			if built.HasPage(req.URL.Path) {
+				handleTemplate(w, req, db, pagesDir, tplSet, table.snapshot(), siteCfg)
+				return
+			}
+			serve(w, req)
+		}
+	}
+	r.Get("/calendar.ics", feedOrPage(feed.ServeICS))
+	r.Get("/calendar.json", feedOrPage(feed.ServeJSON))
 
 	// Serve static files from assets/ at /assets/. With a media backend, uploads
 	// stream from object storage while static assets still come from disk.
@@ -537,6 +560,23 @@ func buildRoutes(pagesDir string) ([]route, error) {
 	return routes, err
 }
 
+// collectionVisibility reports whether a collection may appear in a public feed:
+// not when its page carries a members-only tag or sits under an [access] path.
+// A collection with no page at all is visible (it's public in collections.* too).
+func collectionVisibility(current func() []route, siteCfg siteConfig) func(string) bool {
+	return func(collection string) bool {
+		for _, r := range current() {
+			if r.collectionName != collection {
+				continue
+			}
+			if r.gate != nil || siteCfg.Access.Requires(r.urlTemplate) != "" {
+				return false
+			}
+		}
+		return true
+	}
+}
+
 // permalinkResolver builds a data.PermalinkFunc from the route table — the
 // reverse of buildRoutes. Given a collection and a record's field values it
 // finds the collection's dynamic page and substitutes the values back into the
@@ -694,12 +734,28 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 // baseContext is what every page render starts from: the site, the request, the
 // collections, and who's viewing (user is nil for a visitor).
 func baseContext(req *http.Request, db *data.DB, siteCfg siteConfig, user *data.User) pongo2.Context {
+	origin := requestOrigin(req)
 	return pongo2.Context{
-		"site":        map[string]string{"name": siteCfg.Site.Name},
+		"site":        map[string]string{"name": siteCfg.Site.Name, "url": origin},
 		"request":     map[string]string{"path": req.URL.Path},
 		"collections": buildCollectionsContext(db),
 		"user":        viewerContext(user),
+		// {{ calendar.google }} / .webcal / .ics — ways to subscribe to the site's events.
+		"calendar": calendar.Links(origin),
 	}
+}
+
+// requestOrigin is the site's own origin as this request saw it (scheme +
+// host), for absolute links; behind a proxy X-Forwarded-Proto tells the scheme.
+func requestOrigin(req *http.Request) string {
+	if req.Host == "" {
+		return ""
+	}
+	scheme := "http"
+	if req.TLS != nil || strings.EqualFold(req.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + req.Host
 }
 
 // viewerContext is the signed-in account as templates see it: {{ user.name }},
@@ -843,6 +899,11 @@ func buildCollectionsContext(db *data.DB) map[string]any {
 			result[name] = []map[string]any{}
 			continue
 		}
+		// Every record carries its calendar series as record.when (nil for a post
+		// with no time), so a listing can print dates and the upcoming/in_month
+		// filters can expand without more lookups — and its pin as record.location.
+		db.AttachWhen(records, time.Now(), false)
+		db.AttachLocations(records)
 		result[name] = records
 	}
 
@@ -887,6 +948,19 @@ func attachRecordRelations(db *data.DB, record map[string]any) {
 	// Gallery images imported from the post's page bundle (field="gallery").
 	if gallery, err := db.ListFilesByField("post", id, "gallery"); err == nil {
 		record["gallery"] = gallery
+	}
+
+	// The post's pin ({{ record.location.label }}), nil when it has none.
+	db.AttachLocations([]map[string]any{record})
+
+	// The post's calendar series ({{ record.when }}), nil when it has no time,
+	// and the RSVP tally for its next occurrence ({{ record.rsvps.going }}).
+	if ev := db.EventFor(id); ev != nil {
+		record["when"] = ev.Map(time.Now())
+		record["rsvps"] = db.RSVPSummary(ev, time.Now())
+	} else {
+		record["when"] = nil
+		record["rsvps"] = nil
 	}
 }
 

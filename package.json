@@ -9,7 +9,7 @@
     "check": "go vet ./... && go build ./... && npm test",
     "test": "npm run test:go",
     "test:go": "go test ./...",
-    "test:sdk": "go build -o bin/friendo ./cli/cmd/friendo/ && node tests/sdk-persona.mjs && node tests/sdk-map.mjs && node tests/sdk-map-aggregate.mjs && node tests/sdk-form.mjs && node tests/sdk-gate.mjs && node tests/sdk-network.mjs",
+    "test:sdk": "go build -o bin/friendo ./cli/cmd/friendo/ && node tests/sdk-persona.mjs && node tests/sdk-map.mjs && node tests/sdk-map-aggregate.mjs && node tests/sdk-form.mjs && node tests/sdk-gate.mjs && node tests/sdk-calendar.mjs && node tests/admin-when.mjs && node tests/sdk-rsvp.mjs && node tests/sdk-network.mjs",
     "build": "npm run admin && npm run sdk && go build -o bin/friendo ./cli/cmd/friendo/",
     "release": "node scripts/release.mjs",
     "serve": "npm run build && cd testsite && ../bin/friendo serve",

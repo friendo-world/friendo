@@ -3,15 +3,18 @@ package export
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/flosch/pongo2/v6"
 
+	"github.com/friendo-world/friendo/runtime/go/calendar"
 	"github.com/friendo-world/friendo/runtime/go/data"
 	"github.com/friendo-world/friendo/runtime/go/renderer" // also registers filters + gate tags
 )
@@ -23,6 +26,19 @@ type exportConfig struct {
 		Name string `toml:"name"`
 	} `toml:"site"`
 	Access renderer.AccessRules `toml:"access"`
+	// [deploy] gives the calendar feed an absolute URL to link back with.
+	Deploy struct {
+		Target string `toml:"target"`
+		Domain string `toml:"domain"`
+	} `toml:"deploy"`
+}
+
+// baseURL is where the exported site will live, if friendo.toml says.
+func (c exportConfig) baseURL() string {
+	if c.Deploy.Domain != "" {
+		return "https://" + strings.TrimSuffix(c.Deploy.Domain, "/")
+	}
+	return strings.TrimSuffix(c.Deploy.Target, "/")
 }
 
 func loadExportConfig(siteDir string) exportConfig {
@@ -92,7 +108,8 @@ func exportStatic() error {
 	loader := pongo2.MustNewLocalFileSystemLoader(siteDir)
 	tplSet := pongo2.NewSet("friendo", loader)
 	cfg := loadExportConfig(siteDir)
-	site := map[string]string{"name": cfg.Site.Name}
+	site := map[string]string{"name": cfg.Site.Name, "url": cfg.baseURL()}
+	links := calendar.Links(cfg.baseURL())
 
 	// Build collections context.
 	collections := make(map[string]any)
@@ -104,6 +121,8 @@ func exportStatic() error {
 		if err != nil {
 			continue
 		}
+		db.AttachWhen(records, time.Now(), false) // {{ e.when }} on listings
+		db.AttachLocations(records)
 		collections[name] = records
 	}
 
@@ -145,6 +164,7 @@ func exportStatic() error {
 			"site":        site,
 			"request":     map[string]string{"path": urlPath},
 			"collections": collections,
+			"calendar":    links,
 		}
 
 		tpl, err := tplSet.FromFile("pages/" + rel)
@@ -181,8 +201,82 @@ func exportStatic() error {
 		return err
 	}
 
+	// The calendar feeds, so a static site is subscribable and <friendo-calendar>
+	// has its data with no runtime behind it.
+	if n, err := writeFeeds(db, pagesDir, distDir, cfg); err != nil {
+		return fmt.Errorf("writing calendar feeds: %w", err)
+	} else if n > 0 {
+		fmt.Printf("Exported calendar.ics + calendar.json (%d events)\n", n)
+	}
+
 	fmt.Printf("Exported %d pages to dist/\n", count)
 	return nil
+}
+
+// writeFeeds writes dist/calendar.ics and dist/calendar.json from the published
+// events, leaving out collections whose page is members-only, exactly as the
+// running site does. Returns the number of events written (0 = no feed files).
+func writeFeeds(db *data.DB, pagesDir, distDir string, cfg exportConfig) (int, error) {
+	// Which collections have a public page, and where it lives.
+	pagePath := map[string]string{} // collection -> URL template with [slug]
+	gated := map[string]bool{}
+	filepath.Walk(pagesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.Contains(info.Name(), "[") || !strings.HasSuffix(path, ".html") {
+			return nil
+		}
+		rel, _ := filepath.Rel(pagesDir, path)
+		rel = filepath.ToSlash(rel)
+		parts := strings.Split(rel, "/")
+		if len(parts) < 2 {
+			return nil
+		}
+		collection := parts[len(parts)-2]
+		urlPath := "/" + strings.TrimSuffix(rel, ".html")
+		src, _ := os.ReadFile(path)
+		if renderer.FindGate(src) != "" || cfg.Access.Requires(urlPath) != "" {
+			gated[collection] = true
+		}
+		if _, seen := pagePath[collection]; !seen {
+			pagePath[collection] = urlPath
+		}
+		return nil
+	})
+	visible := func(c string) bool { return !gated[c] }
+	permalink := func(collection string, fields map[string]string) string {
+		tpl, ok := pagePath[collection]
+		if !ok {
+			return ""
+		}
+		return strings.ReplaceAll(tpl, "[slug]", fields["slug"])
+	}
+	entries, err := calendar.Collect(db, visible, permalink, calendar.Filter{})
+	if err != nil {
+		return 0, err
+	}
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	ics, err := os.Create(filepath.Join(distDir, "calendar.ics"))
+	if err != nil {
+		return 0, err
+	}
+	defer ics.Close()
+	if err := calendar.WriteICS(ics, entries, calendar.ICSOptions{SiteName: cfg.Site.Name, SiteZone: db.Location, BaseURL: cfg.baseURL()}); err != nil {
+		return 0, err
+	}
+	// A static file can't take a window, so it carries the most a request could ask for.
+	from := time.Now().In(db.Location)
+	to := from.AddDate(2, 0, 0)
+	payload := map[string]any{
+		"site": cfg.Site.Name, "timezone": db.Location.String(),
+		"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),
+		"events": calendar.Occurrences(entries, from, to, cfg.baseURL()),
+	}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return 0, err
+	}
+	return len(entries), os.WriteFile(filepath.Join(distDir, "calendar.json"), b, 0o644)
 }
 
 // renderDynamicPages renders a dynamic route template (e.g. blog/[slug].html)
@@ -201,6 +295,8 @@ func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map
 	if err != nil || len(records) == 0 {
 		return nil
 	}
+	db.AttachWhen(records, time.Now(), false) // {{ record.when }} on the page
+	db.AttachLocations(records)
 
 	tpl, err := tplSet.FromFile("pages/" + rel)
 	if err != nil {
@@ -220,6 +316,7 @@ func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map
 			"request":     map[string]string{"path": urlPath},
 			"collections": collections,
 			"record":      record,
+			"calendar":    calendar.Links(site["url"]),
 		}
 
 		out, err := tpl.Execute(ctx)

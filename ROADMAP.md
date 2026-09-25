@@ -12,6 +12,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
 | **v0.4** | Open the network — quotas, account management, custom domains | ✅ Shipped |
 | **v0.5** | One obvious sign-in; the network as a friendo site (home site + `<friendo-account>` / `<friendo-console>`); docs + landing | ✅ Shipped |
+| **v0.6** | Calendar — events as posts with a `when`, recurrence, `/calendar.ics` subscriptions, a calendar component, RSVP | ✅ Built (untagged) |
 
 ---
 
@@ -73,6 +74,26 @@ showing the site's `login.html` in place. **Docs +
 landing:** `www/` (friendo.world's home site) and a refreshed docs site with Hosting pages,
 published by hand with `npm run deploy:www|docs`. Scope and decisions:
 [design/v0.5-roadmap.md](design/v0.5-roadmap.md).
+
+**v0.6 — built (2026-09), not yet tagged:** a built-in calendar. **Phase 1:** an event is
+a post with a `when` (`ends`, `timezone`, `repeats`, `except`), lifted from front matter or
+a `<friendo-form>` into an `events` row the way `location` becomes a pin; recurrence from
+the start (`repeats: weekly`, `{every: month, on: first tuesday, until: …}`, `mondays 19:00`),
+expanded in the event's zone; `[site] timezone`; `record.when` on every record; the
+`upcoming`/`past`/`in_month`/`on_day`/`when` filters; `/calendar.ics` (subscribe from any
+calendar app) and `/calendar.json`, members-only collections excluded, written by static
+export too; events sync on push/pull; `friendo init` scaffolds `pages/events/`. **Phase 2:**
+`<friendo-calendar>` (month grid / list over `/calendar.json`, works on a static host),
+`<friendo-input type="when">`, and the admin's When (start/end/all-day/repeats/until/skip/
+timezone) and Where (map pin) sections, with dates in the collection list and review queue.
+**Phase 3:** RSVP — going / maybe / can't go, one answer per member **per occurrence**
+(`rsvps`, migration `0014`; `/_/api/posts/:id/rsvps`), `<friendo-rsvp>`, `record.rsvps`
+server-rendered, an Attendees screen + CSV for organizers, answers re-keyed when a time
+moves. Slots, capacity and volunteer sign-ups are deferred to a later release. Coverage:
+`when_test.go`, `rsvps_test.go`, `calendar_test.go` (package + end-to-end), the REST
+scenarios, the export test, and four browser checks (`sdk-calendar`, `admin-when`,
+`sdk-rsvp`, plus the existing form check). Design:
+[design/calendar-plan.md](design/calendar-plan.md).
 
 ---
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type PendingRecord } from "../api";
+import { formatWhen } from "../when";
 
 export function Review() {
   const [records, setRecords] = useState<PendingRecord[] | null>(null);
@@ -54,6 +55,7 @@ export function Review() {
                 <span class="font-bold">{r.title || r.slug || "(untitled)"}</span>
                 <span class="text-xs text-dim">{r.collection}</span>
               </div>
+              {r.when && <div class="mb-1 text-sm">📅 {formatWhen(r.when)}</div>}
               <div class="mb-3 text-xs text-dim">
                 by {r.author_name || "Anonymous"} · {r.created?.replace("T", " ").replace("Z", "")}
               </div>

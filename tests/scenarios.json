@@ -1052,6 +1052,136 @@
   },
 
   {
+    "name": "a record with a `when` in its data becomes an event (when lifted out of data)",
+    "method": "POST", "path": "/collections/events/records",
+    "body": { "title": "Harvest Fair", "slug": "harvest-fair", "body": "Bring a dish", "status": "published",
+              "data": { "when": "2026-10-04 10:00 to 16:00", "repeats": "weekly", "except": ["2026-10-11"], "mood": "festive" } },
+    "expect": {
+      "status": 201,
+      "json": { "record.when.starts": "2026-10-04T10:00:00Z", "record.when.ends": "2026-10-04T16:00:00Z",
+                "record.when.all_day": false, "record.when.repeats": "weekly", "record.when.rule": "FREQ=WEEKLY",
+                "record.when.except.0": "2026-10-11", "record.data.mood": "festive" }
+    },
+    "capture": { "eventId": "record.id" }
+  },
+  {
+    "name": "the lifted keys are not in the record's data",
+    "method": "GET", "path": "/records/${eventId}",
+    "expect": { "status": 200, "json": { "record.data.mood": "festive", "record.when.repeats": "weekly", "record.when.next.starts": "2026-10-04T10:00:00Z" } }
+  },
+  {
+    "name": "a record with no when has when: null",
+    "method": "POST", "path": "/collections/events/records",
+    "body": { "title": "Plain", "slug": "plain", "status": "published" },
+    "expect": { "status": 201, "json": { "record.when": null } }
+  },
+  {
+    "name": "updating the record moves the event (all day, no repeat)",
+    "method": "PUT", "path": "/records/${eventId}",
+    "body": { "title": "Harvest Fair", "slug": "harvest-fair", "body": "Bring a dish", "status": "published",
+              "data": { "when": "2026-10-05", "mood": "festive" } },
+    "expect": { "status": 200, "json": { "record.when.starts": "2026-10-05T00:00:00Z", "record.when.all_day": true, "record.when.repeats": "", "record.data.mood": "festive" } }
+  },
+  {
+    "name": "an update that leaves data out keeps the event",
+    "method": "PUT", "path": "/records/${eventId}",
+    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published" },
+    "expect": { "status": 200, "json": { "record.title": "Harvest Fair!", "record.when.all_day": true } }
+  },
+  {
+    "name": "an update whose data says nothing about when keeps the event (a read-modify-write round trip is safe)",
+    "method": "PUT", "path": "/records/${eventId}",
+    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "data": { "mood": "calm" } },
+    "expect": { "status": 200, "json": { "record.when.all_day": true, "record.data.mood": "calm" } }
+  },
+  {
+    "name": "a bad when is logged and the existing event kept; the record still saves",
+    "method": "PUT", "path": "/records/${eventId}",
+    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "data": { "when": "next tuesday" } },
+    "expect": { "status": 200, "json": { "record.when.all_day": true } }
+  },
+  {
+    "name": "when: null removes the event",
+    "method": "PUT", "path": "/records/${eventId}",
+    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "data": { "when": null, "mood": "calm" } },
+    "expect": { "status": 200, "json": { "record.when": null, "record.data.mood": "calm" } }
+  },
+  {
+    "name": "the review queue lists when for a pending event",
+    "method": "POST", "path": "/collections/events/records",
+    "body": { "title": "Pending thing", "slug": "pending-thing", "status": "pending", "data": { "when": "2026-12-01 09:00" } },
+    "expect": { "status": 201, "json": { "record.status": "pending", "record.when.starts": "2026-12-01T09:00:00Z" } },
+    "capture": { "pendingEventId": "record.id" }
+  },
+  {
+    "name": "the collection listing carries when for each record",
+    "method": "GET", "path": "/collections/events/records",
+    "expect": { "status": 200, "length": { "records": 3 } }
+  },
+  {
+    "name": "deleting the record deletes its event",
+    "method": "DELETE", "path": "/records/${pendingEventId}",
+    "expect": { "status": 204 }
+  },
+
+  {
+    "name": "owner creates a weekly event to RSVP to",
+    "method": "POST", "path": "/collections/events/records",
+    "body": { "title": "Choir", "slug": "choir", "status": "published", "data": { "when": "2027-03-01 19:00", "repeats": "weekly" } },
+    "expect": { "status": 201 },
+    "capture": { "choirId": "record.id" }
+  },
+  {
+    "name": "rsvp counts are public and start empty (next occurrence by default)",
+    "method": "GET", "path": "/posts/${choirId}/rsvps",
+    "expect": { "status": 200, "json": { "counts.going": 0, "counts.maybe": 0, "counts.not_going": 0, "mine": "", "occurrence": "2027-03-01T19:00:00Z" } }
+  },
+  {
+    "name": "a bad answer is rejected",
+    "method": "POST", "path": "/posts/${choirId}/rsvps",
+    "body": { "answer": "sure" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "a date the event doesn't happen on is rejected",
+    "method": "POST", "path": "/posts/${choirId}/rsvps",
+    "body": { "answer": "going", "occurrence": "2027-03-02T19:00:00Z" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "owner says going to the next occurrence",
+    "method": "POST", "path": "/posts/${choirId}/rsvps",
+    "body": { "answer": "going" },
+    "expect": { "status": 200, "json": { "counts.going": 1, "mine": "going", "attendees.0.author_email": "owner@test.com", "attendees.0.answer": "going" } }
+  },
+  {
+    "name": "changing the answer replaces it",
+    "method": "POST", "path": "/posts/${choirId}/rsvps",
+    "body": { "answer": "maybe", "occurrence": "2027-03-01T19:00:00Z" },
+    "expect": { "status": 200, "json": { "counts.going": 0, "counts.maybe": 1, "mine": "maybe" } }
+  },
+  {
+    "name": "another occurrence has its own tally",
+    "method": "GET", "path": "/posts/${choirId}/rsvps?occurrence=2027-03-08T19:00:00Z",
+    "expect": { "status": 200, "json": { "counts.maybe": 0, "mine": "", "occurrence": "2027-03-08T19:00:00Z" } }
+  },
+  {
+    "name": "the organizer lists attendees",
+    "method": "GET", "path": "/posts/${choirId}/attendees",
+    "expect": { "status": 200, "length": { "attendees": 1 }, "json": { "attendees.0.author_email": "owner@test.com", "attendees.0.scheduled": true } }
+  },
+  {
+    "name": "withdrawing the answer clears it",
+    "method": "DELETE", "path": "/posts/${choirId}/rsvps?occurrence=2027-03-01T19:00:00Z",
+    "expect": { "status": 200, "json": { "counts.maybe": 0, "mine": "" } }
+  },
+  {
+    "name": "a post with no time has nothing to RSVP to",
+    "method": "GET", "path": "/posts/${recordId}/rsvps",
+    "expect": { "status": 404 }
+  },
+
+  {
     "name": "brute-force login attempt 1 fails",
     "method": "POST", "path": "/auth/login",
     "body": { "email": "nobody@test.com", "password": "wrong" },

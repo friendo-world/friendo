@@ -13,7 +13,9 @@ friendo export --mode static
 ```
 
 That writes `dist/` next to your site: every page in `pages/` rendered with your
-content, every published record's page, plus `assets/`. Only **published**
+content, every published record's page, `assets/`, and — if any post has a
+`when` — the [calendar feeds](/docs/calendar#subscribe-calendarics)
+`calendar.ics` and `calendar.json`, so a static site is subscribable. Only **published**
 records are included; drafts and pending posts stay out, the same as on the
 live site. [Members-only pages](/docs/templates#members-only-pages) are skipped
 too (the export lists each one), since a static host can't tell who's asking.

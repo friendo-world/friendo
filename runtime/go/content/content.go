@@ -2,8 +2,10 @@
 // database — Friendo's Hugo-style authoring layer. Markdown files organized in
 // folders become records: the folder under content/ is the collection, the
 // filename (or page-bundle folder) is the slug, YAML front matter supplies title,
-// slug, status, and date, and any remaining front-matter keys are stored as the
-// record's `data` JSON (readable in templates as record.data.<field>). The body
+// slug, status, and date; `location` becomes a map pin and `when` (with
+// ends/timezone/repeats/except) a calendar event; any remaining front-matter keys
+// are stored as the record's `data` JSON (readable in templates as
+// record.data.<field>). The body
 // is stored verbatim and rendered by the `markdown` filter at template time.
 //
 // content/ is the source of truth: importing upserts by (collection, slug), so
@@ -138,6 +140,14 @@ func Import(siteDir string, db *data.DB) (*Result, error) {
 		// becomes a real location row, not opaque `data` JSON.
 		lat, lng, label, hasLocation := parseLocation(meta, title)
 
+		// A `when` (plus ends/timezone/repeats/except) makes the post an event: the
+		// reserved keys are lifted into a real events row the same way `location`
+		// becomes a pin — see data.ParseWhen for the spellings.
+		ev, whenWarnings := data.LiftWhen(meta, db.Location)
+		for _, w := range whenWarnings {
+			res.warn("%s: %s", rel, w)
+		}
+
 		// Everything not mapped to a column becomes the record's `data` JSON.
 		for _, k := range []string{"title", "slug", "status", "date", "location"} {
 			delete(meta, k)
@@ -166,6 +176,12 @@ func Import(siteDir string, db *data.DB) (*Result, error) {
 			}
 		} else if err := db.DeleteLocation(locID); err != nil && err != sql.ErrNoRows {
 			res.warn("%s location: %v", rel, err)
+		}
+
+		// Reconcile the post's `when` the same way: upsert when declared, clear
+		// when removed (deterministic id, so re-import is idempotent).
+		if err := db.ReconcileWhen(recordID, ev); err != nil {
+			res.warn("%s when: %v", rel, err)
 		}
 
 		// Page bundle (content/<collection>/<slug>/index.md): sibling images become

@@ -54,7 +54,13 @@ func TestCLIPushPullRoundTrip(t *testing.T) {
 		"id": "p1", "collection": "blog", "slug": "hello", "title": "Hello",
 		"body": "world", "status": "published", "created": "2020-01-01T00:00:00Z",
 	}}
-	if err := client.PushData(records); err != nil {
+	events := []map[string]any{{
+		"id": "e1", "target_type": "post", "target_id": "p1",
+		"starts": "2026-10-04T10:00:00-07:00", "ends": "2026-10-04T16:00:00-07:00",
+		"all_day": false, "timezone": "America/Los_Angeles", "rrule": "FREQ=WEEKLY",
+		"exdates": []string{"2026-10-11"}, "created": "2020-01-01T00:00:00Z",
+	}}
+	if err := client.PushData(records, events); err != nil {
 		t.Fatalf("PushData: %v", err)
 	}
 	files := []map[string]any{{
@@ -67,9 +73,13 @@ func TestCLIPushPullRoundTrip(t *testing.T) {
 	}
 
 	// Pull it back and assert the round-trip.
-	gotRecords, err := client.PullData()
+	gotRecords, gotEvents, err := client.PullDataAndEvents()
 	if err != nil {
 		t.Fatalf("PullData: %v", err)
+	}
+	ev := findByID(gotEvents, "e1")
+	if ev == nil || ev["target_id"] != "p1" || ev["rrule"] != "FREQ=WEEKLY" || ev["starts"] != "2026-10-04T10:00:00-07:00" {
+		t.Fatalf("event round-trip mismatch: %#v", gotEvents)
 	}
 	rec := findByID(gotRecords, "p1")
 	if rec == nil {

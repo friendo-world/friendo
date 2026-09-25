@@ -252,8 +252,8 @@ func (c *SiteClient) PushAssets(files []map[string]string) error {
 }
 
 // PushData upserts records into the site's database.
-func (c *SiteClient) PushData(records []map[string]any) error {
-	body := map[string]any{"records": records}
+func (c *SiteClient) PushData(records, events []map[string]any) error {
+	body := map[string]any{"records": records, "events": events}
 	return c.post("/_/api/push/data", body)
 }
 
@@ -289,13 +289,20 @@ func (c *SiteClient) PullFiles() ([]map[string]any, error) {
 
 // PullData fetches all records from the site.
 func (c *SiteClient) PullData() ([]map[string]any, error) {
+	records, _, err := c.PullDataAndEvents()
+	return records, err
+}
+
+// PullDataAndEvents fetches all records plus their calendar series.
+func (c *SiteClient) PullDataAndEvents() (records, events []map[string]any, err error) {
 	var result struct {
 		Records []map[string]any `json:"records"`
+		Events  []map[string]any `json:"events"`
 	}
 	if err := c.get("/_/api/pull/data", &result); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return result.Records, nil
+	return result.Records, result.Events, nil
 }
 
 // PullUsers fetches all user accounts (and author profiles) from the site.

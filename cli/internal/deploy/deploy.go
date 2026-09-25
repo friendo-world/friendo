@@ -115,8 +115,12 @@ func RunPush(opts PushOptions) error {
 		if err != nil {
 			return err
 		}
+		events, err := readLocalEvents(siteDir)
+		if err != nil {
+			return err
+		}
 		if len(records) > 0 {
-			if err := siteClient.PushData(records); err != nil {
+			if err := siteClient.PushData(records, events); err != nil {
 				return err
 			}
 			fmt.Printf(" %d records\n", len(records))
@@ -201,7 +205,7 @@ func RunPull(opts PullOptions) error {
 
 	if opts.Data {
 		fmt.Printf("Pulling records...")
-		records, err := siteClient.PullData()
+		records, events, err := siteClient.PullDataAndEvents()
 		if err != nil {
 			return err
 		}
@@ -242,6 +246,15 @@ func RunPull(opts PullOptions) error {
 			inserted++
 		}
 		fmt.Printf(" %d records\n", inserted)
+
+		// Calendar series travel with records.
+		for _, row := range events {
+			if ev := data.EventFromRow(row); ev != nil {
+				if err := db.UpsertEvent(ev); err != nil {
+					fmt.Printf("\n  Warning: failed to insert event %s: %v\n", ev.ID, err)
+				}
+			}
+		}
 
 		// Media rows travel with records.
 		files, err := siteClient.PullFiles()
@@ -543,6 +556,29 @@ func readLocalRecords(siteDir string) ([]map[string]any, error) {
 		}
 	}
 	return all, nil
+}
+
+// readLocalEvents reads calendar series from the local database so they travel
+// with their posts on push.
+func readLocalEvents(siteDir string) ([]map[string]any, error) {
+	dbPath := filepath.Join(siteDir, "data", "friendo.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	db, err := data.Open(siteDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening local database: %w", err)
+	}
+	defer db.Close()
+	list, err := db.ListEvents()
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]map[string]any, 0, len(list))
+	for _, e := range list {
+		rows = append(rows, e.Row())
+	}
+	return rows, nil
 }
 
 // readLocalFiles reads media rows from the local database so they can be pushed

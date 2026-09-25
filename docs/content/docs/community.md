@@ -38,6 +38,9 @@ themselves, so nothing else is needed.
 | `<friendo-channel>` | `channel-id` | A **realtime** message feed; signed-in members post and delete their own, and new messages stream in live. See [Channels](/docs/channels). |
 | `<friendo-map>` | `target-type`, `target-id` | An interactive [Leaflet](https://leafletjs.com/) map of a record's [locations](#tagging-a-location), one marker per pin. Public — no sign-in needed. |
 | `<friendo-form>` | `collection`, `redirect` (optional), `status` (optional) | A create-a-post form: the author's own inputs (plus rich `<friendo-input>` types) become a new post, submitted from the page. See [Submitting posts from a page](#submitting-posts-from-a-page). |
+| `<friendo-calendar>` | `collection`, `view`, `month`, `limit` (all optional) | A month grid or list of the site's [events](/docs/calendar#a-month-view-friendo-calendar), each linking to its post. Public. |
+| `<friendo-rsvp>` | `post-id`, `occurrence`, `names` (optional) | Going / Maybe / Can't go on an [event](/docs/calendar#rsvp-friendo-rsvp); signed-in members answer once per date, counts are public. |
+| `<friendo-add-to-calendar>` | `post-id` (one event) or `subscribe` (the feed), `collection`, `occurrence`, `label` | A menu of [calendar apps](/docs/calendar#google-calendar-apple-calendar-outlook): Google Calendar, Apple Calendar, Outlook, download. Public. |
 
 `<friendo-map>` loads Leaflet (open-source) and OpenStreetMap tiles from a CDN the
 first time a map appears on a page — no API key, and the rest of the SDK stays
@@ -139,7 +142,10 @@ Available parts:
 | `friendo-reactions` | `row`, `button`, `emoji`, `count` |
 | `friendo-poll` | `question`, `option`, `bar`, `result`, `total` |
 | `friendo-map` | `map`, `empty` |
-| `friendo-input` | `input`, `toolbar`, `tool`, `editor`, `map`, `coords`, `file`, `preview`, `note`, `chips`, `chip`, `chip-remove` |
+| `friendo-input` | `input`, `toolbar`, `tool`, `editor`, `map`, `coords`, `file`, `preview`, `note`, `chips`, `chip`, `chip-remove`, and for `type="when"`: `when`, `label`, `checkbox`, `select` |
+| `friendo-calendar` | `nav`, `title`, `button`, `view`, `grid`, `weekday`, `day`, `today`, `outside`, `date`, `event`, `more`, `list`, `group`, `heading`, `time`, `empty`, `error` |
+| `friendo-rsvp` | `question`, `when`, `row`, `button`, `count`, `mine`, `names`, `name`, `status`, `signed-out`, `error` |
+| `friendo-add-to-calendar` | `button`, `menu`, `item`, `copy`, `status`, `error` |
 | `friendo-form` | `status`, `error` |
 
 Reaction and poll buttons carry `aria-pressed="true"` when they reflect the
@@ -164,6 +170,8 @@ The SDK dispatches DOM events you can hook into:
 - **`friendo:submitted`** — bubbles from `<friendo-form>` after it creates a post;
   `event.detail.record` is the new record. Use it to update the page or show a
   confirmation (an alternative to the `redirect` attribute).
+- **`friendo:rsvp`** — bubbles from `<friendo-rsvp>` after a member answers;
+  `event.detail` has `postId`, `occurrence` and `answer`.
 
 ## Adding a poll
 
@@ -296,6 +304,10 @@ write an ordinary form; the component turns it into a created post.
 | `status` | requested status (clamped server-side — see below) |
 | *anything else* (`mood`, `tags`, `where`, `cover`…) | `data.<name>` |
 
+A few names are reserved for the [calendar](/docs/calendar): `when`, `ends`,
+`timezone`, `repeats` and `except` become the post's event rather than metadata,
+so `<input name="when" type="datetime-local">` is all an event-submission form needs.
+
 So the form above creates a post whose `data` is
 `{ "where": {lat,lng}, "cover": "<url>", "tags": [...], "mood": "calm" }` — and those
 read straight back in a template, no extra wiring:
@@ -316,6 +328,7 @@ a `<friendo-input>` with a `type` — `<friendo-form>` reads its value at submit
 | `location` | a click-to-pick [Leaflet](https://leafletjs.com/) map | `{ lat, lng }` in `data.<name>` |
 | `media` | a file/image picker with preview | uploaded after the post is created; its public URL is stored in `data.<name>` |
 | `tags` | a chip input | a `string[]` |
+| `when` | start, end, all-day and repeats in one control | the [calendar keys](/docs/calendar) themselves (`when`, `ends`, `all_day`, `repeats`), lifted into the post's event |
 
 The rich inputs lean on machinery loaded only when they appear on a page, so the rest
 of the SDK stays lean: `richtext` lazy-loads [TipTap](https://tiptap.dev/) and

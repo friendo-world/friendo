@@ -1,0 +1,59 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<h1>Calendar</h1>
+<p>One <code>&lt;friendo-calendar&gt;</code> tag: a month grid (or a list) of every
+published event, read from <a href="/calendar.json"><code>/calendar.json</code></a>. Repeating
+events appear on every date they happen. Click an entry to open its post, or
+<a href="/calendar.ics">subscribe</a> from your calendar app.</p>
+
+<friendo-calendar collection="events" month="2026-10"></friendo-calendar>
+
+<h2>Add an event</h2>
+<p>A <code>&lt;friendo-form&gt;</code> with a <code>&lt;friendo-input type="when"&gt;</code>:
+start, end, all-day and repeats in one control. Sign in first (contributors publish
+directly; members submit for review when submissions are on).</p>
+
+<div class="signin"><friendo-auth></friendo-auth></div>
+
+<friendo-form collection="events">
+    <label class="field"><span>Title</span>
+        <input name="title" placeholder="What's happening?" required></label>
+    <label class="field"><span>When</span>
+        <friendo-input name="when" type="when"></friendo-input></label>
+    <label class="field"><span>Details</span>
+        <friendo-input name="body" type="richtext" placeholder="Where, what to bring…"></friendo-input></label>
+    <label class="field"><span>Photo</span>
+        <friendo-input name="photo" type="media" accept="image/*"></friendo-input></label>
+    <button type="submit">Add event</button>
+</friendo-form>
+
+<p id="result" class="result" hidden></p>
+
+<script>
+    // The calendar above refreshes itself on friendo:submitted; this adds a line
+    // with a link (published) or a note (a member submission, pending review).
+    document.querySelector("friendo-form").addEventListener("friendo:submitted", function (e) {
+        var r = e.detail.record, out = document.getElementById("result");
+        out.hidden = false;
+        if (r.status === "published") {
+            out.innerHTML = "Added! <a href=\"/events/" + encodeURIComponent(r.slug) + "\">View the event &rarr;</a>";
+        } else {
+            out.textContent = "Thanks — your event was submitted for review and will appear once an editor approves it.";
+        }
+    });
+</script>
+
+<p style="margin-top:1.5rem"><a href="/">&larr; Back home</a></p>
+
+<style>
+    friendo-calendar { margin: 1rem 0 2rem; }
+    friendo-calendar::part(event) { background: #efeaff; }
+    friendo-form { display: grid; gap: 1.1rem; margin-top: 1rem; }
+    .field > span { display: block; font-weight: 600; margin-bottom: .3rem; }
+    friendo-form input { font: inherit; padding: .5em .6em; border: 1px solid #d7d7e2; border-radius: 8px; width: 100%; }
+    friendo-form button[type=submit] { justify-self: start; background: var(--accent); color: #fff; border: 0;
+        border-radius: 999px; padding: .6em 1.4em; font: inherit; cursor: pointer; }
+    .signin { background: #f7f7fb; border-radius: 12px; padding: 1rem; }
+    .result { background: #f2f0ff; border: 1px solid #e0dcff; border-radius: 10px; padding: .8rem 1rem; margin-top: 1rem; }
+</style>
+{% endblock %}

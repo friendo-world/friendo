@@ -61,6 +61,11 @@ Every page is rendered with:
 | `record` | The matched record on a dynamic `[param]` route |
 | `record.data.<field>` | Custom [front matter](/docs/content) fields (tags, weight, …) |
 | `record.comments` / `.reactions` / `.poll` / `.gallery` | The post's public [community relations](#community-relations) (server-rendered) |
+| `record.when` | The post's time, if it's an [event](/docs/calendar): `starts`, `ends`, `all_day`, `repeats`, `next` — on every record in `collections.*` too |
+| `record.rsvps` | The event's [RSVP](/docs/calendar#rsvp-friendo-rsvp) tally for its next date: `going`, `maybe`, `not_going` |
+| `record.location` | The post's [map pin](/docs/maps), if any: `lat`, `lng`, `label` |
+| `site.url` | The site's own origin as the request saw it (`https://my-site.friendo.world`); in a static export, `[deploy]` from friendo.toml |
+| `calendar.google` / `.webcal` / `.ics` | [Subscribe links](/docs/calendar#google-calendar-apple-calendar-outlook) for the site's events |
 | `user` | Who's signed in — `name`, `email`, `role`, `id` — or empty for a visitor. See [Members-only pages](#members-only-pages) |
 | `gate` | Only on your `login.html`, when it's standing in for a members-only page: `required`, `reason`, `path` |
 
@@ -194,6 +199,9 @@ set (`truncatechars`, `truncatewords`, `upper`, `lower`, `title`, `capfirst`,
 | `resize` | `{{ img\|asset_url\|resize:"300x200" }}` | `/assets/img?w=300&h=200` (a CDN hint) |
 | `markdown` | `{{ post.body\|markdown }}` | markdown rendered to HTML |
 | `sort_by` | `{% for d in collections.docs\|sort_by:"data.weight" %}` | a list sorted by a (dotted) field |
+| `upcoming`, `past`, `in_month`, `on_day` | `{% for e in collections.events\|upcoming %}` | [events](/docs/calendar) by date, repeating ones expanded |
+| `google_calendar_url` | `{{ record\|google_calendar_url }}` | Google Calendar's "add this event" link |
+| `when` | `{{ record.when\|when }}` | `Sat Oct 4, 10 am – 4 pm` |
 
 ### sort_by
 

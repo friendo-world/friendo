@@ -12,6 +12,9 @@
  *   <friendo-poll poll-id="…"></friendo-poll>
  *   <friendo-map target-type="post" target-id="…"></friendo-map>
  *   <friendo-form collection="posts">…author inputs…</friendo-form>
+ *   <friendo-calendar collection="events"></friendo-calendar>   (month grid / list of the site's events)
+ *   <friendo-rsvp post-id="…"></friendo-rsvp>                    (going / not going / maybe on an event)
+ *   <friendo-add-to-calendar post-id="…"></friendo-add-to-calendar>   (Google / Apple / Outlook / .ics menu; `subscribe` for the whole feed)
  *
  * On a friendo network's own domain, three more tags talk to the network's
  * account API (/api/*) instead of a site's: <friendo-account> (your sites,
@@ -441,6 +444,200 @@
     }
   }
 
+  // --- <friendo-rsvp post-id [occurrence] [names]> ---------------------------
+  // "Are you coming?" on a post that has a `when`. Three answers, one per member
+  // per occurrence; the tally is public. On a repeating event the component asks
+  // about the next date unless `occurrence` (an RFC 3339 start) names another.
+  // The signed-in viewer's answer is the pressed button. Organizers (the post's
+  // author, or a moderator) also see who answered when `names` is present.
+  // Parts: question, when, row, button, count, mine, names, name, status,
+  // signed-out, error.
+  class FriendoRSVP extends FriendoElement {
+    css() {
+      return (
+        ".q{margin:0 0 .35em;font-weight:600}.when{opacity:.75;margin:0 0 .5em;font-size:.95em}" +
+        ".row{display:flex;gap:.4em;flex-wrap:wrap}" +
+        "button{display:inline-flex;gap:.4em;align-items:center;padding:.35em .8em;border:1px solid #ddd;" +
+        "border-radius:999px;background:#fafafa}" +
+        'button[aria-pressed="true"]{background:#e8f0ff;border-color:#9db8ff}' +
+        ".count{font-variant-numeric:tabular-nums;opacity:.75}" +
+        ".mine,.status,.signed-out{font-size:.9em;opacity:.75;margin-top:.5em}" +
+        ".names{margin:.6em 0 0;padding:0;list-style:none;font-size:.9em}.names li{padding:.1em 0}" +
+        ".names .a{opacity:.6;margin-left:.4em}"
+      );
+    }
+    async render() {
+      var postId = this.getAttribute("post-id") || "";
+      var occ = this.getAttribute("occurrence") || "";
+      var q = "/posts/" + encodeURIComponent(postId) + "/rsvps" + (occ ? "?occurrence=" + encodeURIComponent(occ) : "");
+      var data;
+      try {
+        data = await api(q);
+      } catch (e) {
+        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        return;
+      }
+      var user = await currentUser();
+      var answers = [
+        { key: "going", label: this.getAttribute("going-label") || "Going" },
+        { key: "maybe", label: this.getAttribute("maybe-label") || "Maybe" },
+        { key: "not_going", label: this.getAttribute("not-going-label") || "Can't go" },
+      ];
+      var counts = data.counts || {};
+      var html =
+        '<p part="question" class="q">' + esc(this.getAttribute("question") || "Are you coming?") + "</p>" +
+        (data.occurrence_text ? '<p part="when" class="when">' + esc(data.occurrence_text) + "</p>" : "") +
+        '<div part="row" class="row">' +
+        answers.map(function (a) {
+          return '<button part="button" data-answer="' + a.key + '" aria-pressed="' + (data.mine === a.key ? "true" : "false") + '">' +
+            esc(a.label) + '<span part="count" class="count">' + (counts[a.key] || 0) + "</span></button>";
+        }).join("") +
+        "</div>";
+      if (!user) {
+        html += '<div part="signed-out" class="signed-out">Sign in to answer.</div>';
+      } else if (data.mine) {
+        html += '<div part="mine" class="mine">You said <b>' + esc(labelFor(answers, data.mine)) + '</b>. <button type="button" part="button" data-clear="1" style="padding:.1em .5em;font-size:.9em">Clear</button></div>';
+      }
+      if (this.hasAttribute("names") && data.attendees && data.attendees.length) {
+        html += '<ul part="names" class="names">' + data.attendees.map(function (r) {
+          return '<li part="name">' + esc(r.author_name || "Someone") + '<span class="a">' + esc(labelFor(answers, r.answer)) + "</span></li>";
+        }).join("") + "</ul>";
+      }
+      html += '<div part="status" class="status" hidden></div>';
+      this.paint(html);
+
+      var self = this;
+      var status = this.shadowRoot.querySelector('[part="status"]');
+      this.shadowRoot.querySelectorAll("button[data-answer]").forEach(function (btn) {
+        btn.onclick = async function () {
+          if (!user) {
+            self.dispatchEvent(new CustomEvent("friendo:needs-auth", { bubbles: true }));
+            return;
+          }
+          try {
+            await api("/posts/" + encodeURIComponent(postId) + "/rsvps",
+              jsonBody("POST", { occurrence: data.occurrence, answer: btn.dataset.answer }));
+            self.dispatchEvent(new CustomEvent("friendo:rsvp", { bubbles: true, detail: { postId: postId, occurrence: data.occurrence, answer: btn.dataset.answer } }));
+            self.render();
+          } catch (err) {
+            status.hidden = false;
+            status.textContent = err.message;
+          }
+        };
+      });
+      var clear = this.shadowRoot.querySelector("button[data-clear]");
+      if (clear) {
+        clear.onclick = async function () {
+          try {
+            await api("/posts/" + encodeURIComponent(postId) + "/rsvps?occurrence=" + encodeURIComponent(data.occurrence), { method: "DELETE" });
+            self.render();
+          } catch (err) {
+            status.hidden = false;
+            status.textContent = err.message;
+          }
+        };
+      }
+    }
+  }
+  function labelFor(answers, key) {
+    for (var i = 0; i < answers.length; i++) if (answers[i].key === key) return answers[i].label;
+    return key;
+  }
+
+  // --- <friendo-add-to-calendar [post-id] [occurrence] | [subscribe] [collection]> --
+  // A small menu of calendar apps. With `post-id`, "add this event": Google
+  // Calendar's pre-filled form, and an .ics file for Apple Calendar, Outlook and
+  // the rest (one date of a repeating event with `occurrence`). With `subscribe`,
+  // the whole feed: Google (add by URL), Apple/Outlook (webcal://), the plain URL.
+  // Reads /calendar.json — public, and a plain file in a static export. Parts:
+  // button, menu, item, copy, status, error.
+  class FriendoAddToCalendar extends FriendoElement {
+    css() {
+      return (
+        ":host{display:inline-block;position:relative}" +
+        ".btn{font:inherit;padding:.35em .8em;border:1px solid #ccc;border-radius:999px;background:#fafafa;cursor:pointer}" +
+        ".menu{position:absolute;z-index:10;top:calc(100% + .3em);left:0;min-width:14em;margin:0;padding:.3em;list-style:none;" +
+          "background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12)}" +
+        ".menu a,.menu button{display:block;width:100%;text-align:left;font:inherit;padding:.4em .6em;border:0;border-radius:6px;" +
+          "background:none;color:inherit;text-decoration:none;cursor:pointer;white-space:nowrap}" +
+        ".menu a:hover,.menu button:hover{background:#f2f2f5}" +
+        ".status{font-size:.85em;opacity:.7;padding:.2em .6em}"
+      );
+    }
+    async render() {
+      var subscribe = this.hasAttribute("subscribe");
+      var postId = this.getAttribute("post-id") || "";
+      var label = this.getAttribute("label") || (subscribe ? "Subscribe" : "Add to calendar");
+      var origin = location.origin;
+      var items = [];
+      if (subscribe) {
+        var coll = this.getAttribute("collection") || "";
+        var feed = origin + "/calendar.ics" + (coll ? "?collection=" + encodeURIComponent(coll) : "");
+        items = [
+          { text: "Google Calendar", href: "https://calendar.google.com/calendar/r?cid=" + encodeURIComponent(feed) },
+          { text: "Apple Calendar", href: feed.replace(/^https?:\/\//, "webcal://") },
+          { text: "Outlook", href: feed.replace(/^https?:\/\//, "webcal://") },
+          { text: "Copy the feed address", copy: feed },
+        ];
+      } else {
+        var q = "/calendar.json?record=" + encodeURIComponent(postId);
+        var occ = this.getAttribute("occurrence") || "";
+        var ev = null;
+        try {
+          var res = await fetch(q, { credentials: "same-origin" });
+          var body = res.ok ? await res.json() : null;
+          var list = (body && body.events) || [];
+          ev = occ ? list.filter(function (e) { return e.starts === occ; })[0] : list[0];
+        } catch (e) { /* fall through */ }
+        if (!ev) {
+          this.paint('<div part="error" class="status">No upcoming date to add.</div>');
+          return;
+        }
+        // The Google link for a repeating event carries the rule, so Google repeats it too.
+        var google = ev.google;
+        if (!occ && ev.rule && google) google += "&recur=" + encodeURIComponent("RRULE:" + ev.rule);
+        var ics = occ || !ev.rule ? ev.ics : origin + "/calendar.ics?record=" + encodeURIComponent(postId);
+        items = [
+          { text: "Google Calendar", href: google },
+          { text: "Apple Calendar", href: ics },
+          { text: "Outlook", href: ics },
+          { text: "Download .ics", href: ics, download: true },
+        ];
+      }
+      this.paint(
+        '<button part="button" class="btn" type="button" aria-haspopup="true" aria-expanded="false">' + esc(label) + " ▾</button>" +
+        '<ul part="menu" class="menu" hidden>' +
+        items.map(function (it) {
+          if (it.copy) return '<li><button part="copy" type="button" data-copy="' + esc(it.copy) + '">' + esc(it.text) + "</button></li>";
+          return '<li><a part="item" href="' + esc(it.href) + '"' + (it.download ? " download" : ' target="_blank" rel="noopener"') + ">" + esc(it.text) + "</a></li>";
+        }).join("") +
+        '</ul><div part="status" class="status" hidden></div>'
+      );
+      var self = this;
+      var btn = this.shadowRoot.querySelector('[part="button"]');
+      var menu = this.shadowRoot.querySelector('[part="menu"]');
+      var status = this.shadowRoot.querySelector('[part="status"]');
+      btn.onclick = function () {
+        menu.hidden = !menu.hidden;
+        btn.setAttribute("aria-expanded", menu.hidden ? "false" : "true");
+      };
+      this._close = function (e) { if (!self.contains(e.target)) { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); } };
+      document.addEventListener("click", this._close);
+      var copy = this.shadowRoot.querySelector("[data-copy]");
+      if (copy) {
+        copy.onclick = async function () {
+          try { await navigator.clipboard.writeText(copy.dataset.copy); status.textContent = "Copied. Paste it into your calendar app under “add by URL”."; }
+          catch (e) { status.textContent = copy.dataset.copy; }
+          status.hidden = false;
+        };
+      }
+    }
+    disconnectedCallback() {
+      super.disconnectedCallback();
+      if (this._close) document.removeEventListener("click", this._close);
+    }
+  }
+
   // --- <friendo-poll poll-id> ----------------------------------------------
   class FriendoPoll extends FriendoElement {
     css() {
@@ -840,7 +1037,10 @@
         ".chips{display:flex;flex-wrap:wrap;gap:.35em;margin-bottom:.35em}" +
         ".chip{display:inline-flex;align-items:center;gap:.3em;padding:.15em .5em;border:1px solid #9db8ff;" +
         "border-radius:999px;background:#e8f0ff;font-size:.9em}" +
-        ".chip button{border:0;background:none;font:inherit;cursor:pointer;opacity:.7;padding:0;line-height:1}"
+        ".chip button{border:0;background:none;font:inherit;cursor:pointer;opacity:.7;padding:0;line-height:1}" +
+        ".when{display:grid;gap:.5em;grid-template-columns:repeat(auto-fit,minmax(11em,1fr))}" +
+        ".lbl{display:flex;flex-direction:column;gap:.2em;font-size:.9em}.lbl.check{flex-direction:row;align-items:center;gap:.4em;align-self:end}" +
+        ".when select{font:inherit;padding:.4em .5em;border:1px solid #ccc;border-radius:6px}"
       );
     }
     get type() {
@@ -849,6 +1049,8 @@
     // Read by <friendo-form> at submit time. Shape depends on `type`.
     get value() {
       switch (this.type) {
+        case "when":
+          return this._whenValue();
         case "location":
           return this._loc || null;
         case "media":
@@ -875,6 +1077,7 @@
       this._loc = null;
       this._file = null;
       this._tags = [];
+      this._when = null;
       // Keep the mounted TipTap editor; just empty it (a full re-render would reload
       // the library). Other types re-render from their now-cleared state.
       if (this.type === "richtext" && this._editor) {
@@ -895,6 +1098,7 @@
     }
     render() {
       switch (this.type) {
+        case "when": return this._renderWhen();
         case "richtext": return this._renderRichtext();
         case "location": return this._renderLocation();
         case "media": return this._renderMedia();
@@ -904,6 +1108,74 @@
     }
     _renderText() {
       this.paint('<input part="input" placeholder="' + esc(this.getAttribute("placeholder") || "") + '">');
+    }
+    // One control for an event's time: start, end, all-day, and how it repeats.
+    // Its value is the flat {when, ends, all_day, repeats} shape the server reads
+    // (the same keys as front matter), which <friendo-form> spreads into the post.
+    _renderWhen() {
+      var self = this;
+      this.paint(
+        '<div part="when" class="when">' +
+          '<label part="label" class="lbl"><span>Starts</span><input part="input" data-k="when" type="datetime-local"></label>' +
+          '<label part="label" class="lbl"><span>Ends</span><input part="input" data-k="ends" type="datetime-local"></label>' +
+          '<label part="label" class="lbl check"><input part="checkbox" data-k="all_day" type="checkbox"><span>All day</span></label>' +
+          '<label part="label" class="lbl"><span>Repeats</span><select part="select" data-k="repeats">' +
+            '<option value="">Never</option><option value="daily">Daily</option><option value="weekly">Weekly</option>' +
+            '<option value="every 2 weeks">Every 2 weeks</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>' +
+          "</select></label>" +
+          '<label part="label" class="lbl until" hidden><span>Until</span><input part="input" data-k="until" type="date"></label>' +
+        "</div>"
+      );
+      var root = this.shadowRoot;
+      var allDay = root.querySelector('[data-k="all_day"]');
+      var repeats = root.querySelector('[data-k="repeats"]');
+      var until = root.querySelector(".until");
+      function sync() {
+        // All-day events take dates, timed ones take date-times.
+        var t = allDay.checked ? "date" : "datetime-local";
+        ["when", "ends"].forEach(function (k) {
+          var i = root.querySelector('[data-k="' + k + '"]');
+          if (i.type !== t) { var v = i.value; i.type = t; i.value = allDay.checked ? v.slice(0, 10) : (v ? v + (v.length === 10 ? "T09:00" : "") : ""); }
+        });
+        until.hidden = !repeats.value;
+      }
+      allDay.onchange = sync;
+      repeats.onchange = sync;
+      // Restore a prior value (a re-render on auth change keeps what was typed).
+      var w = this._when || {};
+      root.querySelector('[data-k="when"]').value = w.when || "";
+      root.querySelector('[data-k="ends"]').value = w.ends || "";
+      allDay.checked = !!w.all_day;
+      repeats.value = w.repeats || "";
+      root.querySelector('[data-k="until"]').value = w.until || "";
+      sync();
+      root.querySelectorAll("[data-k]").forEach(function (i) {
+        i.addEventListener("input", function () { self._when = self._readWhen(); });
+        i.addEventListener("change", function () { self._when = self._readWhen(); });
+      });
+    }
+    _readWhen() {
+      var root = this.shadowRoot;
+      var get = function (k) { var i = root.querySelector('[data-k="' + k + '"]'); return i ? (i.type === "checkbox" ? i.checked : i.value) : ""; };
+      return { when: get("when"), ends: get("ends"), all_day: get("all_day"), repeats: get("repeats"), until: get("until") };
+    }
+    _whenValue() {
+      var w = this.shadowRoot.querySelector('[data-k="when"]') ? this._readWhen() : (this._when || {});
+      if (!w.when) return null;
+      var out = { when: w.when.replace("T", " ") };
+      if (w.ends) out.ends = w.ends.replace("T", " ");
+      if (w.all_day) out.all_day = true;
+      if (w.repeats) {
+        if (w.until) {
+          var m = /^(?:every (\d+) )?(daily|weekly|monthly|yearly|weeks?)$/.exec(w.repeats);
+          var unit = { daily: "day", weekly: "week", monthly: "month", yearly: "year" }[w.repeats] || "week";
+          var every = m && m[1] ? m[1] + " " + unit + "s" : unit;
+          out.repeats = { every: every, until: w.until };
+        } else {
+          out.repeats = w.repeats;
+        }
+      }
+      return out;
     }
     // A TipTap (ProseMirror) WYSIWYG editor: formatting shows live in the field, and
     // `.value` serializes to markdown (via tiptap-markdown) so it still flows through
@@ -1162,8 +1434,16 @@
         if (!name) return;
         var tag = el.tagName.toLowerCase();
         if (tag === "friendo-input") {
-          if ((el.getAttribute("type") || "").toLowerCase() === "media") {
+          var itype = (el.getAttribute("type") || "").toLowerCase();
+          if (itype === "media") {
             media.push({ name: name, el: el });
+            return;
+          }
+          if (itype === "when") {
+            // The when control yields the reserved calendar keys themselves
+            // (when, ends, all_day, repeats); the server lifts them into the event.
+            var wv = el.value;
+            if (wv) Object.keys(wv).forEach(function (k) { data[k] = wv[k]; });
             return;
           }
           // A location lands in data.<name> as {lat,lng}; the server turns any such
@@ -1222,7 +1502,9 @@
           fd.append("field", media[i].name);
           fd.append("file", file);
           var up = await api("/files", { method: "POST", body: fd });
-          record.data = record.data || {};
+          // Write back what was submitted plus the asset — not only the server's
+          // copy of `data`, which has the calendar keys (when, repeats…) lifted out.
+          record.data = Object.assign({}, data, record.data || {});
           record.data[media[i].name] = up.file.url;
           patched = true;
         } catch (err) {
@@ -1231,9 +1513,12 @@
       }
       if (patched) {
         try {
-          await api("/records/" + encodeURIComponent(record.id), jsonBody("PUT", {
+          var saved = await api("/records/" + encodeURIComponent(record.id), jsonBody("PUT", {
             title: record.title, body: record.body, slug: record.slug, status: record.status, data: record.data,
           }));
+          // Hand listeners the server's record (data with the calendar keys lifted
+          // out, `when` filled in), not our working copy.
+          if (saved && saved.record) record = saved.record;
         } catch (err) { /* leave the record without the asset ref */ }
       }
 
@@ -1260,6 +1545,178 @@
     }
   }
 
+
+  // --- <friendo-calendar [collection] [view=month|list] [month=YYYY-MM] [limit]> --
+  // The site's events from /calendar.json (public; also a plain file in a static
+  // export). `month` view is a grid with prev/next; `list` is the upcoming
+  // occurrences grouped by day. Each entry links to its post. Parts: nav, title,
+  // button, view, grid, weekday, day, today, outside, date, event, more, list,
+  // group, heading, time, empty, error.
+  class FriendoCalendar extends FriendoElement {
+    css() {
+      return (
+        ".nav{display:flex;align-items:center;gap:.5em;margin-bottom:.6em}" +
+        ".nav h2{font-size:1.1em;margin:0;flex:1}" +
+        ".nav button{font:inherit;padding:.25em .7em;border:1px solid #ccc;border-radius:6px;background:#fafafa;cursor:pointer}" +
+        '.nav button[aria-pressed="true"]{background:#e8f0ff;border-color:#9db8ff}' +
+        ".grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#ddd;border:1px solid #ddd}" +
+        ".wd{background:#f4f4f6;font-size:.8em;text-align:center;padding:.3em;opacity:.8}" +
+        ".day{background:#fff;min-height:5.5em;padding:.3em;font-size:.85em;display:flex;flex-direction:column;gap:.15em}" +
+        ".day.outside{background:#fafafa;opacity:.55}" +
+        ".day.today .date{font-weight:700;text-decoration:underline}" +
+        ".date{opacity:.7;font-size:.9em}" +
+        ".ev{display:block;padding:.1em .3em;border-radius:4px;background:#e8f0ff;color:inherit;text-decoration:none;" +
+          "overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+        ".ev:hover{background:#d5e3ff}" +
+        ".more{font-size:.85em;opacity:.7}" +
+        ".list{list-style:none;padding:0;margin:0}" +
+        ".group{margin:0 0 .9em}.group h3{font-size:.95em;margin:0 0 .25em}" +
+        ".group li{display:flex;gap:.6em;padding:.15em 0}.time{opacity:.7;min-width:6.5em}" +
+        ".empty,.error{opacity:.7;padding:.5em 0}"
+      );
+    }
+    connectedCallback() {
+      this._view = (this.getAttribute("view") || "month").toLowerCase();
+      var m = /^(\d{4})-(\d{2})$/.exec(this.getAttribute("month") || "");
+      var now = new Date();
+      this._year = m ? +m[1] : now.getFullYear();
+      this._month = m ? +m[2] - 1 : now.getMonth();
+      // A <friendo-form> on the same page just made a post: refetch, and open
+      // the month of its event so the new entry is in view.
+      var self = this;
+      this._onSubmitted = function (e) {
+        var rec = e.detail && e.detail.record;
+        self._events = null;
+        if (rec && rec.when && rec.when.starts && rec.status === "published") {
+          var d = new Date(rec.when.starts);
+          if (!isNaN(d)) { self._year = d.getFullYear(); self._month = d.getMonth(); }
+        }
+        self.render();
+      };
+      document.addEventListener("friendo:submitted", this._onSubmitted);
+      super.connectedCallback();
+    }
+    disconnectedCallback() {
+      super.disconnectedCallback();
+      document.removeEventListener("friendo:submitted", this._onSubmitted);
+    }
+    async _load() {
+      // Fetch once per mount: the JSON covers up to two years, and the view slices it.
+      if (this._events) return this._events;
+      var q = "/calendar.json?from=" + encodeURIComponent(ymd(new Date(this._year, this._month - 1, 1))) +
+        "&to=" + encodeURIComponent(ymd(new Date(this._year + 2, this._month, 1)));
+      var coll = this.getAttribute("collection");
+      if (coll) q += "&collection=" + encodeURIComponent(coll);
+      var res = await fetch(q, { credentials: "same-origin" });
+      if (!res.ok) throw new Error("Couldn't load the calendar (" + res.status + ")");
+      var body = await res.json();
+      this._events = (body && body.events) || [];
+      return this._events;
+    }
+    async render() {
+      var events;
+      try {
+        events = await this._load();
+      } catch (e) {
+        this.paint('<div part="error" class="error">' + esc(e.message) + "</div>");
+        return;
+      }
+      if (!this.isConnected) return;
+      var self = this;
+      var title = this._view === "month"
+        ? new Date(this._year, this._month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+        : "Upcoming";
+      var html =
+        '<div part="nav" class="nav">' +
+          (this._view === "month"
+            ? '<button part="button" type="button" data-nav="-1" aria-label="Previous month">&lsaquo;</button>' +
+              '<button part="button" type="button" data-nav="1" aria-label="Next month">&rsaquo;</button>'
+            : "") +
+          '<h2 part="title">' + esc(title) + "</h2>" +
+          '<button part="view" type="button" data-view="month" aria-pressed="' + (this._view === "month") + '">Month</button>' +
+          '<button part="view" type="button" data-view="list" aria-pressed="' + (this._view === "list") + '">List</button>' +
+        "</div>" +
+        (this._view === "month" ? this._monthHTML(events) : this._listHTML(events));
+      this.paint(html);
+      this.shadowRoot.querySelectorAll("[data-nav]").forEach(function (b) {
+        b.onclick = function () {
+          var d = new Date(self._year, self._month + (+b.dataset.nav), 1);
+          self._year = d.getFullYear(); self._month = d.getMonth();
+          self.render();
+        };
+      });
+      this.shadowRoot.querySelectorAll("[data-view]").forEach(function (b) {
+        b.onclick = function () { self._view = b.dataset.view; self.render(); };
+      });
+    }
+    _monthHTML(events) {
+      var first = new Date(this._year, this._month, 1);
+      var start = new Date(first); start.setDate(1 - first.getDay()); // week starts Sunday
+      var today = ymd(new Date());
+      var byDay = {};
+      events.forEach(function (e) {
+        var key = dayKey(e);
+        (byDay[key] = byDay[key] || []).push(e);
+      });
+      var html = '<div part="grid" class="grid">';
+      ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach(function (d) {
+        html += '<div part="weekday" class="wd">' + d + "</div>";
+      });
+      for (var i = 0; i < 42; i++) {
+        var d = new Date(start); d.setDate(start.getDate() + i);
+        if (i >= 35 && d.getMonth() !== this._month) break;
+        var key = ymd(d);
+        var outside = d.getMonth() !== this._month;
+        var cls = "day" + (outside ? " outside" : "") + (key === today ? " today" : "");
+        var part = "day" + (key === today ? " today" : "") + (outside ? " outside" : "");
+        html += '<div part="' + part + '" class="' + cls + '" data-date="' + key + '"><span part="date" class="date">' + d.getDate() + "</span>";
+        var list = byDay[key] || [];
+        list.slice(0, 3).forEach(function (e) { html += eventLink(e, true); });
+        if (list.length > 3) html += '<span part="more" class="more">+' + (list.length - 3) + " more</span>";
+        html += "</div>";
+      }
+      return html + "</div>";
+    }
+    _listHTML(events) {
+      var limit = +(this.getAttribute("limit") || 0);
+      var today = ymd(new Date());
+      var upcoming = events.filter(function (e) { return dayKey(e) >= today; });
+      if (limit > 0) upcoming = upcoming.slice(0, limit);
+      if (!upcoming.length) return '<div part="empty" class="empty">Nothing coming up.</div>';
+      var groups = [], last = null;
+      upcoming.forEach(function (e) {
+        var key = dayKey(e);
+        if (!last || last.key !== key) { last = { key: key, items: [] }; groups.push(last); }
+        last.items.push(e);
+      });
+      return '<div part="list" class="list">' + groups.map(function (g) {
+        var d = new Date(g.key + "T12:00:00");
+        return '<div part="group" class="group"><h3 part="heading">' +
+          esc(d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })) + "</h3><ul class=\"list\">" +
+          g.items.map(function (e) {
+            return '<li><span part="time" class="time">' + esc(timeOf(e)) + "</span>" + eventLink(e, false) + "</li>";
+          }).join("") + "</ul></div>";
+      }).join("") + "</div>";
+    }
+  }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function ymd(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  // An all-day event lives on its calendar date wherever the viewer is; a timed
+  // one is bucketed by the viewer's local day.
+  function dayKey(e) {
+    if (e.all_day) return String(e.starts).slice(0, 10);
+    return ymd(new Date(e.starts));
+  }
+  function timeOf(e) {
+    if (e.all_day) return "All day";
+    var d = new Date(e.starts);
+    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  }
+  function eventLink(e, short) {
+    var label = (short && !e.all_day ? timeOf(e) + " " : "") + (e.title || "");
+    if (e.url) return '<a part="event" class="ev" href="' + esc(e.url) + '" title="' + esc(e.title || "") + '">' + esc(label) + "</a>";
+    return '<span part="event" class="ev">' + esc(label) + "</span>";
+  }
 
   // --- network: account, console, activate ----------------------------------
   // These talk to the network's own API on its bare domain (/api/*), not a
@@ -1845,6 +2302,9 @@
     "friendo-map": FriendoMap,
     "friendo-input": FriendoInput,
     "friendo-form": FriendoForm,
+    "friendo-calendar": FriendoCalendar,
+    "friendo-rsvp": FriendoRSVP,
+    "friendo-add-to-calendar": FriendoAddToCalendar,
     "friendo-account": FriendoAccount,
     "friendo-console": FriendoConsole,
     "friendo-activate": FriendoActivate,

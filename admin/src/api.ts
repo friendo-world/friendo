@@ -111,6 +111,18 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
 export type Collection = { name: string; count: number };
 
+// A post's calendar time, as the API returns it (null for a post with no time).
+export type When = {
+  starts: string; // RFC 3339, in the event's zone
+  ends: string; // "" when open-ended
+  all_day: boolean;
+  timezone: string;
+  repeats: string; // human text: "weekly", "monthly on the first Tuesday", ""
+  rule: string; // the RRULE body, "" for a one-off
+  except: string[];
+  next: { starts: string; ends: string; all_day: boolean } | null;
+};
+
 export type Record = {
   id: string;
   collection?: string;
@@ -122,6 +134,8 @@ export type Record = {
   published_at?: string;
   created?: string;
   updated?: string;
+  data?: { [key: string]: unknown };
+  when?: When | null;
 };
 
 export type RecordInput = {
@@ -129,6 +143,9 @@ export type RecordInput = {
   title: string;
   body: string;
   status: string;
+  // Front-matter style fields. The reserved calendar keys (when, ends, all_day,
+  // timezone, repeats, except, rrule) are lifted into the post's event server-side.
+  data?: { [key: string]: unknown };
 };
 
 export type PendingRecord = {
@@ -140,6 +157,29 @@ export type PendingRecord = {
   author_name: string;
   status: string;
   created: string;
+  when?: When | null;
+};
+
+export type Attendee = {
+  id: string;
+  occurrence: string;
+  occurrence_text: string;
+  scheduled: boolean;
+  author_id: string;
+  author_name: string;
+  author_email: string;
+  answer: "going" | "not_going" | "maybe";
+  created: string;
+  updated: string;
+};
+
+export type Location = {
+  id: string;
+  target_type: string;
+  target_id: string;
+  lat: number;
+  lng: number;
+  label: string;
 };
 
 export type CommentStatus = "pending" | "approved" | "rejected";
@@ -189,6 +229,21 @@ export const api = {
     }),
   deleteRecord: (id: string) =>
     req<void>(`/records/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // Who answered an event's RSVP (the post's author or a moderator).
+  attendees: (recordId: string) =>
+    req<{ attendees: Attendee[] }>(`/posts/${encodeURIComponent(recordId)}/attendees`),
+
+  // A post's map pin (the Where section of the record form).
+  locations: (recordId: string) =>
+    req<{ locations: Location[] }>(`/locations?target_type=post&target_id=${encodeURIComponent(recordId)}`),
+  addLocation: (recordId: string, lat: number, lng: number, label: string) =>
+    req<{ location: Location }>("/locations", {
+      method: "POST",
+      body: JSON.stringify({ target_type: "post", target_id: recordId, lat, lng, label }),
+    }),
+  removeLocation: (id: string) =>
+    req<void>(`/locations/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   // Post-review queue (editor+)
   recordsByStatus: (status: string) =>

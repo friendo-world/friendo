@@ -1,0 +1,27 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<h1>Events</h1>
+<p>Every post in <code>content/events/</code> with a <code>when:</code> line. The
+<code>upcoming</code> filter expands repeating events into one entry per date.
+Subscribe with <a href="{{ calendar.google }}">Google Calendar</a>, with
+<a href="{{ calendar.webcal }}">Apple Calendar or Outlook</a>, or from the
+<a href="{{ calendar.ics }}">feed address</a> — or use the menu:
+<friendo-add-to-calendar subscribe collection="events"></friendo-add-to-calendar></p>
+
+<ul class="events">
+{% for e in collections.events|upcoming:12 %}
+    <li><a href="/events/{{ e.slug }}">{{ e.title }}</a> &mdash; {{ e.when|when }}{% if e.when.repeats %} <small>({{ e.when.repeats }})</small>{% endif %}</li>
+{% empty %}
+    <li>Nothing coming up.</li>
+{% endfor %}
+</ul>
+
+<h2>This month</h2>
+<ul>
+{% for e in collections.events|in_month %}
+    <li>{{ e.when|when }} &mdash; {{ e.title }}</li>
+{% endfor %}
+</ul>
+
+<p style="margin-top:1.5rem"><a href="/">&larr; Back home</a></p>
+{% endblock %}

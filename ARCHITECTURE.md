@@ -46,8 +46,8 @@ The client transport is the same everywhere — `<friendo-channel>` opens one
 
 **One schema.** The runtime defines its tables once (`posts`, `comments`,
 `reactions`, `channels`, `messages`, `polls`, `poll_votes`, `authors`,
-`locations`, `files`, `users`, `sessions`). One schema across every site is what
-makes data sync a copy, not a migration.
+`locations`, `events`, `rsvps`, `files`, `users`, `sessions`). One schema across every
+site is what makes data sync a copy, not a migration.
 
 **Same binary from laptop to production.** Local dev, self-host, and
 friendo.world all run this one binary — `friendo serve` for a single site,
@@ -84,6 +84,8 @@ the actor's *own* rows unless they hold the `.any` variant.
 | Community | `GET/POST /posts/:id/comments`, `PUT/DELETE /comments/:id` (moderation); `POST/DELETE /reactions`; `GET/POST /polls`, `POST /polls/:id/vote` | authenticated baseline (comment/react/vote); `comment.moderate.own/any` to moderate; `content.edit.any` to author a poll |
 | Channels (realtime) | `GET/POST /channels`, `DELETE /channels/:id`; `GET/POST /channels/:id/messages`, `DELETE /messages/:id`; `GET /channels/:id/stream` (SSE) | read/post = authenticated member; channel mgmt = `site.configure` |
 | Locations | `GET /locations` (public); `POST /locations`, `DELETE /locations/:id` | read public; write = `content.edit.any` |
+| Calendar | `GET /calendar.ics`, `GET /calendar.json` at the **site root** (not under `/_/api`): published events, `?collection=`, `?record=`, `?occurrence=`; a page at the same path wins | public |
+| RSVP | `GET/POST/DELETE /posts/:id/rsvps` (`occurrence`, `answer`); `GET /posts/:id/attendees` (`?format=csv`) | counts public; answer = authenticated member; attendees = post author or `comment.moderate.any` |
 | Media | `GET /files` (public); `POST /files` (multipart image → `assets/`), `DELETE /files/:id` | read public; write = `content.create` |
 | Users | `GET/POST /users`, `PUT/DELETE /users/:id` (role rules + last-owner guard) | `user.manage`; granting admin/owner needs `site.own` |
 | Settings | `GET/PUT /settings` (site name + `access.*` / `content.require_approval` policy) | `site.configure` |
@@ -139,6 +141,37 @@ fill the same tables.
 
 This documentation site is authored this way (`docs/content/docs/*.md`), with its
 sidebar generated from the docs collection via `collections.docs|sort_by:"data.weight"`.
+
+## Calendar: an event is a post with a `when`
+
+The calendar follows the one lifting pattern the runtime already had for
+`location`: a reserved front-matter/form key that the importer and the record API
+pull out of opaque `data` into a real, indexed row. `when` (plus `ends`,
+`timezone`, `repeats`, `except`, `rrule`) becomes one row in `events` (migration
+`0013`) — a **series**: first start/end in local wall-clock time with the zone
+name beside it, an RFC 5545 RRULE, and skipped dates. Occurrences are expanded on
+read (`teambition/rrule-go`, expansion in the series' zone so a weekly 7pm stays
+7pm across daylight-saving), never stored. One parser, `data.ParseWhen`, serves
+both the content importer and `POST/PUT /records`, so the file spelling and the
+`<friendo-form>` spelling can't drift. The row has a deterministic id per post, so
+re-import and edits upsert in place, and it rides `push/pull --data` beside records.
+
+Templates see `record.when` on every record (attached in one query per page), the
+`upcoming`/`past`/`in_month`/`on_day` filters expand series into occurrence
+entries, and `when` formats a range for people. `runtime/go/calendar` builds the
+feeds — `/calendar.ics` (RRULE/EXDATE passed through, a generated `VTIMEZONE` per
+zone, ETag/304) and `/calendar.json` (expanded) — for the running site and for
+static export alike; a members-only collection is left out of both.
+
+**RSVP** (`rsvps`, migration `0014`) is a member's answer — going / not_going /
+maybe — keyed to a *series and an occurrence start*, so on a weekly event "are you
+coming?" means this Tuesday; the server resolves and validates the occurrence
+against the expanded series, and a series edit re-keys answers to the same day.
+`<friendo-calendar>` (month grid / list over `/calendar.json`), `<friendo-rsvp>`,
+`<friendo-add-to-calendar>` (Google's add-by-URL and pre-filled-event links, `webcal://`,
+.ics — also as `{{ calendar.google }}` / `{{ record|google_calendar_url }}` for no-JS
+pages), `<friendo-input type="when">` and the admin's When / Where / Attendees screens
+are the front-of-house. Design: [design/calendar-plan.md](design/calendar-plan.md).
 
 ## Managed hosting: network mode
 

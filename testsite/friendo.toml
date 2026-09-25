@@ -1,4 +1,5 @@
 [site]
+timezone = "America/Los_Angeles"
 name = "testsite"
 
 [content]

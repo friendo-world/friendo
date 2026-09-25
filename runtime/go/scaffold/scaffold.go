@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 // Init creates a new Friendo site directory with the canonical structure.
@@ -20,9 +22,11 @@ func Init(name string) error {
 	dirs := []string{
 		filepath.Join(name, "pages"),
 		filepath.Join(name, "pages", "blog"),
+		filepath.Join(name, "pages", "events"),
 		filepath.Join(name, "layouts"),
 		filepath.Join(name, "assets"),
 		filepath.Join(name, "content", "blog"),
+		filepath.Join(name, "content", "events"),
 	}
 
 	for _, dir := range dirs {
@@ -32,13 +36,16 @@ func Init(name string) error {
 	}
 
 	files := map[string]string{
-		filepath.Join(name, "friendo.toml"):                      friendoToml(name),
-		filepath.Join(name, "layouts", "base.html"):              baseHTML,
-		filepath.Join(name, "pages", "index.html"):               indexHTML,
-		filepath.Join(name, "pages", "404.html"):                 notFoundHTML,
-		filepath.Join(name, "pages", "blog", "[slug].html"):      blogPostHTML,
-		filepath.Join(name, "assets", "style.css"):               styleCSS,
-		filepath.Join(name, "content", "blog", "hello-world.md"): helloPostMD,
+		filepath.Join(name, "friendo.toml"):                         friendoToml(name),
+		filepath.Join(name, "layouts", "base.html"):                 baseHTML,
+		filepath.Join(name, "pages", "index.html"):                  indexHTML,
+		filepath.Join(name, "pages", "404.html"):                    notFoundHTML,
+		filepath.Join(name, "pages", "blog", "[slug].html"):         blogPostHTML,
+		filepath.Join(name, "assets", "style.css"):                  styleCSS,
+		filepath.Join(name, "content", "blog", "hello-world.md"):    helloPostMD,
+		filepath.Join(name, "pages", "events", "index.html"):        eventsIndexHTML,
+		filepath.Join(name, "pages", "events", "[slug].html"):       eventPageHTML,
+		filepath.Join(name, "content", "events", "first-meetup.md"): firstMeetupMD(),
 	}
 
 	for path, content := range files {
@@ -53,9 +60,10 @@ func Init(name string) error {
 func friendoToml(name string) string {
 	return fmt.Sprintf(`[site]
 name = "%s"
+timezone = "%s"   # the zone an event's time is read in (an IANA name)
 
 [content]
-types = ["blog", "pages"]
+types = ["blog", "events", "pages"]
 
 # Optional: make this file the source of truth for these site settings. Uncomment a
 # key and it is applied on startup and shown read-only in the admin UI (Settings).
@@ -75,7 +83,31 @@ types = ["blog", "pages"]
 
 [deploy]
 # domain = "mysite.com"
-`, name)
+`, name, MachineTimezone())
+}
+
+// MachineTimezone is the IANA name of this machine's zone, for a fresh
+// friendo.toml: $TZ if set, else what /etc/localtime points at, else UTC.
+func MachineTimezone() string {
+	if tz := strings.TrimSpace(os.Getenv("TZ")); tz != "" {
+		if _, err := time.LoadLocation(tz); err == nil {
+			return tz
+		}
+	}
+	if target, err := os.Readlink("/etc/localtime"); err == nil {
+		if i := strings.Index(target, "zoneinfo/"); i >= 0 {
+			name := target[i+len("zoneinfo/"):]
+			if _, err := time.LoadLocation(name); err == nil {
+				return name
+			}
+		}
+	}
+	if name := time.Local.String(); name != "Local" && name != "" {
+		if _, err := time.LoadLocation(name); err == nil {
+			return name
+		}
+	}
+	return "UTC"
 }
 
 const baseHTML = `<!DOCTYPE html>
@@ -144,6 +176,64 @@ Edit it, add more files under ` + "`content/`" + `, and run ` + "`friendo serve`
 changes live. The folder under ` + "`content/`" + ` is the collection; the front matter
 above sets the title and slug.
 `
+
+const eventsIndexHTML = `{% extends "layouts/base.html" %}
+{% block content %}
+<h1>Events</h1>
+
+{# 'upcoming' expands repeating events into one entry per date, soonest first. #}
+{% for e in collections.events|upcoming %}
+<article>
+    <h2><a href="/events/{{ e.slug }}">{{ e.title }}</a></h2>
+    <p>{{ e.when|when }}{% if e.when.repeats %} &middot; {{ e.when.repeats }}{% endif %}</p>
+</article>
+{% empty %}
+<p>Nothing coming up. Add a file to <code>content/events/</code> with a <code>when:</code> line.</p>
+{% endfor %}
+
+<p>Subscribe: <a href="{{ calendar.google }}">Google Calendar</a> &middot;
+<a href="{{ calendar.webcal }}">Apple Calendar / Outlook</a> &middot;
+<a href="{{ calendar.ics }}">feed address</a></p>
+{% endblock %}
+`
+
+const eventPageHTML = `{% extends "layouts/base.html" %}
+{% block content %}
+<article>
+    <h1>{{ record.title }}</h1>
+    <p>{{ record.when|when }}{% if record.when.repeats %} &middot; {{ record.when.repeats }}{% endif %}</p>
+    {% if record.when.repeats and record.when.next %}<p>Next: {{ record.when.next|when }}</p>{% endif %}
+    <div>{{ record.body|markdown }}</div>
+    <p><a href="{{ record|google_calendar_url }}">Add to Google Calendar</a> &middot;
+    <a href="/calendar.ics?record={{ record.id }}">Download .ics</a> &middot; <a href="/events/">All events</a></p>
+</article>
+{% endblock %}
+`
+
+// firstMeetupMD is a starter event, dated a few weeks out so it shows as upcoming.
+func firstMeetupMD() string {
+	day := time.Now().AddDate(0, 0, 21)
+	for day.Weekday() != time.Tuesday {
+		day = day.AddDate(0, 0, 1)
+	}
+	return fmt.Sprintf(`---
+title: First meetup
+when: %s 19:00 to 20:30
+repeats: weekly
+---
+
+An event is a post with a `+"`when:`"+` line. This one repeats every week — see it
+listed under `+"`/events/`"+` and subscribe to `+"`/calendar.ics`"+` from your calendar app.
+
+Other spellings that work:
+
+    when: 2026-10-04                       (all day)
+    when: 2026-10-04 10:00 to 16:00
+    when: mondays 19:00                    (every Monday from now)
+    repeats: monthly                       (or: {every: month, on: first tuesday})
+    except: [2026-12-23]                   (skip a date)
+`, day.Format("2006-01-02"))
+}
 
 const styleCSS = `/* Friendo starter styles */
 * { box-sizing: border-box; margin: 0; padding: 0; }

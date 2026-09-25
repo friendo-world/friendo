@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,6 +75,12 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/channels/{id}/stream", handleChannelStream(db)) // SSE: live new messages
 		r.Post("/channels/{id}/messages", handlePostMessage(db, authFunc))
 		r.Delete("/messages/{id}", handleDeleteMessage(db, authFunc))
+		// RSVP: public counts; a signed-in member answers (going / not_going /
+		// maybe) for one occurrence of a post's event. Names for organizers only.
+		r.Get("/posts/{id}/rsvps", handleGetRSVPs(db, authFunc))
+		r.Post("/posts/{id}/rsvps", handleSetRSVP(db, authFunc))
+		r.Delete("/posts/{id}/rsvps", handleDeleteRSVP(db, authFunc))
+		r.Get("/posts/{id}/attendees", handleAttendees(db, authFunc))
 		r.Get("/polls/by-slug/{slug}", handleGetPollBySlug(db, authFunc))
 		r.Get("/polls/{id}", handleGetPoll(db, authFunc))
 		r.Post("/polls/{id}/vote", handleVotePoll(db, authFunc))
@@ -221,8 +228,28 @@ func handleListRecords(db *data.DB, authFunc func(*http.Request) *data.User) htt
 		if records == nil {
 			records = []map[string]any{}
 		}
+		attachWhenAll(db, records)
 		jsonResponse(w, map[string]any{"records": records})
 	}
+}
+
+// attachWhen adds the post's calendar series as record.when (nil when the post
+// has no time), the same shape templates see.
+func attachWhen(db *data.DB, record map[string]any) {
+	id, _ := record["id"].(string)
+	if id == "" {
+		return
+	}
+	if ev := db.EventFor(id); ev != nil {
+		record["when"] = ev.JSON(time.Now())
+	} else {
+		record["when"] = nil
+	}
+}
+
+// attachWhenAll does attachWhen for a list with one query.
+func attachWhenAll(db *data.DB, records []map[string]any) {
+	db.AttachWhen(records, time.Now(), true)
 }
 
 func handleGetRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
@@ -242,6 +269,7 @@ func handleGetRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		attachWhen(db, record)
 		jsonResponse(w, map[string]any{"record": record})
 	}
 }
@@ -268,6 +296,7 @@ func handleListRecordsByStatus(db *data.DB) http.HandlerFunc {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
 		}
+		attachWhenAll(db, records)
 		jsonResponse(w, map[string]any{"records": records})
 	}
 }
@@ -370,13 +399,57 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			return
 		}
 		if len(in.Data) > 0 && string(in.Data) != "null" {
-			db.SetRecordData(id, string(in.Data))
-			autoGeotag(db, id, in.Title, in.Data)
+			cleaned := liftWhen(db, id, in.Data)
+			db.SetRecordData(id, string(cleaned))
+			autoGeotag(db, id, in.Title, cleaned)
 		}
 		record, _ := db.GetRecordByID(id)
+		attachWhen(db, record)
 		w.WriteHeader(http.StatusCreated)
 		jsonResponse(w, map[string]any{"record": record})
 	}
+}
+
+// liftWhen pulls the reserved calendar keys (when, ends, timezone, repeats,
+// except, rrule) out of a record's data blob into the post's events row and
+// returns the data without them — the API-side twin of the content importer's
+// lifting, so a <friendo-form> with an <input name="when"> makes an event with no
+// SDK knowledge.
+//
+// Data with no `when` key leaves the post's event as it is: the API hands `data`
+// back without the lifted keys, so a client that reads a record and writes it
+// back (the form does, after a photo upload) must not erase the time. Removing
+// the event is explicit — `"when": null` or `"when": ""`. A `when` that can't
+// be read is logged and the existing event kept; the record still saves.
+func liftWhen(db *data.DB, postID string, raw json.RawMessage) json.RawMessage {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
+		return raw
+	}
+	when, present := m["when"]
+	ev, warnings := data.LiftWhen(m, db.Location)
+	for _, w := range warnings {
+		log.Printf("record %s: %s", postID, w)
+	}
+	switch {
+	case !present:
+		// Nothing said about the time; keep what's there.
+	case ev == nil && (when == nil || when == ""):
+		if err := db.ReconcileWhen(postID, nil); err != nil {
+			log.Printf("record %s when: %v", postID, err)
+		}
+	case ev == nil:
+		// Present but unreadable (warned above): keep the existing event.
+	default:
+		if err := db.ReconcileWhen(postID, ev); err != nil {
+			log.Printf("record %s when: %v", postID, err)
+		}
+	}
+	cleaned, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return cleaned
 }
 
 // autoGeotag scans a newly created record's data blob for fields shaped like
@@ -443,9 +516,10 @@ func handleUpdateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			return
 		}
 		if len(in.Data) > 0 && string(in.Data) != "null" {
-			db.SetRecordData(id, string(in.Data))
+			db.SetRecordData(id, string(liftWhen(db, id, in.Data)))
 		}
 		record, _ := db.GetRecordByID(id)
+		attachWhen(db, record)
 		jsonResponse(w, map[string]any{"record": record})
 	}
 }
@@ -690,6 +764,170 @@ func handleToggleReaction(db *data.DB, authFunc func(*http.Request) *data.User) 
 		}
 		reactions, _ := db.ReactionCounts(in.TargetType, in.TargetID, authorID)
 		jsonResponse(w, map[string]any{"reacted": reacted, "reactions": reactions})
+	}
+}
+
+// --- RSVP ---
+
+// rsvpPayload is the shape every RSVP call answers with: the occurrence asked
+// about, its tally, the caller's own answer, and (for organizers) who answered.
+func rsvpPayload(db *data.DB, user *data.User, ev *data.Event, key string) map[string]any {
+	counts, _ := db.RSVPCountsFor(ev.ID, key)
+	out := map[string]any{
+		"occurrence": key,
+		"counts":     counts,
+		"mine":       "",
+	}
+	if t, err := time.Parse(time.RFC3339, key); err == nil {
+		out["occurrence_text"] = data.FormatWhen(t.In(ev.Location()), time.Time{}, ev.AllDay, time.Now().In(ev.Location()), "")
+	}
+	if user != nil {
+		out["mine"] = db.RSVPForUser(ev.ID, key, user.ID)
+		if user.Can(data.CapCommentModerateAny) || db.UserOwnsEventPost(user.ID, ev) {
+			if list, err := db.ListRSVPs(ev.ID, key); err == nil {
+				out["attendees"] = list
+			}
+		}
+	}
+	return out
+}
+
+// eventForPost resolves a post's series and the occurrence a request names
+// (?occurrence= or the body's; "" = the next one), or writes the error.
+func eventForPost(w http.ResponseWriter, db *data.DB, postID, requested string) (*data.Event, string, bool) {
+	rec, err := db.GetRecordByID(postID)
+	if err != nil {
+		jsonError(w, "post not found", http.StatusNotFound)
+		return nil, "", false
+	}
+	if st, _ := rec["status"].(string); st != "published" {
+		jsonError(w, "post not found", http.StatusNotFound)
+		return nil, "", false
+	}
+	ev := db.EventFor(postID)
+	if ev == nil {
+		jsonError(w, "this post has no time to RSVP to", http.StatusNotFound)
+		return nil, "", false
+	}
+	key, err := ev.ResolveOccurrence(strings.TrimSpace(requested), time.Now())
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return nil, "", false
+	}
+	return ev, key, true
+}
+
+// handleGetRSVPs returns the tally for an occurrence (public).
+func handleGetRSVPs(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ev, key, ok := eventForPost(w, db, chi.URLParam(r, "id"), r.URL.Query().Get("occurrence"))
+		if !ok {
+			return
+		}
+		jsonResponse(w, rsvpPayload(db, authFunc(r), ev, key))
+	}
+}
+
+// handleSetRSVP records the caller's answer for an occurrence (any signed-in member).
+func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "sign in to RSVP", http.StatusUnauthorized)
+			return
+		}
+		var in struct {
+			Occurrence string `json:"occurrence"`
+			Answer     string `json:"answer"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if !data.ValidRSVPAnswer(in.Answer) {
+			jsonError(w, "answer must be going, not_going, or maybe", http.StatusBadRequest)
+			return
+		}
+		ev, key, ok := eventForPost(w, db, chi.URLParam(r, "id"), in.Occurrence)
+		if !ok {
+			return
+		}
+		if !db.RateLimitAllow("rsvp:"+user.ID, commentRateLimit, commentRateWindow) {
+			jsonError(w, "too many changes — slow down", http.StatusTooManyRequests)
+			return
+		}
+		if err := db.SetRSVP(ev.ID, key, db.DefaultAuthorID(user.ID), in.Answer); err != nil {
+			jsonError(w, fmt.Sprintf("rsvp error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonResponse(w, rsvpPayload(db, user, ev, key))
+	}
+}
+
+// handleDeleteRSVP withdraws the caller's answer for an occurrence.
+func handleDeleteRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ev, key, ok := eventForPost(w, db, chi.URLParam(r, "id"), r.URL.Query().Get("occurrence"))
+		if !ok {
+			return
+		}
+		// Any of the account's personas may have answered; clear them all.
+		personas, _ := db.ListPersonas(user.ID)
+		for _, p := range personas {
+			if id, _ := p["id"].(string); id != "" {
+				db.DeleteRSVP(ev.ID, key, id)
+			}
+		}
+		jsonResponse(w, rsvpPayload(db, user, ev, key))
+	}
+}
+
+// handleAttendees lists every answer on a post's event for its organizer (the
+// post's author, or a moderator), grouped by occurrence; ?format=csv downloads it.
+func handleAttendees(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		postID := chi.URLParam(r, "id")
+		ev := db.EventFor(postID)
+		if ev == nil {
+			jsonError(w, "this post has no time to RSVP to", http.StatusNotFound)
+			return
+		}
+		if !user.Can(data.CapCommentModerateAny) && !db.UserOwnsEventPost(user.ID, ev) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		rows, err := db.AttendeeRows(ev)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		if r.URL.Query().Get("format") == "csv" {
+			w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+			w.Header().Set("Content-Disposition", `attachment; filename="attendees.csv"`)
+			cw := csv.NewWriter(w)
+			cw.Write([]string{"occurrence", "name", "email", "answer", "answered_at", "scheduled"})
+			for _, row := range rows {
+				str := func(k string) string { v, _ := row[k].(string); return v }
+				sched := "yes"
+				if s, _ := row["scheduled"].(bool); !s {
+					sched = "no longer scheduled"
+				}
+				cw.Write([]string{str("occurrence"), str("author_name"), str("author_email"), str("answer"), str("updated"), sched})
+			}
+			cw.Flush()
+			return
+		}
+		jsonResponse(w, map[string]any{"attendees": rows})
 	}
 }
 
@@ -1648,6 +1886,7 @@ func handlePushData(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Records []map[string]any `json:"records"`
+			Events  []map[string]any `json:"events"` // calendar series, beside their posts
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 10<<20)).Decode(&body); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
@@ -1655,6 +1894,13 @@ func handlePushData(db *data.DB) http.HandlerFunc {
 		}
 
 		synced := 0
+		for _, row := range body.Events {
+			if ev := data.EventFromRow(row); ev != nil {
+				if err := db.UpsertEvent(ev); err != nil {
+					log.Printf("Error upserting event %s: %v", ev.ID, err)
+				}
+			}
+		}
 		for _, rec := range body.Records {
 			str := func(key string) string {
 				v, _ := rec[key].(string)
@@ -1860,7 +2106,13 @@ func handlePullData(db *data.DB) http.HandlerFunc {
 		if records == nil {
 			records = []map[string]any{}
 		}
-		jsonResponse(w, map[string]any{"records": records})
+		events := []map[string]any{}
+		if list, err := db.ListEvents(); err == nil {
+			for _, e := range list {
+				events = append(events, e.Row())
+			}
+		}
+		jsonResponse(w, map[string]any{"records": records, "events": events})
 	}
 }
 
