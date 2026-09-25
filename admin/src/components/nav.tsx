@@ -1,7 +1,7 @@
 import type { JSX } from "preact";
 import { can, type User } from "../api";
 
-type Tab = "dashboard" | "review" | "users" | "moderation" | "settings";
+type Tab = "content" | "moderation" | "users" | "settings";
 
 // The bar across the top of every admin page: the wordmark, then the sections
 // this user can see, lowercase and separated by dots. The current one is blue.
@@ -29,18 +29,17 @@ export function Nav({
     </a>
   );
   const links: (JSX.Element | false)[] = [
-    link("/_/", "dashboard", "dashboard"),
-    can(user.role, "content.edit.any") && link("/_/review", "review", "review"),
+    link("/_/", "content", "content"),
+    can(user.role, "comment.moderate.own") && link("/_/moderation", "moderation", "moderation"),
     can(user.role, "user.manage") && link("/_/users", "users", "users"),
-    can(user.role, "comment.moderate.own") && link("/_/moderation", "comments", "moderation"),
     can(user.role, "site.configure") && link("/_/settings", "settings", "settings"),
     link("/", "view site", "site"),
   ];
 
   return (
-    <nav class="mx-auto flex max-w-[960px] flex-wrap items-baseline gap-x-2 gap-y-2 border-b border-ink px-4 pt-4 pb-2">
-      <a href="/_/" class="mr-4 text-xl font-bold text-ink no-underline">
-        <span class="text-base">&#10047;</span> friendo
+    <nav class="mx-auto flex w-full max-w-[1200px] flex-wrap items-baseline gap-x-2 gap-y-2 border-b border-ink px-4 pt-4 pb-2">
+      <a href="/_/" class="mr-2 self-center text-2xl leading-none text-ink no-underline" title="friendo admin" aria-label="friendo admin">
+        &#10047;
       </a>
       {links
         .filter(Boolean)

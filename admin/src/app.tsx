@@ -1,19 +1,18 @@
 import { useEffect, useState } from "preact/hooks";
 import { LocationProvider, Router, Route } from "preact-iso";
-import { api, ApiError, type SetupStatus, type User } from "./api";
+import { ALL_FEATURES_ON, api, ApiError, type Features, type SetupStatus, type User } from "./api";
 import { AuthProvider } from "./auth";
 import { Layout } from "./components/layout";
+import { ToastProvider } from "./components/toast";
 import { Login } from "./views/login";
 import { Setup } from "./views/setup";
 import { Migrate } from "./views/migrate";
-import { Dashboard } from "./views/dashboard";
-import { CollectionView } from "./views/collection";
-import { RecordForm } from "./views/record-form";
+import { CollectionsArea } from "./views/collections";
+import { RecordRedirect } from "./views/record-redirect";
 import { Users } from "./views/users";
 import { UserForm } from "./views/user-form";
 import { SettingsView } from "./views/settings";
-import { Moderation } from "./views/moderation";
-import { Review } from "./views/review";
+import { ModerationPage } from "./views/moderation-page";
 import { Attendees } from "./views/attendees";
 import { NotFound } from "./views/not-found";
 
@@ -23,6 +22,12 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [setup, setSetup] = useState<SetupStatus>(NO_SETUP);
   const [loading, setLoading] = useState(true);
+  const [features, setFeatures] = useState<Features>(ALL_FEATURES_ON);
+  const reloadFeatures = () => {
+    api.features().then((r) => setFeatures({ ...ALL_FEATURES_ON, ...r.features })).catch(() => {});
+  };
+
+  useEffect(reloadFeatures, []);
 
   useEffect(() => {
     api
@@ -63,24 +68,25 @@ export function App() {
   };
 
   return (
-    <AuthProvider value={{ user, logout }}>
+    <AuthProvider value={{ user, logout, features, reloadFeatures }}>
       <LocationProvider>
+        <ToastProvider>
         <Layout>
           <Router>
-            <Route path="/_/" component={Dashboard} />
-            <Route path="/_/collections/:collection/new" component={RecordForm} />
-            <Route path="/_/collections/:collection" component={CollectionView} />
-            <Route path="/_/records/:id/edit" component={RecordForm} />
+            <Route path="/_/" component={CollectionsArea} />
+            <Route path="/_/collections/:collection/:id?" component={CollectionsArea} />
+            <Route path="/_/records/:id/edit" component={RecordRedirect} />
             <Route path="/_/records/:id/attendees" component={Attendees} />
             <Route path="/_/users" component={Users} />
             <Route path="/_/users/new" component={UserForm} />
             <Route path="/_/users/:id/edit" component={UserForm} />
-            <Route path="/_/review" component={Review} />
-            <Route path="/_/moderation" component={Moderation} />
+            <Route path="/_/moderation" component={ModerationPage} />
+            <Route path="/_/review" component={ModerationPage} />
             <Route path="/_/settings" component={SettingsView} />
             <Route default component={NotFound} />
           </Router>
         </Layout>
+        </ToastProvider>
       </LocationProvider>
     </AuthProvider>
   );

@@ -2,7 +2,8 @@ import { useEffect, useState } from "preact/hooks";
 import { api, type PendingRecord } from "../api";
 import { formatWhen } from "../when";
 
-export function Review() {
+// Posts waiting for an editor, as a section of the Moderation page.
+export function ReviewQueue() {
   const [records, setRecords] = useState<PendingRecord[] | null>(null);
   const [error, setError] = useState("");
 
@@ -37,9 +38,9 @@ export function Review() {
   }
 
   return (
-    <div class="mx-auto max-w-[960px] px-4 py-8">
-      <h1 class="mb-1 text-xl font-bold">Review</h1>
-      <p class="mb-6 text-sm text-dim">
+    <section data-section="review">
+      <h2 class="mb-1 text-sm font-bold text-dim">Posts to review</h2>
+      <p class="mb-3 text-xs text-dim">
         Posts awaiting approval. Publishing makes them live on the site.
       </p>
 
@@ -61,7 +62,7 @@ export function Review() {
               </div>
               <div class="flex justify-end gap-2">
                 <a
-                  href={`/_/records/${encodeURIComponent(r.id)}/edit`}
+                  href={`/_/collections/${encodeURIComponent(r.collection)}/${encodeURIComponent(r.id)}`}
                   class="bg-tint px-2 py-1 text-xs font-bold text-dim hover:bg-manila"
                 >
                   Edit
@@ -87,6 +88,6 @@ export function Review() {
           <p class="text-sm text-dim">Nothing awaiting review.</p>
         </div>
       )}
-    </div>
+    </section>
   );
 }

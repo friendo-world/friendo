@@ -10,6 +10,8 @@
 @theme {
   --font-sans: "Liberation Sans", Arial, Helvetica, sans-serif;
   --font-mono: Courier, "Courier New", monospace;
+  /* Labels: the narrow cut, never uppercase. */
+  --font-narrow: "Liberation Sans Narrow", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
 
   --color-paper: white;
   --color-tint: lightyellow;
@@ -25,4 +27,35 @@
   a { text-underline-offset: 2px; }
   button, input, select, textarea { border-radius: 0; }
   code, pre, kbd { font-family: var(--font-mono); }
+}
+
+/* The record panel's body preview and rich editor: plain, readable HTML in the
+   same type as the rest of the admin. */
+@layer components {
+  .preview :is(h1, h2, h3, h4) { font-weight: bold; margin: 0.8em 0 0.3em; }
+  .preview h1 { font-size: 1.4em; }
+  .preview h2 { font-size: 1.2em; }
+  .preview h3 { font-size: 1.05em; }
+  .preview p, .preview ul, .preview ol, .preview blockquote, .preview pre, .preview table { margin: 0.5em 0; }
+  .preview ul { list-style: disc; padding-left: 1.4em; }
+  .preview ol { list-style: decimal; padding-left: 1.4em; }
+  .preview a { color: blue; text-decoration: underline; }
+  .preview blockquote { border-left: 1px solid black; padding-left: 0.8em; color: dimgray; }
+  .preview code { background: lightyellow; padding: 0 0.2em; }
+  .preview pre { background: lightyellow; padding: 0.5em; overflow-x: auto; }
+  .preview img { max-width: 100%; }
+  .preview table { border-collapse: collapse; }
+  .preview :is(th, td) { border: 1px solid black; padding: 0.2em 0.5em; }
+
+  .rich .ProseMirror { min-height: 16rem; padding: 0.5rem 0.75rem; outline: none; white-space: pre-wrap; font-size: 0.875rem; }
+  .rich .ProseMirror > * { margin: 0.35em 0; }
+  .rich .ProseMirror :is(h1, h2, h3) { font-weight: bold; }
+  .rich .ProseMirror h2 { font-size: 1.2em; }
+  .rich .ProseMirror h3 { font-size: 1.05em; }
+  .rich .ProseMirror ul { list-style: disc; padding-left: 1.4em; }
+  .rich .ProseMirror ol { list-style: decimal; padding-left: 1.4em; }
+  .rich .ProseMirror blockquote { border-left: 1px solid black; padding-left: 0.8em; color: dimgray; }
+  .rich .ProseMirror code { background: lightyellow; padding: 0 0.2em; }
+  .rich .ProseMirror a { color: blue; text-decoration: underline; }
+  .rich .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: dimgray; float: left; height: 0; pointer-events: none; }
 }

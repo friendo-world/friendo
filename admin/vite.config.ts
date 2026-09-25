@@ -8,6 +8,10 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   base: "/_/",
   plugins: [preact(), tailwindcss()],
+  // `npm run admin:dev` talks to a runtime on :3000 (`npm run serve`).
+  server: {
+    proxy: { "/_/api": "http://localhost:3000" },
+  },
   build: {
     outDir: "../runtime/go/admin/spa",
     emptyOutDir: true,

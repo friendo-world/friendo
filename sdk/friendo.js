@@ -50,6 +50,9 @@
     if (!res.ok) {
       var err = new Error((body && body.error) || res.statusText);
       err.status = res.status;
+      // The site has this feature switched off (Settings → Features): a tag for
+      // it renders nothing rather than an error.
+      err.off = !!(body && body.off);
       throw err;
     }
     return body;
@@ -108,6 +111,18 @@
     // Wrap component markup with the shared reset stylesheet.
     paint(html) {
       this.shadowRoot.innerHTML = "<style>" + BASE_CSS + this.css() + "</style>" + html;
+    }
+    // A load failed: show why — unless the feature is off for this site, in
+    // which case the tag simply isn't there.
+    fail(e) {
+      if (e && e.off) {
+        this.shadowRoot.innerHTML = "";
+        this.hidden = true;
+        this.setAttribute("data-off", "");
+        return;
+      }
+      this.hidden = false;
+      this.paint('<div part="error">' + esc(e.message) + "</div>");
     }
     css() {
       return "";
@@ -291,7 +306,7 @@
         comments = (list && list.comments) || [];
         canModerate = !!(list && list.can_moderate);
       } catch (e) {
-        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        this.fail(e);
         return;
       }
 
@@ -392,7 +407,7 @@
       try {
         data = await api("/reactions?target_type=" + encodeURIComponent(type) + "&target_id=" + encodeURIComponent(id));
       } catch (e) {
-        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        this.fail(e);
         return;
       }
       var byEmoji = {};
@@ -474,7 +489,7 @@
       try {
         data = await api(q);
       } catch (e) {
-        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        this.fail(e);
         return;
       }
       var user = await currentUser();
@@ -664,7 +679,7 @@
       try {
         data = await api(endpoint);
       } catch (e) {
-        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        this.fail(e);
         return;
       }
       var poll = (data && data.poll) || {};
@@ -765,7 +780,7 @@
       try {
         data = await api("/channels/" + encodeURIComponent(channelId) + "/messages");
       } catch (e) {
-        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        this.fail(e);
         return;
       }
       var messages = (data && data.messages) || [];
@@ -929,7 +944,7 @@
       try {
         data = await api(q);
       } catch (e) {
-        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        this.fail(e);
         return;
       }
       var locations = (data && data.locations) || [];
@@ -947,7 +962,7 @@
       try {
         L = await loadLeaflet();
       } catch (e) {
-        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        this.fail(e);
         return;
       }
       if (!this.isConnected) return; // removed while the library loaded
@@ -1279,7 +1294,7 @@
       try {
         L = await loadLeaflet();
       } catch (e) {
-        this.paint('<div part="error">' + esc(e.message) + "</div>");
+        this.fail(e);
         return;
       }
       if (!this.isConnected) return;

@@ -339,6 +339,16 @@ func RunPull(opts PullOptions) error {
 		}
 	}
 
+	// The site's collections and their fields, written into friendo.toml's
+	// [content] block so the folder knows about anything started on the site.
+	if block, err := siteClient.PullContentToml(); err != nil {
+		fmt.Printf("  Warning: couldn't read the site's [content] block: %v\n", err)
+	} else if changed, err := writeContentBlock(siteDir, block); err != nil {
+		fmt.Printf("  Warning: couldn't update friendo.toml: %v\n", err)
+	} else if changed {
+		fmt.Println("Updated friendo.toml's [content] block to match the site.")
+	}
+
 	fmt.Println("Done.")
 	return nil
 }

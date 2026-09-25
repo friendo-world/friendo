@@ -2251,3 +2251,31 @@ func (db *DB) UserOwnsComment(userID, commentID string) bool {
 	).Scan(&one)
 	return err == nil
 }
+
+// --- Features ---
+
+// Features are the community pieces a site can switch off: each has its own
+// API and <friendo-*> tag, and off means the API refuses it, the tag renders
+// nothing, and a page's server-rendered {{ record.comments }} (and so on) is
+// empty. Existing data stays; turning a feature back on shows it again. Stored
+// as site settings ("features.comments"), so friendo.toml's [settings] can
+// freeze them like any other setting.
+var Features = []string{"comments", "reactions", "polls", "rsvp", "locations", "channels"}
+
+// FeatureLabel is how a feature is named to people.
+var FeatureLabel = map[string]string{
+	"comments":  "Comments",
+	"reactions": "Reactions",
+	"polls":     "Polls",
+	"rsvp":      "RSVPs",
+	"locations": "Map pins",
+	"channels":  "Channels",
+}
+
+// FeatureSetting is the settings key that holds a feature's switch.
+func FeatureSetting(name string) string { return "features." + name }
+
+// FeatureOn reports whether a feature is switched on (they all start on).
+func (db *DB) FeatureOn(name string) bool {
+	return db.GetBoolSetting(FeatureSetting(name), true)
+}

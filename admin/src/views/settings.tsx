@@ -1,7 +1,9 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, type AccessSettings, type Settings, type SettingsPatch } from "../api";
+import { api, type AccessSettings, type Features, type Settings, type SettingsPatch } from "../api";
 import { useAuth } from "../auth";
 import { RoleBadge } from "../components/role-badge";
+import { Toggle } from "../components/ui";
+import { ContentToml } from "../components/content-toml";
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -9,48 +11,6 @@ function Stat({ label, value }: { label: string; value: string | number }) {
       <dt class="text-xs font-bold text-dim">{label}</dt>
       <dd class="mt-1 text-sm font-bold">{value}</dd>
     </div>
-  );
-}
-
-function Toggle({
-  label,
-  hint,
-  on,
-  disabled,
-  onToggle,
-}: {
-  label: string;
-  hint: string;
-  on: boolean;
-  disabled: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <label class="flex items-start justify-between gap-4">
-      <span>
-        <span class="text-sm font-bold">{label}</span>
-        <span class="mt-1 block text-xs text-dim">{hint}</span>
-      </span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on ? "true" : "false"}
-        disabled={disabled}
-        onClick={onToggle}
-        class={
-          "relative inline-flex h-6 w-11 shrink-0 border border-ink transition-colors " +
-          (on ? "bg-link" : "bg-white") +
-          (disabled ? " opacity-50" : "")
-        }
-      >
-        <span
-          class={
-            "inline-block h-4 w-4 translate-y-[3px] transition-transform " +
-            (on ? "translate-x-[25px] bg-white" : "translate-x-[3px] bg-ink")
-          }
-        />
-      </button>
-    </label>
   );
 }
 
@@ -87,7 +47,7 @@ function matchesPreset(a: AccessSettings, p: AccessPreset) {
 }
 
 export function SettingsView() {
-  const { user, logout } = useAuth();
+  const { user, logout, reloadFeatures } = useAuth();
   const [s, setS] = useState<Settings | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -103,6 +63,7 @@ export function SettingsView() {
     setSaving(true);
     try {
       setS(await api.updateSettings(p));
+      if (p.features) reloadFeatures();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save.");
     } finally {
@@ -121,7 +82,17 @@ export function SettingsView() {
     approval: "content.require_approval",
     submissions: "content.accept_submissions",
     passwordLogin: "access.password_login",
+    defaultCollections: "content.default_collections",
   };
+  const FEATURES: { key: keyof Features; label: string; hint: string }[] = [
+    { key: "comments", label: "Comments", hint: "Members comment on posts: <friendo-comments>, record.comments, and the moderation queue." },
+    { key: "reactions", label: "Reactions", hint: "Emoji reactions on posts and comments: <friendo-reactions>, record.reactions." },
+    { key: "polls", label: "Polls", hint: "Polls in a post's front matter: <friendo-poll>, record.poll." },
+    { key: "rsvp", label: "RSVPs", hint: "Going / maybe / can't go on events: <friendo-rsvp>, record.rsvps, and the Attendees list." },
+    { key: "locations", label: "Map pins", hint: "Pins on posts: <friendo-map>, record.location, and the editor's Where section." },
+    { key: "channels", label: "Channels", hint: "Realtime chat and feeds: <friendo-channel>." },
+  ];
+  const DEFAULTS = ["blog", "pages", "posts"];
   const isManaged = (k: string) => s?.managed?.includes(k) ?? false;
   const accessManaged = isManaged(MK.defaultRole) || isManaged(MK.signups) || isManaged(MK.approval);
   const managedHint = (base: string, k: string) => (isManaged(k) ? base + " · Set in friendo.toml." : base);
@@ -147,6 +118,62 @@ export function SettingsView() {
         <p class="mt-4 text-xs text-dim">
           Site name and content types are configured in <code class="bg-tint px-1.5 py-0.5">friendo.toml</code>.
         </p>
+      </div>
+
+      <h2 class="mb-3 text-sm font-bold text-dim">Content</h2>
+      <div class="mb-8 bg-white p-6 border border-ink">
+        {s && !s.content.types_declared && (
+          <div class="mb-6 border-b border-ink pb-6" data-default-collections>
+            <p class="text-sm font-bold">Built-in collections</p>
+            <p class="mb-2 text-xs text-dim">
+              {managedHint(
+                "Shown in the content sidebar while friendo.toml lists no [content] types. A collection you start yourself appears regardless.",
+                MK.defaultCollections
+              )}
+            </p>
+            <div class="flex flex-wrap gap-4">
+              {DEFAULTS.map((name) => (
+                <label key={name} class="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name={`default-${name}`}
+                    checked={s.content.default_collections.includes(name)}
+                    disabled={saving || isManaged(MK.defaultCollections)}
+                    onChange={(e) => {
+                      const on = (e.target as HTMLInputElement).checked;
+                      const next = DEFAULTS.filter((n) => (n === name ? on : s.content.default_collections.includes(n)));
+                      patch({ content: { default_collections: next } });
+                    }}
+                  />
+                  {name}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        <ContentToml />
+      </div>
+
+      <h2 class="mb-3 text-sm font-bold text-dim">Features</h2>
+      <div class="mb-8 bg-white p-6 border border-ink">
+        <p class="mb-4 text-xs text-dim">
+          Turn a community feature off and the site refuses it: its API says no, its <code>&lt;friendo-*&gt;</code> tag
+          shows nothing, and a page's <code>record.…</code> for it is empty. What people already wrote is kept for when
+          it comes back.
+        </p>
+        <div class="space-y-4" data-features>
+          {s &&
+            FEATURES.map((f) => (
+              <Toggle
+                key={f.key}
+                label={f.label}
+                hint={managedHint(f.hint, `features.${f.key}`)}
+                on={s.features[f.key]}
+                disabled={saving || isManaged(`features.${f.key}`)}
+                onToggle={() => patch({ features: { [f.key]: !s.features[f.key] } })}
+              />
+            ))}
+        </div>
       </div>
 
       <h2 class="mb-3 text-sm font-bold text-dim">Access &amp; roles</h2>

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "marked": "^18.0.14",
     "preact": "^10.27.0",
     "preact-iso": "^2.12.0"
   },

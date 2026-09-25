@@ -1,18 +1,17 @@
 /* docs.friendo.world — the friendo house style, set for reading.
-   Paper and ink: an off-white page, black hairlines, no rounded corners, no
-   shadows. Liberation Sans for everything, its Narrow cut in bold for small
-   labels, Courier for code. */
+   Paper and ink: a white page, black hairlines, no rounded corners, no
+   shadows. Liberation Sans for everything, in bold for small labels, headings
+   and the wordmark; Courier for code. Links are blue. Named CSS colours on purpose. */
 
 @font-face { font-family: "Liberation Sans"; font-weight: normal; src: url("/assets/fonts/LiberationSans-Regular.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "Liberation Sans"; font-style: italic; src: url("/assets/fonts/LiberationSans-Italic.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "Liberation Sans"; font-weight: bold; src: url("/assets/fonts/LiberationSans-Bold.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "Liberation Sans"; font-stretch: condensed; src: url("/assets/fonts/LiberationSansNarrow-Regular.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "Liberation Sans"; font-weight: bold; font-stretch: condensed; src: url("/assets/fonts/LiberationSansNarrow-Bold.woff2") format("woff2"); font-display: swap; }
 
 :root {
-  --paper: lightyellow;
-  --tint: white;
+  --paper: white;
+  --tint: lightyellow;
   --manila: navajowhite;
+  --link: blue;
   --ink: black;
   --dim: dimgray;
   --rule: black;
@@ -33,28 +32,31 @@ body {
   -webkit-font-smoothing: antialiased;
   text-wrap: pretty;
 }
-a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
 a:hover { text-decoration: none; }
+h1, h2, h3, h4 { font-weight: bold; line-height: 1.1; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+b, strong { font-weight: bold; }
+em { font-style: italic; }
 ::selection { background: var(--manila); color: black; }
 
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 8px; top: 8px; background: var(--manila); color: black; padding: 8px 12px; z-index: 20; }
 
-/* Type helpers. .label is the small condensed bold text used for kickers, nav and rule headers. */
+/* Type helpers. .label is the small bold text used for kickers, nav and rule headers. */
 .label {
-  font-stretch: condensed; font-weight: bold;
-  letter-spacing: 0; font-size: 0.8rem; line-height: 1.2;
+  font-weight: bold;
+  letter-spacing: 0.02em; font-size: 0.85rem; line-height: 1.3;
 }
 .rule-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
   border-bottom: 1px solid var(--rule); padding-bottom: 2px; margin: 0 0 0.75rem;
 }
-.rule-head .right { font-stretch: normal; font-weight: normal; text-align: right; }
+.rule-head .right { font-weight: normal; text-align: right; }
 .badge {
   display: inline-block; vertical-align: 0.1em;
   background: var(--ink); color: var(--paper);
   padding: 2px 5px 1px; border-radius: 5px;
-  font-size: 0.6rem; font-weight: bold; letter-spacing: 0; line-height: 1.2;
+  font-size: 0.6rem; font-weight: bold; letter-spacing: 0.03em; line-height: 1.2;
 }
 .dim { color: var(--dim); }
 
@@ -67,8 +69,8 @@ a:hover { text-decoration: none; }
   display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
 }
 .masthead .brand { text-decoration: none; color: var(--ink); display: inline-flex; align-items: baseline; gap: 0.5rem; }
-.masthead .brand .word { font-weight: bold; font-size: 1.25rem; letter-spacing: -0.01em; line-height: 1; }
-.masthead .brand .flower { font-size: 1.1rem; line-height: 1; }
+.masthead .brand .word { font-weight: bold; font-size: 1.25rem; letter-spacing: 0.01em; line-height: 1; }
+.masthead .brand .flower { font-size: 1.1rem; line-height: 1; font-weight: normal; }
 .masthead .brand .label { color: var(--dim); }
 .masthead .home { color: var(--ink); text-decoration: none; }
 .masthead .home:hover { text-decoration: underline; }
@@ -93,7 +95,7 @@ a:hover { text-decoration: none; }
   color: var(--ink); text-decoration: none; font-size: 0.925rem;
 }
 .sidebar nav a:hover { text-decoration: underline; }
-.sidebar nav a.active { background: var(--manila); color: black; font-weight: bold; }
+.sidebar nav a.active { color: var(--link); font-weight: bold; }
 
 /* Content */
 .content { flex: 1 1 auto; min-width: 0; padding: 2rem 2rem 5rem; }
@@ -118,7 +120,7 @@ a:hover { text-decoration: none; }
 code, kbd, pre { font-family: var(--mono); font-size: 0.95em; }
 code { padding: 0 0.15em; }
 pre {
-  background: var(--tint); border: 1px solid var(--rule);
+  background: var(--tint); border: 1px solid var(--rule); max-width: 100%;
   padding: 0.85rem 1rem; margin: 1rem 0; overflow-x: auto;
   line-height: 1.4; font-size: 0.9rem;
 }
@@ -130,7 +132,7 @@ pre code { padding: 0; font-size: inherit; }
 .doc-body th, .doc-body td { border: 1px solid var(--rule); padding: 0.45rem 0.65rem; text-align: left; vertical-align: top; }
 .doc-body th {
   background: var(--tint);
-  font-stretch: condensed; font-weight: bold; letter-spacing: 0; font-size: 0.75rem;
+  font-weight: bold; letter-spacing: 0.02em; font-size: 0.8rem;
 }
 
 /* Blockquotes: a manila note. */
@@ -147,13 +149,16 @@ pre code { padding: 0; font-size: inherit; }
 .hero { padding: 0.5rem 0 1.5rem; }
 .hero h1 { font-size: clamp(2rem, 4.5vw, 2.6rem); line-height: 1.1; margin: 0 0 0.6rem; letter-spacing: -0.01em; }
 .lead { font-size: 1.1rem; max-width: 46ch; margin: 0 0 1rem; }
+
+/* Button: black block. Slightly heavier top padding so the text sits on the
+   baseline of the box. */
 .button {
-  display: inline-block; padding: 10px 12px 7px; line-height: 1.2;
-  font-size: 0.8rem; font-weight: bold; font-stretch: condensed;
-  letter-spacing: 0; text-decoration: none;
-  border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+  display: inline-block; padding: 10px 14px 8px; line-height: 1.2;
+  font: inherit; font-size: 0.85rem; font-weight: bold;
+  letter-spacing: 0.03em; text-decoration: none;
+  cursor: pointer; border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
 }
-.button:hover { background: var(--manila); color: black; border-color: black; }
+.button:hover { background: var(--link); color: var(--paper); border-color: var(--link); }
 
 .guide { margin: 2rem 0; }
 .guide .group { margin: 0 0 1.5rem; }
@@ -164,12 +169,14 @@ pre code { padding: 0; font-size: inherit; }
 .guide li a:hover { text-decoration: underline; }
 .guide li .n { display: inline-block; width: 2.5ch; color: var(--ink); font-size: 0.8rem; }
 
+/* Numbered cells with shared hairlines */
 .start {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px;
   background: var(--rule); border: 1px solid var(--rule); margin: 1.5rem 0 2rem;
 }
-.start a { background: var(--paper); padding: 1rem 1rem 1.1rem; text-decoration: none; display: block; }
+.start a { background: var(--paper); color: var(--ink); padding: 1rem 1rem 1.1rem; text-decoration: none; display: block; }
 .start a:hover { background: var(--tint); }
+.start a:hover h3 { color: var(--link); }
 .start .n { display: block; margin-bottom: 0.6rem; color: var(--dim); }
 .start h3 { font-size: 1.05rem; margin: 0 0 0.3rem; line-height: 1.2; }
 .start p { margin: 0; color: var(--dim); font-size: 0.95rem; }
@@ -182,7 +189,7 @@ pre code { padding: 0; font-size: inherit; }
   .content { padding: 1.5rem var(--gutter) 4rem; }
   .navtoggle-btn {
     display: block; position: sticky; top: var(--masthead-h); z-index: 5;
-    background: var(--manila); color: black; border-bottom: 1px solid black;
+    background: var(--paper); color: var(--ink); border-bottom: 1px solid var(--rule);
     padding: 0.55rem var(--gutter) 0.4rem; cursor: pointer;
   }
   .sidebar {
@@ -206,5 +213,5 @@ pre code { padding: 0; font-size: inherit; }
   .doc { max-width: none; }
   pre { border: 1px solid black; background: none; white-space: pre-wrap; }
   .doc-body blockquote { background: none; }
-  a { text-decoration: none; }
+  a { color: black; text-decoration: none; }
 }

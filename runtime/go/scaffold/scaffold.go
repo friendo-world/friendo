@@ -65,6 +65,15 @@ timezone = "%s"   # the zone an event's time is read in (an IANA name)
 [content]
 types = ["blog", "events", "pages"]
 
+# Optional: the fields a type's records carry, so the admin lays out its table and
+# form from them (and they travel with the folder). A bare string is the kind: text,
+# paragraph, number, checkbox, tags, image or json. A table adds choices, required
+# and a hint. Records can still carry other fields; these are just the known ones.
+# [content.blog.fields]
+# tags  = "tags"
+# cover = "image"
+# mood  = { kind = "text", choices = ["calm", "wild"], required = true, hint = "How it feels" }
+
 # Optional: make this file the source of truth for these site settings. Uncomment a
 # key and it is applied on startup and shown read-only in the admin UI (Settings).
 # [settings]
@@ -74,6 +83,8 @@ types = ["blog", "events", "pages"]
 # accept_submissions = false      # let members submit posts via <friendo-form> (into the review queue)
 # auto_approve = false            # publish new comments immediately instead of queuing them
 # password_login = false          # also allow signing in with a password (everyone can always use an emailed code)
+# comments = true                 # feature switches (Settings → Features): comments, reactions, polls, rsvp, locations, channels
+# default_collections = ["blog", "pages", "posts"]   # built-in collections listed while [content] types is unset
 
 # Optional: members-only paths. A page can also gate itself with {%% members only %%}
 # (or editors only, admins only …) at the top of its template. Restart to apply.

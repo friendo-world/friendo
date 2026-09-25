@@ -56,7 +56,10 @@ Push local state to your deployed site.
 
 ### `friendo pull`
 Pull remote state into your local database. Use `--data` for records and/or
-`--users` for accounts (`--target` to override).
+`--users` for accounts (`--target` to override). Every pull also rewrites the
+`[content]` block of your `friendo.toml` to list the site's collections and the
+fields their records carry (see [Configuration](/docs/config#content)); the rest of
+the file is left alone.
 
 ## Accounts & networks
 

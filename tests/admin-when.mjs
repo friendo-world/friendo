@@ -1,8 +1,9 @@
-// Admin browser check for the record form's When and Where sections: boots the Go
+// Admin browser check for the record panel's When and Where sections: boots the Go
 // runtime over a throwaway site, signs the browser in as the owner, creates a
 // record through the SPA with a weekly time and a map pin, then reopens it and
-// confirms the form shows what was saved and that the API holds the event and the
-// pin. Needs no network. Run with `npm run test:sdk`. Usage: node tests/admin-when.mjs
+// confirms the panel shows what was saved and that the API holds the event and the
+// pin. Needs no network. Run with `npm run test:sdk` (which rebuilds the embedded
+// SPA first). Usage: node tests/admin-when.mjs
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
@@ -68,11 +69,11 @@ try {
 
   // Create: a weekly event with an end date and a pin.
   await page.goto(ORIGIN + "/_/collections/events/new", { waitUntil: "load" });
-  await page.locator("form input[type=text]").first().waitFor({ timeout: 10000 });
-  const inputs = page.locator("form input[type=text]");
-  await inputs.nth(0).fill("Choir practice"); // title
-  await inputs.nth(1).fill("choir"); // slug
-  await page.locator("form select").first().selectOption("published");
+  const panel = page.locator("[data-panel]");
+  await panel.locator('input[name="title"]').waitFor({ timeout: 10000 });
+  await panel.locator('input[name="title"]').fill("Choir practice");
+  await panel.locator('input[name="slug"]').fill("choir");
+  await panel.locator('[data-section="status"] button[value="published"]').click();
   await page.locator('[data-section="when"] input[name="when"]').fill("2026-11-05T18:30");
   await page.locator('[data-section="when"] input[name="ends"]').fill("2026-11-05T20:00");
   await page.locator('[data-section="when"] select[name="repeats"]').selectOption("weekly");
@@ -99,11 +100,11 @@ try {
   if (locs.locations.length !== 1 || locs.locations[0].label !== "Eiffel Tower") throw new Error(`pin = ${JSON.stringify(locs)}`);
 
   // The list shows the time.
-  const cell = await page.locator("table tbody tr td").nth(3).innerText();
+  const cell = await page.locator('table tbody tr td[data-col="when"]').first().innerText();
   if (!/Nov 5/.test(cell) || !/weekly/.test(cell)) throw new Error(`When column = ${JSON.stringify(cell)}`);
 
   // Edit: the form reflects what was saved; clearing the start removes the event.
-  await page.goto(ORIGIN + "/_/records/" + rec.id + "/edit", { waitUntil: "load" });
+  await page.goto(ORIGIN + "/_/collections/events/" + rec.id, { waitUntil: "load" });
   const startsField = page.locator('[data-section="when"] input[name="when"]');
   await startsField.waitFor({ timeout: 10000 });
   await page.waitForFunction(() => document.querySelector('[data-section="when"] input[name="when"]').value !== "");

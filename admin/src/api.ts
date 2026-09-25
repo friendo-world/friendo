@@ -7,18 +7,26 @@ export type Role = "owner" | "admin" | "editor" | "contributor" | "member";
 // Used to gate the admin UI; the server enforces the real checks.
 export type Capability =
   | "content.create"
+  | "content.edit.own"
   | "content.edit.any"
+  | "content.publish"
   | "comment.moderate.own"
+  | "comment.moderate.any"
   | "user.manage"
   | "site.configure"
   | "site.own";
 
-const ROLE_CAPS: Record<Role, Capability[]> = {
+// Each role holds everything the one below it does, exactly as the server grants
+// them (runtime/go/data/data.go, roleCapabilities).
+const CONTRIBUTOR: Capability[] = ["content.create", "content.edit.own", "comment.moderate.own"];
+const EDITOR: Capability[] = [...CONTRIBUTOR, "content.edit.any", "content.publish", "comment.moderate.any"];
+const ADMIN: Capability[] = [...EDITOR, "user.manage", "site.configure"];
+const ROLE_CAPS: { [role in Role]: Capability[] } = {
   member: [],
-  contributor: ["content.create", "comment.moderate.own"],
-  editor: ["content.create", "content.edit.any", "comment.moderate.own"],
-  admin: ["content.create", "content.edit.any", "comment.moderate.own", "user.manage", "site.configure"],
-  owner: ["content.create", "content.edit.any", "comment.moderate.own", "user.manage", "site.configure", "site.own"],
+  contributor: CONTRIBUTOR,
+  editor: EDITOR,
+  admin: ADMIN,
+  owner: [...ADMIN, "site.own"],
 };
 
 export function can(role: Role, cap: Capability): boolean {
@@ -61,13 +69,33 @@ export type AccessSettings = {
 // A request-code response: the code is only present in local dev (echo mode).
 export type CodeSent = { sent: boolean; emailed?: boolean; code?: string };
 
+// The community features a site can switch off (Settings → Features). Off means
+// the API refuses it, its <friendo-*> tag renders nothing, and the admin hides
+// its section; existing data is kept.
+export type Features = {
+  comments: boolean;
+  reactions: boolean;
+  polls: boolean;
+  rsvp: boolean;
+  locations: boolean;
+  channels: boolean;
+};
+
+export const ALL_FEATURES_ON: Features = { comments: true, reactions: true, polls: true, rsvp: true, locations: true, channels: true };
+
 export type Settings = {
   site: { name: string };
   collections: number;
   users: number;
   moderation: { auto_approve: boolean };
   access: AccessSettings;
-  content: { accept_submissions: boolean };
+  content: {
+    accept_submissions: boolean;
+    // Which built-in collections show when friendo.toml lists no [content] types.
+    default_collections: string[];
+    types_declared: boolean;
+  };
+  features: Features;
   // DB keys frozen by friendo.toml's [settings] block — rendered read-only.
   managed: string[];
 };
@@ -75,7 +103,8 @@ export type Settings = {
 export type SettingsPatch = {
   moderation?: { auto_approve: boolean };
   access?: Partial<AccessSettings>;
-  content?: { accept_submissions?: boolean };
+  content?: { accept_submissions?: boolean; default_collections?: string[] };
+  features?: Partial<Features>;
 };
 
 export class ApiError extends Error {
@@ -92,7 +121,11 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     // The admin identifies itself: on localhost with no email provider, the
     // runtime opens the admin without a sign-in for these calls only — a site's
     // own <friendo-*> tags never send this, so visitors stay visitors.
-    headers: { "X-Friendo-Admin": "1", ...(opts.body ? { "Content-Type": "application/json" } : {}) },
+    // A FormData body (file upload) sets its own multipart content type.
+    headers: {
+      "X-Friendo-Admin": "1",
+      ...(opts.body && !(opts.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
+    },
     ...opts,
   });
   if (!res.ok) {
@@ -109,7 +142,18 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
-export type Collection = { name: string; count: number };
+// A field friendo.toml declares for a content type ([content.<type>.fields]).
+export type DeclaredField = {
+  name: string;
+  kind: string; // text | paragraph | number | checkbox | tags | image | json
+  choices?: string[];
+  required?: boolean;
+  hint?: string;
+};
+
+// `declared` marks a collection named in friendo.toml's [content] types; the rest
+// exist because they have records (or are the built-in defaults).
+export type Collection = { name: string; count: number; declared: boolean; fields: DeclaredField[] };
 
 // A post's calendar time, as the API returns it (null for a post with no time).
 export type When = {
@@ -182,6 +226,19 @@ export type Location = {
   label: string;
 };
 
+// An uploaded image attached to a record. `field` names the record field it
+// belongs to ("photo", "gallery"); `url` is where it's served from.
+export type FileRow = {
+  id: string;
+  record_type: string;
+  record_id: string;
+  field: string;
+  url: string;
+  mime: string;
+  size: number;
+  created: string;
+};
+
 export type CommentStatus = "pending" | "approved" | "rejected";
 
 export type Comment = {
@@ -212,8 +269,13 @@ export const api = {
       body: JSON.stringify({ email, code }),
     }),
   logout: () => req<void>("/auth/logout", { method: "POST" }),
+  // Public: which community features the site has on.
+  features: () => req<{ features: Features }>("/features"),
 
-  collections: () => req<{ collections: Collection[] }>("/collections"),
+  // `declared` says whether friendo.toml has a [content] types list at all.
+  collections: () => req<{ collections: Collection[]; declared: boolean }>("/collections"),
+  // The [content] block that matches the site as it is, to paste into friendo.toml.
+  contentToml: () => req<{ toml: string }>("/content/toml"),
   records: (collection: string) =>
     req<{ records: Record[] }>(`/collections/${encodeURIComponent(collection)}/records`),
   record: (id: string) => req<{ record: Record }>(`/records/${encodeURIComponent(id)}`),
@@ -244,6 +306,20 @@ export const api = {
     }),
   removeLocation: (id: string) =>
     req<void>(`/locations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // Images attached to a record. Uploading needs the record to exist first, so a
+  // new record is saved, then its images go up, then the URLs are written back.
+  files: (recordId: string) =>
+    req<{ files: FileRow[] }>(`/files?record_type=post&record_id=${encodeURIComponent(recordId)}`),
+  uploadFile: (recordId: string, field: string, file: File) => {
+    const fd = new FormData();
+    fd.append("record_type", "post");
+    fd.append("record_id", recordId);
+    fd.append("field", field);
+    fd.append("file", file);
+    return req<{ file: FileRow }>("/files", { method: "POST", body: fd });
+  },
+  deleteFile: (id: string) => req<void>(`/files/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   // Post-review queue (editor+)
   recordsByStatus: (status: string) =>

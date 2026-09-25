@@ -11,12 +11,11 @@ Content in Friendo lives in your site's database as **records**, grouped into
 ## Built-in content types
 
 Friendo ships with content types that work identically on your machine and in the
-cloud. Enable the ones you need in [`friendo.toml`](/docs/config):
-
-```toml
-[content]
-types = ["posts", "comments", "reactions"]
-```
+cloud. The community ones — comments, reactions, polls, RSVPs, map pins, channels —
+are all on to begin with; switch any off in the admin under **Settings → Features**
+(or freeze the switch in [`friendo.toml`](/docs/config#settings)). Off, the feature's
+API refuses it, its `<friendo-*>` tag shows nothing, and templates see it as empty;
+what people already wrote is kept for when it comes back.
 
 | Type | What it's for | In templates |
 |---|---|---|
@@ -54,7 +53,11 @@ A record has fields like `id`, `slug`, `title`, `body`, `status`, `created`, and
 
 Every Friendo site has an admin UI at `/_/` for creating and editing records —
 the same UI locally and when deployed. It's a content editor, user management,
-and settings, backed by the site's REST API.
+and settings, backed by the site's REST API. A collection's records show up as a
+table whose columns are the fields its records actually have; opening a record
+edits every field in its `data` (and lets you add one), plus the When and Where
+sections. Records that come from `content/` files say so, since the file wins on
+the next import.
 
 ## Authoring in files (content/)
 

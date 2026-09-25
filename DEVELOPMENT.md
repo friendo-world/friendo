@@ -206,7 +206,7 @@ The SPA talks to the REST API under `/_/api/*`, served by the Go runtime
 ```bash
 npm run admin:install   # first time only
 npm run admin:dev       # Vite dev server with hot reload
-# point its API calls at a running runtime, e.g. `npm run serve` on :3000
+# its /_/api calls are proxied to a running runtime on :3000 (`npm run serve`)
 ```
 
 `npm run build` rebuilds the SPA before compiling, so the embedded bundle stays

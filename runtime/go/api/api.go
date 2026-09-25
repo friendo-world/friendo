@@ -43,9 +43,13 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 	// declares: apply them to the DB now (overwriting any admin edit) and mark them
 	// so the settings API reports them read-only and refuses to change them.
 	managed := applyManagedSettings(db, siteDir)
+	// [content] types and their fields, read once; the admin lays itself out from them.
+	contentTypes, typesDeclared := loadContentTypes(siteDir)
 	r.Route("/api", func(r chi.Router) {
 		// Public endpoints — used by the SPA to bootstrap and authenticate.
 		r.Get("/me", handleMe(authFunc))
+		// Which community features are on (Settings → Features).
+		r.Get("/features", handleFeatures(db))
 
 		// Personas: an account's author profiles. Any authenticated member may
 		// list/create their own and pick which one their comments/messages use.
@@ -64,38 +68,40 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// Community: public reads, member-gated writes. These self-gate rather
 		// than joining the admin group — reads are open, and a write needs only
 		// an authenticated member (any role), not admin.
-		r.Get("/posts/{id}/comments", handleListComments(db, authFunc))
-		r.Post("/posts/{id}/comments", handlePostComment(db, authFunc))
-		r.Get("/reactions", handleListReactions(db, authFunc))
-		r.Post("/reactions", handleToggleReaction(db, authFunc))
+		r.Get("/posts/{id}/comments", featureGate(db, "comments", handleListComments(db, authFunc)))
+		r.Post("/posts/{id}/comments", featureGate(db, "comments", handlePostComment(db, authFunc)))
+		r.Get("/reactions", featureGate(db, "reactions", handleListReactions(db, authFunc)))
+		r.Post("/reactions", featureGate(db, "reactions", handleToggleReaction(db, authFunc)))
 
 		// Channels & messages (community feed): public reads, member-gated posts.
-		r.Get("/channels", handleListChannels(db))
-		r.Get("/channels/{id}/messages", handleListMessages(db, authFunc))
-		r.Get("/channels/{id}/stream", handleChannelStream(db)) // SSE: live new messages
-		r.Post("/channels/{id}/messages", handlePostMessage(db, authFunc))
-		r.Delete("/messages/{id}", handleDeleteMessage(db, authFunc))
+		r.Get("/channels", featureGate(db, "channels", handleListChannels(db)))
+		r.Get("/channels/{id}/messages", featureGate(db, "channels", handleListMessages(db, authFunc)))
+		r.Get("/channels/{id}/stream", featureGate(db, "channels", handleChannelStream(db))) // SSE: live new messages
+		r.Post("/channels/{id}/messages", featureGate(db, "channels", handlePostMessage(db, authFunc)))
+		r.Delete("/messages/{id}", featureGate(db, "channels", handleDeleteMessage(db, authFunc)))
 		// RSVP: public counts; a signed-in member answers (going / not_going /
 		// maybe) for one occurrence of a post's event. Names for organizers only.
-		r.Get("/posts/{id}/rsvps", handleGetRSVPs(db, authFunc))
-		r.Post("/posts/{id}/rsvps", handleSetRSVP(db, authFunc))
-		r.Delete("/posts/{id}/rsvps", handleDeleteRSVP(db, authFunc))
-		r.Get("/posts/{id}/attendees", handleAttendees(db, authFunc))
-		r.Get("/polls/by-slug/{slug}", handleGetPollBySlug(db, authFunc))
-		r.Get("/polls/{id}", handleGetPoll(db, authFunc))
-		r.Post("/polls/{id}/vote", handleVotePoll(db, authFunc))
+		r.Get("/posts/{id}/rsvps", featureGate(db, "rsvp", handleGetRSVPs(db, authFunc)))
+		r.Post("/posts/{id}/rsvps", featureGate(db, "rsvp", handleSetRSVP(db, authFunc)))
+		r.Delete("/posts/{id}/rsvps", featureGate(db, "rsvp", handleDeleteRSVP(db, authFunc)))
+		r.Get("/posts/{id}/attendees", featureGate(db, "rsvp", handleAttendees(db, authFunc)))
+		r.Get("/polls/by-slug/{slug}", featureGate(db, "polls", handleGetPollBySlug(db, authFunc)))
+		r.Get("/polls/{id}", featureGate(db, "polls", handleGetPoll(db, authFunc)))
+		r.Post("/polls/{id}/vote", featureGate(db, "polls", handleVotePoll(db, authFunc)))
 
 		// Locations (geo-tagging): public reads; contributor+ attaches/removes
 		// (own posts) or editor+ (any). Ownership is enforced inside the handler,
 		// so the route gate is the lower content.edit.own capability.
-		r.Get("/locations", handleListLocations(db, permalink))
+		r.Get("/locations", featureGate(db, "locations", handleListLocations(db, permalink)))
 
 		// Files (per-record media): public reads; contributor+ uploads/removes.
 		r.Get("/files", handleListFiles(db))
 
 		// Content — contributor+ (holds content.create). The handlers scope to the
 		// actor's own posts unless they also hold content.edit.any.
-		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db)))
+		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db, contentTypes, typesDeclared)))
+		// The [content] block that matches the site as it is (to copy, or for `friendo pull`).
+		r.Get("/content/toml", capGate(authFunc, data.CapSiteConfigure, handleContentToml(db, contentTypes)))
 		r.Get("/collections/{collection}/records", capGate(authFunc, data.CapContentCreate, handleListRecords(db, authFunc)))
 		// Create self-gates: contributors+ (content.create) post directly; when the
 		// site opts in (content.accept_submissions), a signed-in member may submit a
@@ -111,20 +117,20 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 
 		// Comment moderation — contributor+ (moderate.own); scoped to own posts
 		// unless the actor holds moderate.any.
-		r.Get("/comments", capGate(authFunc, data.CapCommentModerateOwn, handleModerationList(db, authFunc)))
-		r.Put("/comments/{id}", capGate(authFunc, data.CapCommentModerateOwn, handleUpdateComment(db, authFunc)))
+		r.Get("/comments", featureGate(db, "comments", capGate(authFunc, data.CapCommentModerateOwn, handleModerationList(db, authFunc))))
+		r.Put("/comments/{id}", featureGate(db, "comments", capGate(authFunc, data.CapCommentModerateOwn, handleUpdateComment(db, authFunc))))
 		// Delete self-gates: a member may delete their own comment; moderators
 		// may delete comments they're allowed to moderate.
-		r.Delete("/comments/{id}", handleDeleteComment(db, authFunc))
+		r.Delete("/comments/{id}", featureGate(db, "comments", handleDeleteComment(db, authFunc)))
 
 		// Poll creation — editor+ (content.edit.any).
-		r.Post("/polls", capGate(authFunc, data.CapContentEditAny, handleCreatePoll(db)))
+		r.Post("/polls", featureGate(db, "polls", capGate(authFunc, data.CapContentEditAny, handleCreatePoll(db))))
 
 		// Location tagging — contributor+ (content.edit.own). The gate admits
 		// contributors; the handler then requires the actor to own the target post
 		// unless they also hold content.edit.any (editor+), mirroring the record API.
-		r.Post("/locations", capGate(authFunc, data.CapContentEditOwn, handleCreateLocation(db, authFunc)))
-		r.Delete("/locations/{id}", capGate(authFunc, data.CapContentEditOwn, handleDeleteLocation(db, authFunc)))
+		r.Post("/locations", featureGate(db, "locations", capGate(authFunc, data.CapContentEditOwn, handleCreateLocation(db, authFunc))))
+		r.Delete("/locations/{id}", featureGate(db, "locations", capGate(authFunc, data.CapContentEditOwn, handleDeleteLocation(db, authFunc))))
 
 		// Media upload — contributor+ (content.create). Bytes land in assets/ and
 		// are served by the static /assets/* handler; the row links them to a record.
@@ -132,8 +138,8 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Delete("/files/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteFile(db, siteDir, store)))
 
 		// Channel management — admin+ (site.configure); posting is member-gated above.
-		r.Post("/channels", capGate(authFunc, data.CapSiteConfigure, handleCreateChannel(db)))
-		r.Delete("/channels/{id}", capGate(authFunc, data.CapSiteConfigure, handleDeleteChannel(db)))
+		r.Post("/channels", featureGate(db, "channels", capGate(authFunc, data.CapSiteConfigure, handleCreateChannel(db))))
+		r.Delete("/channels/{id}", featureGate(db, "channels", capGate(authFunc, data.CapSiteConfigure, handleDeleteChannel(db))))
 
 		// Users — admin+ (user.manage). Granting admin/owner additionally needs
 		// site.own (enforced by canAssignRole).
@@ -143,8 +149,8 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Delete("/users/{id}", capGate(authFunc, data.CapUserManage, handleDeleteUser(db, authFunc)))
 
 		// Settings + sync — admin+ (site.configure).
-		r.Get("/settings", capGate(authFunc, data.CapSiteConfigure, handleSettings(db, siteName, managed)))
-		r.Put("/settings", capGate(authFunc, data.CapSiteConfigure, handleUpdateSettings(db, siteName, managed)))
+		r.Get("/settings", capGate(authFunc, data.CapSiteConfigure, handleSettings(db, siteName, managed, typesDeclared)))
+		r.Put("/settings", capGate(authFunc, data.CapSiteConfigure, handleUpdateSettings(db, siteName, managed, typesDeclared)))
 		r.Post("/push/templates", capGate(authFunc, data.CapSiteConfigure, handlePushTemplates(siteDir, onTemplatesChanged)))
 		r.Post("/push/assets", capGate(authFunc, data.CapSiteConfigure, handlePushAssets(siteDir, store)))
 		r.Post("/push/data", capGate(authFunc, data.CapSiteConfigure, handlePushData(db)))
@@ -177,11 +183,15 @@ func capGate(authFunc func(*http.Request) *data.User, cap data.Capability, h htt
 
 // --- Content (collections + records) ---
 
-// defaultCollections always appear in the collections list so a fresh site has
-// somewhere to create the first record. Both runtimes use the same set.
+// defaultCollections appear in the collections list when friendo.toml declares no
+// [content] types, so a fresh site has somewhere to create the first record.
 var defaultCollections = []string{"blog", "pages", "posts"}
 
-func handleListCollections(db *data.DB) http.HandlerFunc {
+// handleListCollections lists the site's collections: the types friendo.toml
+// declares (in that order, with their fields), then any other collection that
+// has records — a collection can be started ad hoc, and the toml can catch up
+// later (see handleContentToml). With no declared types, the defaults stand in.
+func handleListCollections(db *data.DB, types []ContentType, declared bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		counts, err := db.CollectionCounts()
 		if err != nil {
@@ -193,18 +203,29 @@ func handleListCollections(db *data.DB) http.HandlerFunc {
 			byName[c.Name] = c.Count
 		}
 
-		out := []data.CollectionCount{}
+		out := []collectionInfo{}
 		seen := map[string]bool{}
-		for _, name := range defaultCollections {
-			out = append(out, data.CollectionCount{Name: name, Count: byName[name]})
-			seen[name] = true
+		if declared {
+			for _, t := range types {
+				fields := t.Fields
+				if fields == nil {
+					fields = []FieldDecl{}
+				}
+				out = append(out, collectionInfo{Name: t.Name, Count: byName[t.Name], Declared: true, Fields: fields})
+				seen[t.Name] = true
+			}
+		} else {
+			for _, name := range defaultCollectionsFor(db) {
+				out = append(out, collectionInfo{Name: name, Count: byName[name], Fields: []FieldDecl{}})
+				seen[name] = true
+			}
 		}
 		for _, c := range counts {
 			if !seen[c.Name] {
-				out = append(out, c)
+				out = append(out, collectionInfo{Name: c.Name, Count: c.Count, Fields: []FieldDecl{}})
 			}
 		}
-		jsonResponse(w, map[string]any{"collections": out})
+		jsonResponse(w, map[string]any{"collections": out, "declared": declared})
 	}
 }
 
@@ -2690,6 +2711,15 @@ type tomlSettingsConfig struct {
 		RequireApproval   *bool   `toml:"require_approval"`
 		AcceptSubmissions *bool   `toml:"accept_submissions"`
 		PasswordLogin     *bool   `toml:"password_login"`
+		// Feature switches (see data.Features) and the built-in collections a
+		// site without [content] types shows.
+		Comments           *bool    `toml:"comments"`
+		Reactions          *bool    `toml:"reactions"`
+		Polls              *bool    `toml:"polls"`
+		RSVP               *bool    `toml:"rsvp"`
+		Locations          *bool    `toml:"locations"`
+		Channels           *bool    `toml:"channels"`
+		DefaultCollections []string `toml:"default_collections"`
 	} `toml:"settings"`
 }
 
@@ -2739,13 +2769,27 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 			log.Printf("friendo.toml: ignoring invalid [settings] default_role %q (want \"member\" or \"contributor\")", *s.DefaultRole)
 		}
 	}
+	for name, v := range map[string]*bool{
+		"comments": s.Comments, "reactions": s.Reactions, "polls": s.Polls,
+		"rsvp": s.RSVP, "locations": s.Locations, "channels": s.Channels,
+	} {
+		if v != nil {
+			set(data.FeatureSetting(name), boolSetting(*v))
+		}
+	}
+	if s.DefaultCollections != nil {
+		set(settingDefaultCollections, strings.Join(normalizeDefaultCollections(s.DefaultCollections), ","))
+	}
 	return managed
 }
 
 // managedList returns the managed setting keys in a stable order for the API, so the
 // admin SPA can render those controls read-only.
 func managedList(managed map[string]bool) []string {
-	order := []string{settingAutoApprove, settingDefaultRole, settingSignupsEnabled, settingRequireApproval, settingAcceptSubmissions, settingPasswordLogin}
+	order := []string{settingAutoApprove, settingDefaultRole, settingSignupsEnabled, settingRequireApproval, settingAcceptSubmissions, settingPasswordLogin, settingDefaultCollections}
+	for _, f := range data.Features {
+		order = append(order, data.FeatureSetting(f))
+	}
 	out := []string{}
 	for _, k := range order {
 		if managed[k] {
@@ -2764,7 +2808,7 @@ func boolSetting(b bool) string {
 
 // settingsPayload builds the settings object returned by GET/PUT /settings. The
 // `managed` list names the keys frozen by friendo.toml's [settings] block.
-func settingsPayload(db *data.DB, siteName string, managed map[string]bool) map[string]any {
+func settingsPayload(db *data.DB, siteName string, managed map[string]bool, typesDeclared bool) map[string]any {
 	users, _ := db.ListUsers()
 	counts, _ := db.CollectionCounts()
 	return map[string]any{
@@ -2779,15 +2823,18 @@ func settingsPayload(db *data.DB, siteName string, managed map[string]bool) map[
 			"password_login":   db.GetBoolSetting(settingPasswordLogin, false),
 		},
 		"content": map[string]any{
-			"accept_submissions": db.GetBoolSetting(settingAcceptSubmissions, false),
+			"accept_submissions":  db.GetBoolSetting(settingAcceptSubmissions, false),
+			"default_collections": defaultCollectionsFor(db),
+			"types_declared":      typesDeclared,
 		},
-		"managed": managedList(managed),
+		"features": featuresMap(db),
+		"managed":  managedList(managed),
 	}
 }
 
-func handleSettings(db *data.DB, siteName string, managed map[string]bool) http.HandlerFunc {
+func handleSettings(db *data.DB, siteName string, managed map[string]bool, typesDeclared bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse(w, settingsPayload(db, siteName, managed))
+		jsonResponse(w, settingsPayload(db, siteName, managed, typesDeclared))
 	}
 }
 
@@ -2796,7 +2843,7 @@ func handleSettings(db *data.DB, siteName string, managed map[string]bool) http.
 // member-submissions toggle. Keys frozen by friendo.toml's [settings] block are
 // silently skipped — the SPA disables them, and this keeps the DB from drifting from
 // the file (which would just overwrite it on the next start anyway).
-func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool) http.HandlerFunc {
+func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool, typesDeclared bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Moderation *struct {
@@ -2809,8 +2856,10 @@ func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool)
 				PasswordLogin   *bool   `json:"password_login"`
 			} `json:"access"`
 			Content *struct {
-				AcceptSubmissions *bool `json:"accept_submissions"`
+				AcceptSubmissions  *bool    `json:"accept_submissions"`
+				DefaultCollections []string `json:"default_collections"`
 			} `json:"content"`
+			Features map[string]*bool `json:"features"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
@@ -2841,7 +2890,16 @@ func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool)
 		if in.Content != nil && in.Content.AcceptSubmissions != nil && !managed[settingAcceptSubmissions] {
 			db.SetSetting(settingAcceptSubmissions, boolSetting(*in.Content.AcceptSubmissions))
 		}
-		jsonResponse(w, settingsPayload(db, siteName, managed))
+		if in.Content != nil && in.Content.DefaultCollections != nil && !managed[settingDefaultCollections] {
+			db.SetSetting(settingDefaultCollections, strings.Join(normalizeDefaultCollections(in.Content.DefaultCollections), ","))
+		}
+		for name, v := range in.Features {
+			if v == nil || data.FeatureLabel[name] == "" || managed[data.FeatureSetting(name)] {
+				continue
+			}
+			db.SetSetting(data.FeatureSetting(name), boolSetting(*v))
+		}
+		jsonResponse(w, settingsPayload(db, siteName, managed, typesDeclared))
 	}
 }
 

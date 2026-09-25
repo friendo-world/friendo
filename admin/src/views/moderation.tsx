@@ -7,7 +7,8 @@ const TABS: { key: CommentStatus; label: string }[] = [
   { key: "rejected", label: "Rejected" },
 ];
 
-export function Moderation() {
+// Comments by status, as a section of the Moderation page.
+export function CommentsQueue() {
   const [status, setStatus] = useState<CommentStatus>("pending");
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [error, setError] = useState("");
@@ -43,9 +44,9 @@ export function Moderation() {
   }
 
   return (
-    <div class="mx-auto max-w-[960px] px-4 py-8">
-      <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-xl font-bold">Comments</h1>
+    <section data-section="comments">
+      <div class="mb-3 flex items-center justify-between">
+        <h2 class="text-sm font-bold text-dim">Comments</h2>
         <div class="flex border border-ink">
           {TABS.map((t, i) => (
             <button
@@ -109,6 +110,6 @@ export function Moderation() {
           <p class="text-sm text-dim">No {status} comments.</p>
         </div>
       )}
-    </div>
+    </section>
   );
 }

@@ -27,11 +27,50 @@ types = ["posts", "comments", "reactions"]
 
 | Key | What |
 |---|---|
-| `types` | The [content types](/docs/content) your site uses — a hint for tooling |
+| `types` | The site's [content types](/docs/content) — the collections the admin lists, in this order |
 
-`types` documents which collections your site works with. Collections themselves
-are created simply by having records in them (via the admin UI, the API, or a
-`content/` folder), so this is descriptive rather than enforced.
+```toml
+[content]
+types = ["blog", "events", "pages"]
+```
+
+The admin lists these first, in this order, then any other collection that has
+records — a collection exists simply by having records in it (via the admin, the
+API, or a `content/` folder), so you can start one ad hoc and let the file catch up.
+Leave the key out and the admin shows the built-in defaults (`blog`, `pages`,
+`posts`) plus whatever has records.
+
+**Keeping the file in step.** A collection that isn't in `types` yet is marked ✱ in
+the admin. The **friendo.toml** button on any collection shows the `[content]` block
+that matches the site right now — every collection and the fields its records carry —
+to paste into your file. `friendo pull` writes that same block into your local
+`friendo.toml` for you (only the `[content]` section; everything else is left alone).
+
+### Fields
+
+Optionally, say which fields a type's records carry. The admin then shows those
+fields on every record of the type (even before a record has them), uses them as the
+table's columns, and checks `required` and `choices` before saving. Because it's in
+`friendo.toml`, it travels with the folder to every install of the site.
+
+```toml
+[content.blog.fields]
+tags   = "tags"
+cover  = "image"
+weight = "number"
+mood   = { kind = "text", choices = ["calm", "wild"], required = true, hint = "How the post feels" }
+```
+
+A bare string is the field's **kind**: `text`, `paragraph`, `number`, `checkbox`,
+`tags`, `image` or `json`. A table adds `choices` (a menu instead of free text),
+`required`, and a `hint` shown under the field. Field names can't be one of a
+record's own fields (`title`, `slug`, `body`, `status`, …) or the calendar keys
+(`when`, `ends`, `repeats`, …), which the [When section](/docs/calendar) owns.
+
+This describes the fields; it doesn't restrict them. A record can still carry any
+other key — from a `content/` file's front matter, a `<friendo-form>`, or the
+admin's *Add a field* — and the admin shows those after the declared ones. The
+records API accepts any data either way.
 
 ## `[settings]`
 
@@ -50,6 +89,8 @@ require_approval = false        # hold contributor posts for review before publi
 accept_submissions = false      # let members submit posts via <friendo-form> (into the review queue)
 auto_approve = false            # publish new comments immediately instead of queuing them
 password_login = false          # also allow signing in with a password (everyone can always use an emailed code)
+comments = true                 # feature switches: comments, reactions, polls, rsvp, locations, channels
+default_collections = ["blog", "pages"]   # built-in collections shown when [content] types is unset
 ```
 
 | Key | What | Default |
@@ -60,6 +101,8 @@ password_login = false          # also allow signing in with a password (everyon
 | `accept_submissions` | Let signed-in members submit posts from a [`<friendo-form>`](/docs/community#submitting-posts-from-a-page) into the review queue | `false` |
 | `auto_approve` | Publish new comments immediately instead of queuing them for moderation | `false` |
 | `password_login` | Also allow signing in with a password. Off, everyone signs in with a code sent to their email — see [Auth & users](/docs/auth) | `false` |
+| `comments`, `reactions`, `polls`, `rsvp`, `locations`, `channels` | Feature switches (admin **Settings → Features**). Off, the feature's API refuses reads and writes with `403` and `off: true`, its `<friendo-*>` tag renders nothing, and `record.comments` (and so on) is empty in templates. What people already wrote is kept | `true` |
+| `default_collections` | Which of the built-in collections (`blog`, `pages`, `posts`) the admin lists while `[content] types` is unset | all three |
 
 Changes take effect on the next start (like `[site].name`). Keys you leave out are
 managed in the admin UI and travel to a deployed site with `friendo push --data`.

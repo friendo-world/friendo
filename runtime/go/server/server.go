@@ -925,19 +925,29 @@ func attachRecordRelations(db *data.DB, record map[string]any) {
 		return
 	}
 
+	// A feature that's switched off (Settings → Features) renders as if the
+	// post had none of it, so a template's {% if record.comments %} stays quiet.
+
 	// Approved comments, oldest first (always present, possibly empty).
-	if comments, err := db.ListCommentsByPost(id, false); err == nil {
-		record["comments"] = comments
+	record["comments"] = []map[string]any{}
+	if db.FeatureOn("comments") {
+		if comments, err := db.ListCommentsByPost(id, false); err == nil {
+			record["comments"] = comments
+		}
 	}
 
 	// Reaction tallies (no server-side viewer → reacted is false).
-	if reactions, err := db.ReactionCounts("post", id, ""); err == nil {
-		record["reactions"] = reactions
+	if db.FeatureOn("reactions") {
+		if reactions, err := db.ReactionCounts("post", id, ""); err == nil {
+			record["reactions"] = reactions
+		}
+	} else {
+		record["reactions"] = []map[string]any{}
 	}
 
 	// Poll declared in the post's front matter (data.poll.slug), if any. Resolving
 	// lazily creates the poll on first view — matching the SDK/REST path.
-	if slug := recordPollSlug(record); slug != "" {
+	if slug := recordPollSlug(record); slug != "" && db.FeatureOn("polls") {
 		if pollID, err := db.ResolvePollBySlug(slug); err == nil {
 			if poll, err := db.GetPoll(pollID, ""); err == nil {
 				record["poll"] = poll
@@ -951,13 +961,21 @@ func attachRecordRelations(db *data.DB, record map[string]any) {
 	}
 
 	// The post's pin ({{ record.location.label }}), nil when it has none.
-	db.AttachLocations([]map[string]any{record})
+	if db.FeatureOn("locations") {
+		db.AttachLocations([]map[string]any{record})
+	} else {
+		record["location"] = nil
+	}
 
 	// The post's calendar series ({{ record.when }}), nil when it has no time,
 	// and the RSVP tally for its next occurrence ({{ record.rsvps.going }}).
 	if ev := db.EventFor(id); ev != nil {
 		record["when"] = ev.Map(time.Now())
-		record["rsvps"] = db.RSVPSummary(ev, time.Now())
+		if db.FeatureOn("rsvp") {
+			record["rsvps"] = db.RSVPSummary(ev, time.Now())
+		} else {
+			record["rsvps"] = nil
+		}
 	} else {
 		record["when"] = nil
 		record["rsvps"] = nil
