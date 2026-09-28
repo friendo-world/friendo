@@ -1,0 +1,21 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<h1>Chat</h1>
+<p>A realtime chat. Naming a chat is making it: this page says
+<code>chat-id="general"</code>, and the site registered <code>general</code> the
+first time the page was served. Sign in to post; messages stream in live.</p>
+
+<section class="community">
+    <div class="signin">
+        <h2>Sign in to join</h2>
+        <friendo-auth></friendo-auth>
+    </div>
+    <friendo-chat chat-id="general"></friendo-chat>
+</section>
+
+<style>
+    /* Your own bubbles and the Send button take the site's accent. */
+    friendo-chat { --chat-mine: var(--accent); }
+    friendo-chat::part(author) { color: var(--accent); font-weight: 600; }
+</style>
+{% endblock %}

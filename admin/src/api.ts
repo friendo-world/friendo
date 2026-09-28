@@ -78,10 +78,10 @@ export type Features = {
   polls: boolean;
   rsvp: boolean;
   locations: boolean;
-  channels: boolean;
+  chats: boolean;
 };
 
-export const ALL_FEATURES_ON: Features = { comments: true, reactions: true, polls: true, rsvp: true, locations: true, channels: true };
+export const ALL_FEATURES_ON: Features = { comments: true, reactions: true, polls: true, rsvp: true, locations: true, chats: true };
 
 export type Settings = {
   site: { name: string };

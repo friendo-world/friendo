@@ -721,6 +721,12 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 		return
 	}
 
+	// A page that names a chat makes it: <friendo-chat chat-id="general"> in the
+	// rendered markup registers `general` the first time it's served. The ids
+	// come out of the owner's own templates (a per-record chat-id included), so
+	// naming one is the whole act of making it.
+	registerChats(db, out)
+
 	// Inject live reload script before </body>.
 	out = strings.Replace(out, "</body>", liveReloadScript+"\n</body>", 1)
 
@@ -729,6 +735,22 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 	w.Header().Set("Vary", "Cookie")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, out)
+}
+
+// registerChats makes any chat a rendered page names that doesn't exist yet
+// (see data.ChatIDsInHTML). A no-op while the feature is off, so a switched-off
+// tag doesn't quietly grow rows.
+func registerChats(db *data.DB, html string) {
+	if !strings.Contains(html, "<friendo-chat") || !db.FeatureOn("chats") {
+		return
+	}
+	for _, id := range data.ChatIDsInHTML(html) {
+		if made, err := db.EnsureChat(id); err != nil {
+			log.Printf("Registering chat %q: %v", id, err)
+		} else if made {
+			log.Printf("New chat %q (named on a page)", id)
+		}
+	}
 }
 
 // baseContext is what every page render starts from: the site, the request, the

@@ -16,7 +16,7 @@ friendo/
 │   ├── src/              # Preact + TypeScript app
 │   └── vite.config.ts    # builds to runtime/go/admin/spa (committed)
 ├── sdk/                  # friendo.js — community Web Components, served at /friendo.js
-│   └── friendo.js        #   (auth/comments/reactions/poll/channel/map; committed)
+│   └── friendo.js        #   (auth/comments/reactions/poll/chat/map; committed)
 ├── runtime/
 │   └── go/               # Go runtime — THE runtime (local dev = self-host = friendo.world)
 │       ├── server/       # HTTP server, routing, hot reload (`friendo serve` — one site)

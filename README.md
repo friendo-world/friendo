@@ -127,8 +127,8 @@ Friendo ships with built-in content types — enable the ones your site needs.
 | **Posts** | Blog posts, pages, any authored content | `{{ collections.blog }}` |
 | **Comments** | Comments on any post | `{{ record.comments }}` or `<friendo-comments>` |
 | **Reactions** | Emoji reactions on posts or comments | `{{ record.reactions }}` or `<friendo-reactions>` |
-| **Channels** | Chat rooms, forums, feeds (realtime) | `<friendo-channel>` |
-| **Messages** | Messages within a channel | `<friendo-channel>` |
+| **Chats** | Chat rooms, forums, feeds (realtime) | `<friendo-chat>` |
+| **Messages** | Messages within a chat | `<friendo-chat>` |
 | **Polls** | Polls attached to posts | `{{ record.poll }}` or `<friendo-poll>` |
 | **Authors** | People (personas) who create content | `{{ record.author_name }}` |
 | **Locations** | Geotag any record | `<friendo-map>` |
@@ -223,9 +223,12 @@ All sync goes through the site's own `/_/api/*` endpoints, authenticated with si
 |---|---|---|
 | **Phase 1** | CLI + Go runtime + friendo.world foundation | Complete |
 | **Phase 1.5** | Auth, shared admin SPA + REST API, codebase refactor, working deploy | Complete |
-| **Phase 3** | Community features — visitor comments/reactions/polls, realtime channels, locations, media, the `friendo.js` SDK | Complete |
+| **Phase 3** | Community features — visitor comments/reactions/polls, realtime chats, locations, media, the `friendo.js` SDK | Complete |
 | **v0.2 / v0.3** | Public-safe hardening, then consolidation onto one Go runtime + network mode: server-side community rendering, page-bundle galleries, render/CLI/SDK test coverage, `<friendo-map>`, persona switcher | Complete |
-| **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned (0.4+) |
+| **v0.4** | The network opens: quotas, account + site management, custom domains | Complete |
+| **v0.5** | One sign-in (an emailed code everywhere, passwords opt-in); the network as a friendo site; members-only pages; a built-in calendar with RSVP; declared fields + feature switches + a rebuilt records admin | Complete |
+| **v0.6** | Social graph — following, groups, event invitations, richer profiles | Planned |
+| **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
 
 See [ROADMAP.md](ROADMAP.md) for details and known gaps.
 

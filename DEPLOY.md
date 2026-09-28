@@ -269,10 +269,11 @@ For friendo.world: `npm run deploy:www` and `npm run deploy:docs` publish this r
 - SQLite runs in WAL mode on block/NVMe storage. **Do not** put `/data` on NFS — its `fsync`
   semantics can corrupt SQLite.
 
-## 6. Cutting friendo.world over
+## 6. Cutting a domain over
 
-De-risk on a throwaway domain first. Then point `friendo.world`'s apex + wildcard at the box,
-migrate any tenants, and retire the Cloudflare Workers-for-Platforms stack.
+friendo.world itself was cut over this way in 2026-07 (the old Cloudflare
+Workers-for-Platforms stack is gone). For a new network: de-risk on a throwaway domain
+first, then point the real apex + wildcard at the box and migrate any tenants.
 
 ---
 

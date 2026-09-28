@@ -35,7 +35,7 @@ themselves, so nothing else is needed.
 | `<friendo-comments>` | `post-id` | Lists approved comments and, for signed-in members, a compose box. |
 | `<friendo-reactions>` | `target-type`, `target-id`, `emojis` (optional, comma-separated; default `👍,❤️,🎉`) | Emoji reactions with live counts; click toggles yours. |
 | `<friendo-poll>` | `poll-slug` (or `poll-id`) | Renders a poll; signed-in members vote once and see the tally. |
-| `<friendo-channel>` | `channel-id` | A **realtime** message feed; signed-in members post and delete their own, and new messages stream in live. See [Channels](/docs/channels). |
+| `<friendo-chat>` | `chat-id` | A **realtime** message feed; signed-in members post and delete their own, and new messages stream in live. Naming a chat makes it. See [Chats](/docs/chats). |
 | `<friendo-map>` | `target-type`, `target-id` | An interactive [Leaflet](https://leafletjs.com/) map of a record's [locations](#tagging-a-location), one marker per pin. Public — no sign-in needed. |
 | `<friendo-form>` | `collection`, `redirect` (optional), `status` (optional) | A create-a-post form: the author's own inputs (plus rich `<friendo-input>` types) become a new post, submitted from the page. See [Submitting posts from a page](#submitting-posts-from-a-page). |
 | `<friendo-calendar>` | `collection`, `view`, `month`, `limit` (all optional) | A month grid or list of the site's [events](/docs/calendar#a-month-view-friendo-calendar), each linking to its post. Public. |

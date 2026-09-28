@@ -832,32 +832,32 @@
     "expect": { "status": 200, "length": { "files": 0 } }
   },
   {
-    "name": "an admin creates a channel",
-    "method": "POST", "path": "/channels",
+    "name": "an admin creates a chat",
+    "method": "POST", "path": "/chats",
     "body": { "name": "General", "kind": "feed" },
-    "expect": { "status": 201, "json": { "channel.name": "General", "channel.kind": "feed" } },
-    "capture": { "channelId": "channel.id" }
+    "expect": { "status": 201, "json": { "chat.name": "General", "chat.kind": "feed" } },
+    "capture": { "chatId": "chat.id" }
   },
   {
-    "name": "channels are listed publicly",
-    "method": "GET", "path": "/channels",
-    "expect": { "status": 200, "length": { "channels": 1 }, "json": { "channels.0.id": "${channelId}" } }
+    "name": "chats are listed publicly",
+    "method": "GET", "path": "/chats",
+    "expect": { "status": 200, "length": { "chats": 1 }, "json": { "chats.0.id": "${chatId}" } }
   },
   {
-    "name": "post a message to the channel",
-    "method": "POST", "path": "/channels/${channelId}/messages",
-    "body": { "body": "Hello channel" },
-    "expect": { "status": 201, "json": { "message.body": "Hello channel", "message.author_name": "Owner" } },
+    "name": "post a message to the chat",
+    "method": "POST", "path": "/chats/${chatId}/messages",
+    "body": { "body": "Hello chat" },
+    "expect": { "status": 201, "json": { "message.body": "Hello chat", "message.author_name": "Owner" } },
     "capture": { "messageId": "message.id" }
   },
   {
-    "name": "messages are listed for the channel",
-    "method": "GET", "path": "/channels/${channelId}/messages",
+    "name": "messages are listed for the chat",
+    "method": "GET", "path": "/chats/${chatId}/messages",
     "expect": { "status": 200, "length": { "messages": 1 }, "json": { "messages.0.id": "${messageId}", "messages.0.mine": true } }
   },
   {
-    "name": "posting to a missing channel is a 404",
-    "method": "POST", "path": "/channels/nope/messages",
+    "name": "posting to a missing chat is a 404",
+    "method": "POST", "path": "/chats/nope/messages",
     "body": { "body": "x" },
     "expect": { "status": 404 }
   },
@@ -884,13 +884,36 @@
     "expect": { "status": 204 }
   },
   {
-    "name": "the channel's messages are now empty",
-    "method": "GET", "path": "/channels/${channelId}/messages",
+    "name": "the chat's messages are now empty",
+    "method": "GET", "path": "/chats/${chatId}/messages",
     "expect": { "status": 200, "length": { "messages": 0 } }
   },
   {
-    "name": "delete the channel",
-    "method": "DELETE", "path": "/channels/${channelId}",
+    "name": "delete the chat",
+    "method": "DELETE", "path": "/chats/${chatId}",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "a chat can be made with the id a page will name",
+    "method": "POST", "path": "/chats",
+    "body": { "id": "general" },
+    "expect": { "status": 201, "json": { "chat.id": "general", "chat.name": "general", "chat.kind": "feed" } }
+  },
+  {
+    "name": "a taken chat id is a conflict",
+    "method": "POST", "path": "/chats",
+    "body": { "id": "general" },
+    "expect": { "status": 409 }
+  },
+  {
+    "name": "a chat id must be a slug",
+    "method": "POST", "path": "/chats",
+    "body": { "id": "not a slug" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "delete the named chat",
+    "method": "DELETE", "path": "/chats/general",
     "expect": { "status": 204 }
   },
   {

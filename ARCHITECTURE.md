@@ -41,11 +41,12 @@ One runtime implements it — the **Go runtime** (`runtime/go/`):
 | Templates | [Pongo2](https://github.com/flosch/pongo2) (Jinja2) |
 | Realtime | in-process message hub (SSE) |
 
-The client transport is the same everywhere — `<friendo-channel>` opens one
-`EventSource` on `/channels/:id/stream` and new messages stream in live.
+The client transport is the same everywhere — `<friendo-chat>` opens one
+`EventSource` on `/chats/:id/stream` and new messages stream in live. A page
+that names a chat (`chat-id="general"`) registers it the first time it is served.
 
 **One schema.** The runtime defines its tables once (`posts`, `comments`,
-`reactions`, `channels`, `messages`, `polls`, `poll_votes`, `authors`,
+`reactions`, `chats`, `messages`, `polls`, `poll_votes`, `authors`,
 `locations`, `events`, `rsvps`, `files`, `users`, `sessions`). One schema across every
 site is what makes data sync a copy, not a migration.
 
@@ -82,7 +83,7 @@ the actor's *own* rows unless they hold the `.any` variant.
 | Personas | `GET/POST /me/personas`, `POST /me/personas/:id/default` — an account's author profiles + which one attribution uses | authenticated member (own personas) |
 | Content | `GET /collections`, CRUD under `/collections/:c/records` and `/records/:id`; `GET /records`, `PUT /records/:id/status` (review queue) | `content.create` (own); `content.edit.any` / `content.publish` for others' posts + publishing |
 | Community | `GET/POST /posts/:id/comments`, `PUT/DELETE /comments/:id` (moderation); `POST/DELETE /reactions`; `GET/POST /polls`, `POST /polls/:id/vote` | authenticated baseline (comment/react/vote); `comment.moderate.own/any` to moderate; `content.edit.any` to author a poll |
-| Channels (realtime) | `GET/POST /channels`, `DELETE /channels/:id`; `GET/POST /channels/:id/messages`, `DELETE /messages/:id`; `GET /channels/:id/stream` (SSE) | read/post = authenticated member; channel mgmt = `site.configure` |
+| Chats (realtime) | `GET/POST /chats`, `DELETE /chats/:id`; `GET/POST /chats/:id/messages`, `DELETE /messages/:id`; `GET /chats/:id/stream` (SSE) | read public; post = authenticated member; chat mgmt = `site.configure` (pages also register the chats they name) |
 | Locations | `GET /locations` (public); `POST /locations`, `DELETE /locations/:id` | read public; write = `content.edit.any` |
 | Calendar | `GET /calendar.ics`, `GET /calendar.json` at the **site root** (not under `/_/api`): published events, `?collection=`, `?record=`, `?occurrence=`; a page at the same path wins | public |
 | RSVP | `GET/POST/DELETE /posts/:id/rsvps` (`occurrence`, `answer`); `GET /posts/:id/attendees` (`?format=csv`) | counts public; answer = authenticated member; attendees = post author or `comment.moderate.any` |

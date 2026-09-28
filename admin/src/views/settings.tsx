@@ -90,7 +90,7 @@ export function SettingsView() {
     { key: "polls", label: "Polls", hint: "Polls in a post's front matter: <friendo-poll>, record.poll." },
     { key: "rsvp", label: "RSVPs", hint: "Going / maybe / can't go on events: <friendo-rsvp>, record.rsvps, and the Attendees list." },
     { key: "locations", label: "Map pins", hint: "Pins on posts: <friendo-map>, record.location, and the editor's Where section." },
-    { key: "channels", label: "Channels", hint: "Realtime chat and feeds: <friendo-channel>." },
+    { key: "chats", label: "Chats", hint: "Realtime chat and feeds: <friendo-chat>." },
   ];
   const DEFAULTS = ["blog", "pages", "posts"];
   const isManaged = (k: string) => s?.managed?.includes(k) ?? false;

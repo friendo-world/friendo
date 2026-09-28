@@ -89,7 +89,7 @@ require_approval = false        # hold contributor posts for review before publi
 accept_submissions = false      # let members submit posts via <friendo-form> (into the review queue)
 auto_approve = false            # publish new comments immediately instead of queuing them
 password_login = false          # also allow signing in with a password (everyone can always use an emailed code)
-comments = true                 # feature switches: comments, reactions, polls, rsvp, locations, channels
+comments = true                 # feature switches: comments, reactions, polls, rsvp, locations, chats
 default_collections = ["blog", "pages"]   # built-in collections shown when [content] types is unset
 ```
 
@@ -101,7 +101,7 @@ default_collections = ["blog", "pages"]   # built-in collections shown when [con
 | `accept_submissions` | Let signed-in members submit posts from a [`<friendo-form>`](/docs/community#submitting-posts-from-a-page) into the review queue | `false` |
 | `auto_approve` | Publish new comments immediately instead of queuing them for moderation | `false` |
 | `password_login` | Also allow signing in with a password. Off, everyone signs in with a code sent to their email — see [Auth & users](/docs/auth) | `false` |
-| `comments`, `reactions`, `polls`, `rsvp`, `locations`, `channels` | Feature switches (admin **Settings → Features**). Off, the feature's API refuses reads and writes with `403` and `off: true`, its `<friendo-*>` tag renders nothing, and `record.comments` (and so on) is empty in templates. What people already wrote is kept | `true` |
+| `comments`, `reactions`, `polls`, `rsvp`, `locations`, `chats` | Feature switches (admin **Settings → Features**). Off, the feature's API refuses reads and writes with `403` and `off: true`, its `<friendo-*>` tag renders nothing, and `record.comments` (and so on) is empty in templates. What people already wrote is kept | `true` |
 | `default_collections` | Which of the built-in collections (`blog`, `pages`, `posts`) the admin lists while `[content] types` is unset | all three |
 
 Changes take effect on the next start (like `[site].name`). Keys you leave out are

@@ -11,8 +11,8 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
 | **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
 | **v0.4** | Open the network — quotas, account management, custom domains | ✅ Shipped |
-| **v0.5** | One obvious sign-in; the network as a friendo site (home site + `<friendo-account>` / `<friendo-console>`); docs + landing | ✅ Shipped |
-| **v0.6** | Calendar — events as posts with a `when`, recurrence, `/calendar.ics` subscriptions, a calendar component, RSVP | ✅ Built (untagged) |
+| **v0.5** | One obvious sign-in; the network as a friendo site (home site + `<friendo-account>` / `<friendo-console>`); members-only pages; a built-in calendar with RSVP; declared fields + feature switches + a rebuilt records admin; docs + landing | ✅ Shipped |
+| **v0.6** | Social graph — following, groups, event invitations, richer profiles (scoping) | Planned |
 
 ---
 
@@ -75,7 +75,7 @@ landing:** `www/` (friendo.world's home site) and a refreshed docs site with Hos
 published by hand with `npm run deploy:www|docs`. Scope and decisions:
 [design/v0.5-roadmap.md](design/v0.5-roadmap.md).
 
-**v0.6 — built (2026-09), not yet tagged:** a built-in calendar. **Phase 1:** an event is
+**v0.5, continued — calendar:** a built-in calendar. **Phase 1:** an event is
 a post with a `when` (`ends`, `timezone`, `repeats`, `except`), lifted from front matter or
 a `<friendo-form>` into an `events` row the way `location` becomes a pin; recurrence from
 the start (`repeats: weekly`, `{every: month, on: first tuesday, until: …}`, `mondays 19:00`),
@@ -94,6 +94,43 @@ moves. Slots, capacity and volunteer sign-ups are deferred to a later release. C
 scenarios, the export test, and four browser checks (`sdk-calendar`, `admin-when`,
 `sdk-rsvp`, plus the existing form check). Design:
 [design/calendar-plan.md](design/calendar-plan.md).
+
+**v0.5, continued — the records admin, declared fields, feature switches:** the admin's
+records screens were rebuilt around what a collection's records actually carry: a
+collection is a table whose columns are the fields its records have, a record opens in a
+side panel that edits every key in its `data` (with *Add a field*), typed widgets per kind,
+search, bulk publish, auto-slug, a dirty guard, and a note on records that come from
+`content/` files (the file wins on the next import). `friendo.toml`'s `[content]` block
+grew **declared fields** — `[content.<type>.fields]` names a field's kind (`text`,
+`paragraph`, `number`, `checkbox`, `tags`, `image`, `json`) with optional `choices`,
+`required` and a `hint`; the runtime serves them, the admin lays out its table and form
+from them and checks a record before saving, and the records API stays open to any
+data. A collection that isn't declared yet is marked ✱, a **friendo.toml** button shows
+the block that matches the site right now, and `friendo pull` writes that `[content]`
+block into the local file. **Feature switches** (`comments`, `reactions`, `polls`,
+`rsvp`, `locations`, `chats`; admin **Settings → Features**, freezable in
+`friendo.toml`): off, the feature's API answers `403` with `off: true`, its `<friendo-*>`
+tag renders nothing, and templates see it as empty; what people already wrote is kept.
+Coverage: `features_test.go`, `toml_content_types_test.go`, `content_toml_test.go`, and
+the browser checks `admin-records`, `admin-types`, `sdk-features`.
+
+**v0.5, continued — chats:** channels are now **chats** (`<friendo-chat chat-id>`,
+`/_/api/chats`, the `chats` switch; migration `0015` renames the table, the messages
+column and the stored switch in place). **Naming a chat makes it:** a page that renders
+`<friendo-chat chat-id="general">` registers `general` the first time it's served, and a
+template can name one per record (`chat-id="event-{{ record.slug }}"`) — the ids come out
+of the owner's own markup, so there's nothing to register by hand (the curl step is gone
+from the docs). Ids are slugs (up to 64 chars); `POST /_/api/chats` takes an optional `id`
+for making one ahead of time or with a display name (`409` if taken). Coverage:
+`chats_test.go` (server) and the REST scenarios.
+
+**v0.6 — planned:** a social graph for a site's members. One-way follows with friends as
+mutual follows; groups as a flexible built-in content type (member-creatable behind a
+setting, moderator-controlled settings in the record's `data`, and the filters, tags and
+gates that come with being built in — `user.groups` lights up the `if` tail reserved in
+v0.5); richer profiles with a public page; in-page notifications (email later); and event
+invitations as an `invited` RSVP. Per site, synced and exported like RSVPs. Scope, names
+and tiers: [design/v0.6-roadmap.md](design/v0.6-roadmap.md).
 
 ---
 
@@ -221,6 +258,9 @@ users-sync password fix, the migration seed, the localhost open rule
 (`runtime/go/admin/admin_test.go`), the operator JSON API, browser sign-in + bootstrap,
 reserved names, the apex/home-site/override routing, the `www` redirect, the "Open admin"
 SSO hand-off — and a Playwright walk of the whole network story (`tests/sdk-network.mjs`).
+The calendar, the declared-fields and feature-switch work, and the rebuilt records admin
+each landed with their own Go tests and browser checks (listed in their v0.5 paragraphs
+above); `npm run test:sdk` now runs twelve browser checks.
 
 Still without *automated* coverage (each was exercised by hand on friendo.world before
 the v0.4 tag): the live `friendo deploy` device-auth path against a running network, the
@@ -275,8 +315,8 @@ The old Workers-for-Platforms stack it replaced (dispatch namespaces, prod D1
   `data/`. **Rendering:** template-engine hardening (nesting, `forloop.*`, filters,
   `'` escaping) with a CI render smoke; CORS removed + `Secure` cookies; a
   bundle-currency check on every PR. **Coherence:** provisioning idempotency; the
-  once-dead `channels` / `messages` / `locations` / `files` tables are now wired up —
-  **channels are a realtime feed** (SSE via a Go in-process hub), **locations** are
+  once-dead `chats` / `messages` / `locations` / `files` tables are now wired up —
+  **chats (then "channels") are a realtime feed** (SSE via a Go in-process hub), **locations** are
   geo-tags, and **media upload** attaches per-record images (multipart → `assets/` on
   disk / R2) that **sync on deploy** — a binary-safe (base64) asset push plus
   `files`-row sync so uploaded images travel byte-identical. The test suite now covers

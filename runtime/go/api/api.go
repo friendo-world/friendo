@@ -73,12 +73,12 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/reactions", featureGate(db, "reactions", handleListReactions(db, authFunc)))
 		r.Post("/reactions", featureGate(db, "reactions", handleToggleReaction(db, authFunc)))
 
-		// Channels & messages (community feed): public reads, member-gated posts.
-		r.Get("/channels", featureGate(db, "channels", handleListChannels(db)))
-		r.Get("/channels/{id}/messages", featureGate(db, "channels", handleListMessages(db, authFunc)))
-		r.Get("/channels/{id}/stream", featureGate(db, "channels", handleChannelStream(db))) // SSE: live new messages
-		r.Post("/channels/{id}/messages", featureGate(db, "channels", handlePostMessage(db, authFunc)))
-		r.Delete("/messages/{id}", featureGate(db, "channels", handleDeleteMessage(db, authFunc)))
+		// Chats & messages (community feed): public reads, member-gated posts.
+		r.Get("/chats", featureGate(db, "chats", handleListChats(db)))
+		r.Get("/chats/{id}/messages", featureGate(db, "chats", handleListMessages(db, authFunc)))
+		r.Get("/chats/{id}/stream", featureGate(db, "chats", handleChatStream(db))) // SSE: live new messages
+		r.Post("/chats/{id}/messages", featureGate(db, "chats", handlePostMessage(db, authFunc)))
+		r.Delete("/messages/{id}", featureGate(db, "chats", handleDeleteMessage(db, authFunc)))
 		// RSVP: public counts; a signed-in member answers (going / not_going /
 		// maybe) for one occurrence of a post's event. Names for organizers only.
 		r.Get("/posts/{id}/rsvps", featureGate(db, "rsvp", handleGetRSVPs(db, authFunc)))
@@ -137,9 +137,9 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Post("/files", capGate(authFunc, data.CapContentCreate, handleUploadFile(db, siteDir, store)))
 		r.Delete("/files/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteFile(db, siteDir, store)))
 
-		// Channel management — admin+ (site.configure); posting is member-gated above.
-		r.Post("/channels", featureGate(db, "channels", capGate(authFunc, data.CapSiteConfigure, handleCreateChannel(db))))
-		r.Delete("/channels/{id}", featureGate(db, "channels", capGate(authFunc, data.CapSiteConfigure, handleDeleteChannel(db))))
+		// Chat management — admin+ (site.configure); posting is member-gated above.
+		r.Post("/chats", featureGate(db, "chats", capGate(authFunc, data.CapSiteConfigure, handleCreateChat(db))))
+		r.Delete("/chats/{id}", featureGate(db, "chats", capGate(authFunc, data.CapSiteConfigure, handleDeleteChat(db))))
 
 		// Users — admin+ (user.manage). Granting admin/owner additionally needs
 		// site.own (enforced by canAssignRole).
@@ -1243,75 +1243,82 @@ func removeAsset(ctx context.Context, siteDir string, store storage.Backend, key
 	os.Remove(filepath.Join(siteDir, filepath.FromSlash(key)))
 }
 
-// --- Channels & messages (community feed) ---
+// --- Chats & messages (community feed) ---
 
-// messageHub fans out new messages to open SSE streams, per channel. The edge
-// runtime achieves the same with a per-channel Durable Object; the client (an
-// EventSource on /channels/:id/stream) is identical across both.
+// messageHub fans out new messages to open SSE streams, per chat. The client
+// is <friendo-chat>, an EventSource on /chats/:id/stream.
 type messageHub struct {
 	mu   sync.Mutex
-	subs map[string]map[chan string]struct{} // channelID -> subscriber channels
+	subs map[string]map[chan string]struct{} // chatID -> subscribers
 }
 
 var msgHub = &messageHub{subs: map[string]map[chan string]struct{}{}}
 
-func (h *messageHub) subscribe(channelID string) chan string {
+func (h *messageHub) subscribe(chatID string) chan string {
 	ch := make(chan string, 8)
 	h.mu.Lock()
-	if h.subs[channelID] == nil {
-		h.subs[channelID] = map[chan string]struct{}{}
+	if h.subs[chatID] == nil {
+		h.subs[chatID] = map[chan string]struct{}{}
 	}
-	h.subs[channelID][ch] = struct{}{}
+	h.subs[chatID][ch] = struct{}{}
 	h.mu.Unlock()
 	return ch
 }
 
-func (h *messageHub) unsubscribe(channelID string, ch chan string) {
+func (h *messageHub) unsubscribe(chatID string, ch chan string) {
 	h.mu.Lock()
-	if set := h.subs[channelID]; set != nil {
+	if set := h.subs[chatID]; set != nil {
 		delete(set, ch)
 		if len(set) == 0 {
-			delete(h.subs, channelID)
+			delete(h.subs, chatID)
 		}
 	}
 	h.mu.Unlock()
 	close(ch)
 }
 
-func (h *messageHub) broadcast(channelID, data string) {
+// broadcast sends one SSE frame to everyone streaming the chat. An empty event
+// name is the default `message` event (a new message); a named one — `delete`
+// — carries a change to what's already shown.
+func (h *messageHub) broadcast(chatID, event, data string) {
+	frame := "data: " + data + "\n\n"
+	if event != "" {
+		frame = "event: " + event + "\n" + frame
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for ch := range h.subs[channelID] {
+	for ch := range h.subs[chatID] {
 		select {
-		case ch <- data:
+		case ch <- frame:
 		default: // drop for a slow/full subscriber rather than block the poster
 		}
 	}
 }
 
-// handleChannelStream is a Server-Sent Events stream of a channel's new messages
-// (public). Each `data:` frame is a message in the same shape as the list API.
-func handleChannelStream(db *data.DB) http.HandlerFunc {
+// handleChatStream is a Server-Sent Events stream of what changes in a chat
+// (public): each default frame is a new message in the same shape as the list
+// API; an `event: delete` frame is `{"id": …}` for a message that's gone.
+func handleChatStream(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			jsonError(w, "streaming unsupported", http.StatusInternalServerError)
 			return
 		}
-		channelID := chi.URLParam(r, "id")
+		chatID := chi.URLParam(r, "id")
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 
-		ch := msgHub.subscribe(channelID)
-		defer msgHub.unsubscribe(channelID, ch)
+		ch := msgHub.subscribe(chatID)
+		defer msgHub.unsubscribe(chatID, ch)
 		fmt.Fprint(w, ": connected\n\n")
 		flusher.Flush()
 
 		for {
 			select {
-			case data := <-ch:
-				fmt.Fprintf(w, "data: %s\n\n", data)
+			case frame := <-ch:
+				fmt.Fprint(w, frame)
 				flusher.Flush()
 			case <-r.Context().Done():
 				return
@@ -1320,21 +1327,26 @@ func handleChannelStream(db *data.DB) http.HandlerFunc {
 	}
 }
 
-func handleListChannels(db *data.DB) http.HandlerFunc {
+func handleListChats(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		channels, err := db.ListChannels()
+		chats, err := db.ListChats()
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
 		}
-		jsonResponse(w, map[string]any{"channels": channels})
+		jsonResponse(w, map[string]any{"chats": chats})
 	}
 }
 
-// handleCreateChannel creates a channel (admin-gated).
-func handleCreateChannel(db *data.DB) http.HandlerFunc {
+// handleCreateChat creates a chat by hand (admin-gated). Pages make their own
+// chats just by naming one (<friendo-chat chat-id="general"> registers `general`
+// the first time the page is served), so this is for making one ahead of time
+// or with a display name. `id` is optional (a generated one otherwise) and must
+// be a slug; `name` defaults to the id.
+func handleCreateChat(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
+			ID   string `json:"id"`
 			Name string `json:"name"`
 			Kind string `json:"kind"`
 		}
@@ -1342,27 +1354,38 @@ func handleCreateChannel(db *data.DB) http.HandlerFunc {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if strings.TrimSpace(in.Name) == "" {
-			jsonError(w, "name is required", http.StatusBadRequest)
+		in.ID, in.Name = strings.TrimSpace(in.ID), strings.TrimSpace(in.Name)
+		if in.ID == "" && in.Name == "" {
+			jsonError(w, "an id or a name is required", http.StatusBadRequest)
 			return
 		}
-		id, err := db.CreateChannel(in.Name, in.Kind)
+		if in.ID != "" {
+			if !data.ValidChatID(in.ID) {
+				jsonError(w, "id must be letters, digits, dots, dashes or underscores (up to 64)", http.StatusBadRequest)
+				return
+			}
+			if _, err := db.GetChat(in.ID); err == nil {
+				jsonError(w, "a chat with that id already exists", http.StatusConflict)
+				return
+			}
+		}
+		id, err := db.CreateChat(in.ID, in.Name, in.Kind)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
 		}
-		channel, _ := db.GetChannel(id)
+		chat, _ := db.GetChat(id)
 		w.WriteHeader(http.StatusCreated)
-		jsonResponse(w, map[string]any{"channel": channel})
+		jsonResponse(w, map[string]any{"chat": chat})
 	}
 }
 
-// handleDeleteChannel removes a channel and its messages (admin-gated).
-func handleDeleteChannel(db *data.DB) http.HandlerFunc {
+// handleDeleteChat removes a chat and its messages (admin-gated).
+func handleDeleteChat(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		err := db.DeleteChannel(chi.URLParam(r, "id"))
+		err := db.DeleteChat(chi.URLParam(r, "id"))
 		if err == sql.ErrNoRows {
-			jsonError(w, "channel not found", http.StatusNotFound)
+			jsonError(w, "chat not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -1373,7 +1396,7 @@ func handleDeleteChannel(db *data.DB) http.HandlerFunc {
 	}
 }
 
-// handleListMessages returns a channel's messages (public; `mine` per row when
+// handleListMessages returns a chat's messages (public; `mine` per row when
 // the caller is signed in).
 func handleListMessages(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1390,7 +1413,7 @@ func handleListMessages(db *data.DB, authFunc func(*http.Request) *data.User) ht
 	}
 }
 
-// handlePostMessage posts a message to a channel. Member-gated + rate-limited.
+// handlePostMessage posts a message to a chat. Member-gated + rate-limited.
 func handlePostMessage(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
@@ -1398,9 +1421,9 @@ func handlePostMessage(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		channelID := chi.URLParam(r, "id")
-		if _, err := db.GetChannel(channelID); err != nil {
-			jsonError(w, "channel not found", http.StatusNotFound)
+		chatID := chi.URLParam(r, "id")
+		if _, err := db.GetChat(chatID); err != nil {
+			jsonError(w, "chat not found", http.StatusNotFound)
 			return
 		}
 		var in struct {
@@ -1419,15 +1442,15 @@ func handlePostMessage(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			jsonError(w, "you're posting too fast — slow down", http.StatusTooManyRequests)
 			return
 		}
-		id, err := db.CreateMessage(channelID, in.ParentID, db.DefaultAuthorID(user.ID), in.Body)
+		id, err := db.CreateMessage(chatID, in.ParentID, db.DefaultAuthorID(user.ID), in.Body)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
 		}
 		message, _ := db.GetMessage(id)
-		// Push the new message to everyone streaming this channel.
+		// Push the new message to everyone streaming this chat.
 		if b, err := json.Marshal(message); err == nil {
-			msgHub.broadcast(channelID, string(b))
+			msgHub.broadcast(chatID, "", string(b))
 		}
 		w.WriteHeader(http.StatusCreated)
 		jsonResponse(w, map[string]any{"message": message})
@@ -1447,7 +1470,10 @@ func handleDeleteMessage(db *data.DB, authFunc func(*http.Request) *data.User) h
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		err := db.DeleteMessage(id)
+		message, err := db.GetMessage(id) // for its chat, to tell the stream
+		if err == nil {
+			err = db.DeleteMessage(id)
+		}
 		if err == sql.ErrNoRows {
 			jsonError(w, "message not found", http.StatusNotFound)
 			return
@@ -1455,6 +1481,12 @@ func handleDeleteMessage(db *data.DB, authFunc func(*http.Request) *data.User) h
 		if err != nil {
 			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
 			return
+		}
+		// Take it off everyone's screen, not just the deleter's.
+		if chatID, _ := message["chat_id"].(string); chatID != "" {
+			if b, err := json.Marshal(map[string]string{"id": id}); err == nil {
+				msgHub.broadcast(chatID, "delete", string(b))
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -2718,7 +2750,7 @@ type tomlSettingsConfig struct {
 		Polls              *bool    `toml:"polls"`
 		RSVP               *bool    `toml:"rsvp"`
 		Locations          *bool    `toml:"locations"`
-		Channels           *bool    `toml:"channels"`
+		Chats              *bool    `toml:"chats"`
 		DefaultCollections []string `toml:"default_collections"`
 	} `toml:"settings"`
 }
@@ -2771,7 +2803,7 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 	}
 	for name, v := range map[string]*bool{
 		"comments": s.Comments, "reactions": s.Reactions, "polls": s.Polls,
-		"rsvp": s.RSVP, "locations": s.Locations, "channels": s.Channels,
+		"rsvp": s.RSVP, "locations": s.Locations, "chats": s.Chats,
 	} {
 		if v != nil {
 			set(data.FeatureSetting(name), boolSetting(*v))

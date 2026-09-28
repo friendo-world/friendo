@@ -62,6 +62,34 @@
     return { method: method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) };
   }
 
+  // STAMP_GAP is how long a pause between messages starts a new batch (with
+  // its own time stamp) in a chat.
+  var STAMP_GAP = 5 * 60 * 1000;
+
+  // stampLabel is a human label for when a batch of messages was sent: "just
+  // now", "5 min ago", then "Today 3:42 PM", "Yesterday 9:10 AM", "Mon 4:10 PM"
+  // within the week, and the date after that.
+  function stampLabel(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return "";
+    var s = Math.round((Date.now() - d.getTime()) / 1000);
+    if (s < 45) return "just now";
+    var m = Math.round(s / 60);
+    if (m < 60) return m + " min ago";
+    var clock = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    var now = new Date();
+    var startOfDay = function (x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); };
+    var days = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+    if (days === 0) return "Today " + clock;
+    if (days === 1) return "Yesterday " + clock;
+    if (days < 7) return d.toLocaleDateString(undefined, { weekday: "short" }) + " " + clock;
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" }) + " " + clock;
+  }
+  function fullDate(iso) {
+    var d = new Date(iso);
+    return isNaN(d) ? "" : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (ch) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
@@ -741,44 +769,110 @@
     }
   }
 
-  // --- <friendo-channel channel-id> ------------------------------------------
-  // A community feed: lists a channel's messages and, for signed-in members, a
+  // --- <friendo-chat chat-id> ------------------------------------------
+  // A community feed: lists a chat's messages and, for signed-in members, a
   // compose box. Members can delete their own messages.
-  class FriendoChannel extends FriendoElement {
+  class FriendoChat extends FriendoElement {
+    // Bubbles like a phone's messages: yours on the right in the accent
+    // colour, everyone else's on the left in grey, inside a bordered box with
+    // the composer along the bottom. A site tunes the colours with custom
+    // properties on the tag (--chat-mine, --chat-theirs, --chat-border,
+    // --chat-background, --chat-height) or restyles any part.
     css() {
       return (
-        "ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.6em}" +
-        "li{padding:.5em .7em;border:1px solid #eee;border-radius:10px}" +
-        ".meta{font-size:.85em;opacity:.7;margin-bottom:.2em;display:flex;gap:.5em;align-items:center}" +
-        ".del{margin-left:auto;font:inherit;font-size:.8em;cursor:pointer;border:0;background:none;opacity:.6}" +
-        "textarea{font:inherit;width:100%;box-sizing:border-box;padding:.5em;border:1px solid #ccc;border-radius:6px}" +
-        "form{margin-top:.6em;display:flex;flex-direction:column;gap:.5em;align-items:flex-start}" +
-        ".empty{opacity:.6}"
+        ".chat{border:1px solid var(--chat-border,#d9d9de);border-radius:12px;background:var(--chat-background,#fff);display:flex;flex-direction:column;overflow:hidden}" +
+        "ul{list-style:none;margin:0;padding:.75em;display:flex;flex-direction:column;gap:.5em;max-height:var(--chat-height,60vh);overflow-y:auto;overscroll-behavior:contain}" +
+        "li{max-width:78%;align-self:flex-start;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-start}" +
+        "li.mine{align-self:flex-end;align-items:flex-end}" +
+        ".author{font-size:.8em;opacity:.65;margin:0 .6em .15em}" +
+        ".stamp{align-self:center;max-width:none;font-size:.75em;opacity:.6;margin:.5em 0 .1em}" +
+        ".meta{font-size:.8em;opacity:.65;margin:.15em .6em 0;display:none;gap:.5em;align-items:baseline}" +
+        "li.selected .meta{display:flex}" +
+        "[part=body]{cursor:default}" +
+        "[part=body]{background:var(--chat-theirs,#e9e9eb);color:inherit;padding:.5em .85em;border-radius:18px;white-space:pre-wrap;overflow-wrap:anywhere}" +
+        "li.mine [part=body]{background:var(--chat-mine,#0b84ff);color:#fff}" +
+        ".del{font:inherit;font-size:.9em;cursor:pointer;border:0;background:none;opacity:.7;padding:0}" +
+        "form{display:flex;gap:.5em;align-items:flex-end;padding:.6em .75em;border-top:1px solid var(--chat-border,#d9d9de)}" +
+        "textarea{font:inherit;flex:1;box-sizing:border-box;padding:.5em .8em;border:1px solid var(--chat-border,#d9d9de);border-radius:18px;resize:none}" +
+        "button[type=submit]{font:inherit;border:0;border-radius:999px;padding:.5em 1.1em;background:var(--chat-mine,#0b84ff);color:#fff;cursor:pointer}" +
+        "[part=status]{font-size:.8em;opacity:.65;padding:0 .75em .5em}" +
+        ".empty{opacity:.6;align-self:center;max-width:none}" +
+        "p.empty{margin:0;padding:.6em .75em;border-top:1px solid var(--chat-border,#d9d9de)}"
       );
     }
     disconnectedCallback() {
       super.disconnectedCallback();
       if (this._es) { this._es.close(); this._es = null; }
+      if (this._ticker) { clearInterval(this._ticker); this._ticker = null; }
     }
-    // messageLi builds one message row.
+    // messageLi builds one message row. Times aren't on every bubble: a stamp
+    // (stampLi) sits above a batch; tapping a bubble shows its exact time.
     messageLi(m) {
       var del = m.mine || this._canModerate
         ? '<button part="delete" class="del" data-id="' + esc(m.id) + '">delete</button>'
         : "";
+      var name = m.mine ? "" : '<span part="author" class="author">' + esc(m.author_name || "Anonymous") + "</span>";
+      // Tapping a bubble shows its line: the exact time, and delete when allowed.
       return (
-        '<li part="message" data-id="' + esc(m.id) + '"><div part="author" class="meta">' +
-        esc(m.author_name || "Anonymous") + del +
-        '</div><div part="body">' + esc(m.body) + "</div></li>"
+        '<li part="message' + (m.mine ? " mine" : "") + '" class="' + (m.mine ? "mine" : "") + '" data-id="' + esc(m.id) + '" data-created="' + esc(m.created) + '">' +
+        name + '<div part="body" tabindex="0">' + esc(m.body) + "</div>" +
+        '<div part="meta" class="meta"><span part="sent">' + esc(fullDate(m.created)) + "</span>" + del + "</div></li>"
       );
     }
+    // stampLi is the centred time above a batch of messages, like a phone's
+    // messages: one per run, a new one when the gap is over five minutes.
+    stampLi(iso) {
+      return '<li part="time" class="stamp" data-created="' + esc(iso) + '" title="' + esc(fullDate(iso)) + '"><time datetime="' + esc(iso) + '">' + esc(stampLabel(iso)) + "</time></li>";
+    }
+    // needsStamp says whether a message sent at `iso` starts a new batch after
+    // the message before it (none = first message).
+    needsStamp(prevIso, iso) {
+      if (!prevIso) return true;
+      var a = new Date(prevIso), b = new Date(iso);
+      return isNaN(a) || isNaN(b) || b - a > STAMP_GAP;
+    }
+    // rows renders messages with a stamp above each batch.
+    rows(messages) {
+      var out = "", prev = "";
+      for (var i = 0; i < messages.length; i++) {
+        if (this.needsStamp(prev, messages[i].created)) out += this.stampLi(messages[i].created);
+        out += this.messageLi(messages[i]);
+        prev = messages[i].created;
+      }
+      return out;
+    }
+    // The list scrolls like a chat: newest at the bottom, the view starting
+    // there and following new messages — unless you've scrolled up to read.
+    atBottom() {
+      var list = this.shadowRoot.querySelector('[part="list"]');
+      return !list || list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    }
+    scrollToBottom() {
+      var list = this.shadowRoot.querySelector('[part="list"]');
+      if (list) list.scrollTop = list.scrollHeight;
+    }
+    // Relative labels ("5 min ago") drift, so re-label every minute.
+    tickTimes() {
+      var self = this;
+      this.shadowRoot.querySelectorAll("time[datetime]").forEach(function (t) {
+        t.textContent = stampLabel(t.getAttribute("datetime"));
+      });
+      if (!this._ticker) this._ticker = setInterval(function () { self.tickTimes(); }, 60000);
+    }
     async render() {
-      var channelId = this.getAttribute("channel-id") || "";
+      var chatId = this.getAttribute("chat-id") || "";
       var user = await currentUser();
       // Editor+ can moderate (delete any); members can delete only their own.
       this._canModerate = !!user && ["editor", "admin", "owner"].includes(user.role);
+      // Your author ids (personas), so a message arriving over the stream —
+      // which is the same frame for everyone — can be told apart as yours.
+      this._myAuthors = [];
+      if (user) {
+        try { this._myAuthors = ((await api("/me/personas")).personas || []).map(function (p) { return p.id; }); } catch (e) { /* visitor-like */ }
+      }
       var data;
       try {
-        data = await api("/channels/" + encodeURIComponent(channelId) + "/messages");
+        data = await api("/chats/" + encodeURIComponent(chatId) + "/messages");
       } catch (e) {
         this.fail(e);
         return;
@@ -787,36 +881,51 @@
       var self = this;
 
       var items = messages.length
-        ? messages.map(function (m) { return self.messageLi(m); }).join("")
+        ? this.rows(messages)
         : '<li part="empty" class="empty">No messages yet.</li>';
 
       var composer = user
-        ? '<form part="form"><textarea part="input" required placeholder="Message…" rows="2"></textarea>' +
-          '<button part="submit" type="submit">Send</button><span part="status" class="meta"></span></form>'
+        ? '<form part="form"><textarea part="input" required placeholder="Message…" rows="1"></textarea>' +
+          '<button part="submit" type="submit">Send</button></form><div part="status"></div>'
         : '<p part="signed-out" class="empty">Sign in to join the conversation.</p>';
 
-      this.paint('<ul part="list">' + items + "</ul>" + composer);
-      this.wireActions(channelId);
-      this.openStream(channelId);
+      this.paint('<div part="chat" class="chat"><ul part="list">' + items + "</ul>" + composer + "</div>");
+      this.scrollToBottom();
+      this.tickTimes();
+      this.wireActions(chatId);
+      this.openStream(chatId);
     }
 
     // openStream subscribes to live new messages via SSE and appends them.
-    openStream(channelId) {
+    openStream(chatId) {
       if (this._es) return; // one connection per element
       var self = this;
       try {
-        var es = new EventSource(API + "/channels/" + encodeURIComponent(channelId) + "/stream");
+        var es = new EventSource(API + "/chats/" + encodeURIComponent(chatId) + "/stream");
         this._es = es;
         es.onmessage = function (ev) {
           var m;
           try { m = JSON.parse(ev.data); } catch (e) { return; }
           var list = self.shadowRoot.querySelector('[part="list"]');
           if (!list || list.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(m.id) : m.id) + '"]')) return;
+          m.mine = m.mine || (self._myAuthors || []).indexOf(m.author_id) >= 0;
+          var follow = self.atBottom() || self._followNext;
+          self._followNext = false;
           var empty = list.querySelector('[part="empty"]');
           if (empty) empty.remove();
+          var lastMessage = null;
+          list.querySelectorAll('[part~="message"]').forEach(function (li) { lastMessage = li; });
+          if (self.needsStamp(lastMessage ? lastMessage.dataset.created : "", m.created)) list.insertAdjacentHTML("beforeend", self.stampLi(m.created));
           list.insertAdjacentHTML("beforeend", self.messageLi(m));
-          self.wireActions(channelId);
+          if (follow) self.scrollToBottom();
+          self.wireActions(chatId);
         };
+        // A message someone deleted (theirs, or a moderator's call) goes away here too.
+        es.addEventListener("delete", function (ev) {
+          var m;
+          try { m = JSON.parse(ev.data); } catch (e) { return; }
+          self.removeMessage(m.id);
+        });
         es.onerror = function () { self._streaming = false; };
         this._streaming = true;
       } catch (e) {
@@ -824,15 +933,41 @@
       }
     }
 
-    wireActions(channelId) {
+    // removeMessage takes a message row off the list (and shows the empty line
+    // when it was the last one). Safe to call twice: the deleter's own click and
+    // the stream's delete event both land here.
+    removeMessage(id) {
+      var list = this.shadowRoot.querySelector('[part="list"]');
+      if (!list) return;
+      var li = list.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+      if (li) li.remove();
+      list.querySelectorAll(".stamp").forEach(function (st) {
+        var next = st.nextElementSibling;
+        if (!next || next.classList.contains("stamp")) st.remove();
+      });
+      if (!list.querySelector('[part~="message"]') && !list.querySelector('[part="empty"]')) {
+        list.insertAdjacentHTML("beforeend", '<li part="empty" class="empty">No messages yet.</li>');
+      }
+    }
+
+    wireActions(chatId) {
       var self = this;
+      // Tap (or focus + Enter) a bubble to show its line; one at a time.
+      this.shadowRoot.querySelectorAll('[part="body"]').forEach(function (body) {
+        var toggle = function () {
+          var li = body.parentElement, on = li.classList.contains("selected");
+          self.shadowRoot.querySelectorAll("li.selected").forEach(function (x) { x.classList.remove("selected"); });
+          if (!on) li.classList.add("selected");
+        };
+        body.onclick = toggle;
+        body.onkeydown = function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } };
+      });
       this.shadowRoot.querySelectorAll(".del").forEach(function (btn) {
         btn.onclick = async function () {
           if (!confirm("Delete this message?")) return;
           try {
             await api("/messages/" + encodeURIComponent(btn.dataset.id), { method: "DELETE" });
-            var li = self.shadowRoot.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(btn.dataset.id) : btn.dataset.id) + '"]');
-            if (li) li.remove();
+            self.removeMessage(btn.dataset.id);
           } catch (e) { /* leave as-is */ }
         };
       });
@@ -846,13 +981,22 @@
           if (!body) return;
           status.textContent = "Sending…";
           try {
-            await api("/channels/" + encodeURIComponent(channelId) + "/messages", jsonBody("POST", { body: body }));
+            await api("/chats/" + encodeURIComponent(chatId) + "/messages", jsonBody("POST", { body: body }));
             input.value = "";
             status.textContent = "";
+            self._followNext = true;
             // The message arrives back over the SSE stream and is appended there;
             // if streaming is unavailable, re-render to show it.
             if (!self._streaming) self.render();
           } catch (err) { status.textContent = err.message; }
+        };
+        // Enter sends, like a chat; Shift+Enter makes a new line.
+        var input = this.shadowRoot.querySelector('[part="input"]');
+        input.onkeydown = function (e) {
+          if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+            e.preventDefault();
+            form.requestSubmit();
+          }
         };
       }
     }
@@ -2313,7 +2457,7 @@
     "friendo-comments": FriendoComments,
     "friendo-reactions": FriendoReactions,
     "friendo-poll": FriendoPoll,
-    "friendo-channel": FriendoChannel,
+    "friendo-chat": FriendoChat,
     "friendo-map": FriendoMap,
     "friendo-input": FriendoInput,
     "friendo-form": FriendoForm,

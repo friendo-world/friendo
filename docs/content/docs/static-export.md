@@ -21,7 +21,7 @@ live site. [Members-only pages](/docs/templates#members-only-pages) are skipped
 too (the export lists each one), since a static host can't tell who's asking.
 
 Community features that need the runtime — signing in, posting comments, live
-channels — don't work in a static export, since there's no API behind it. The
+chats — don't work in a static export, since there's no API behind it. The
 **server-rendered** forms still do: `{{ record.comments }}`, `{{ record.reactions }}`,
 `{{ record.poll }}` and `{{ record.gallery }}` are rendered into the HTML at
 export time, so readers get the content even without the runtime.

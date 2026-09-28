@@ -83,7 +83,7 @@ types = ["blog", "events", "pages"]
 # accept_submissions = false      # let members submit posts via <friendo-form> (into the review queue)
 # auto_approve = false            # publish new comments immediately instead of queuing them
 # password_login = false          # also allow signing in with a password (everyone can always use an emailed code)
-# comments = true                 # feature switches (Settings → Features): comments, reactions, polls, rsvp, locations, channels
+# comments = true                 # feature switches (Settings → Features): comments, reactions, polls, rsvp, locations, chats
 # default_collections = ["blog", "pages", "posts"]   # built-in collections listed while [content] types is unset
 
 # Optional: members-only paths. A page can also gate itself with {%% members only %%}

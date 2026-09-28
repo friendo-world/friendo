@@ -2,8 +2,7 @@
 {% block content %}
 <article>
     <h1>{{ record.title }}</h1>
-    {# A photo attached through the form's media input lands in data.photo as the
-       uploaded file's URL, the same way the blog's cover image does. #}
+    {# A photo attached through the form's media input lands in data.photo as the uploaded file's URL, the same way the blog's cover image does. #}
     {% if record.data.photo %}
     <img class="cover" src="{{ record.data.photo }}" alt="">
     {% endif %}
@@ -39,6 +38,13 @@
     <div>
         <h2>Map</h2>
         <friendo-map target-type="post" target-id="{{ record.id }}"></friendo-map>
+    </div>
+
+    <!-- A live thread under this event. The chat id is computed per record, and
+         the site registers it the first time the page is served — no setup. -->
+    <div>
+        <h2>Chat</h2>
+        <friendo-chat chat-id="event-{{ record.slug }}"></friendo-chat>
     </div>
 </section>
 
