@@ -1,5 +1,5 @@
 /* docs.friendo.world — the friendo house style, set for reading.
-   Paper and ink: a white page, black hairlines, no rounded corners, no
+   Paper and ink: a white page, silver hairlines (dimgray in dark mode), no rounded corners, no
    shadows. Liberation Sans for everything, in bold for small labels, headings
    and the wordmark; Courier for code. Links are blue. Named CSS colours on purpose. */
 
@@ -8,18 +8,44 @@
 @font-face { font-family: "Liberation Sans"; font-weight: bold; src: url("/assets/fonts/LiberationSans-Bold.woff2") format("woff2"); font-display: swap; }
 
 :root {
+  color-scheme: light;
   --paper: white;
   --tint: lightyellow;
   --manila: navajowhite;
   --link: blue;
   --ink: black;
   --dim: dimgray;
-  --rule: black;
+  --rule: silver;
   --sans: "Liberation Sans", Arial, Helvetica, sans-serif;
   --mono: Courier, "Courier New", monospace;
   --sidebar-w: 240px;
   --masthead-h: 60px;
   --gutter: 1rem;
+}
+
+/* Dark: the same page with the ink and paper swapped. Follows the system
+   preference unless the footer toggle has set data-theme on <html> (the script
+   in layouts/base.html does that before first paint, from localStorage).
+   Manila notes stay manila, with black text, in both. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: black;
+    --tint: #1c1c1c;
+    --link: deepskyblue;
+    --ink: white;
+    --dim: darkgray;
+    --rule: dimgray;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: black;
+  --tint: #1c1c1c;
+  --link: deepskyblue;
+  --ink: white;
+  --dim: darkgray;
+  --rule: dimgray;
 }
 
 * { box-sizing: border-box; }
@@ -125,6 +151,18 @@ pre {
   line-height: 1.4; font-size: 0.9rem;
 }
 pre code { padding: 0; font-size: inherit; }
+
+/* Copy button on every code block. The script in layouts/base.html wraps each
+   <pre> in .codeblock and adds the button, so it only shows up when the
+   clipboard is available. Bare text, dim until pointed at, same florette as the landing. */
+.codeblock { position: relative; }
+.codeblock .copy-code {
+  position: absolute; top: 0; right: 0;
+  padding: 4px 8px; border: 0; background: none; color: var(--ink);
+  font: inherit; font-family: var(--sans); cursor: pointer;
+  opacity: 0.35; transition: opacity 0.15s;
+}
+.codeblock .copy-code:hover, .codeblock .copy-code:focus-visible, .codeblock .copy-code.done { opacity: 1; }
 .doc-body h2 code, .doc-body h3 code, .doc-body h4 code { font-size: 0.9em; }
 
 /* Tables: hairlines, small bold headers. */
@@ -183,6 +221,22 @@ pre code { padding: 0; font-size: inherit; }
 
 .meta { color: var(--dim); font-size: 0.875rem; border-top: 1px solid var(--rule); padding-top: 1rem; margin-top: 2rem; }
 
+/* Footer: a rule across the page with the theme toggle on the right. The
+   toggle is a bare label, like the copy button, and reads as the mode it
+   switches to ("dark" while the page is light). Hidden without JS. */
+.colophon {
+  max-width: 1120px; margin: 0 auto; padding: 1rem var(--gutter) 2rem;
+  border-top: 1px solid var(--rule); color: var(--dim);
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+}
+.colophon a { color: var(--dim); }
+.theme-toggle {
+  display: none; padding: 0; border: 0; background: none; color: var(--ink);
+  font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.theme-toggle:hover { text-decoration: none; }
+.js .theme-toggle { display: inline; }
+
 /* Navigation toggle (mobile) */
 .navtoggle, .navtoggle-btn { display: none; }
 @media (max-width: 860px) {
@@ -206,12 +260,14 @@ pre code { padding: 0; font-size: inherit; }
 /* Print: black on white, no chrome. */
 @media print {
   @page { margin: 0.6in; }
+  :root { --paper: white; --tint: white; --ink: black; --dim: dimgray; --rule: black; --link: black; }
   html, body { background: white; color: black; font-size: 10.5pt; }
   .masthead { position: static; border-bottom: 4px double black; height: auto; padding: 0 0 0.1in; max-width: none; }
   .masthead .home, .sidebar, .navtoggle-btn, .skip { display: none; }
   .content { padding: 0.2in 0 0; }
   .doc { max-width: none; }
   pre { border: 1px solid black; background: none; white-space: pre-wrap; }
+  .copy-code, .colophon { display: none; }
   .doc-body blockquote { background: none; }
   a { color: black; text-decoration: none; }
 }

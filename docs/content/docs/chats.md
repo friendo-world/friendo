@@ -1,5 +1,5 @@
 ---
-title: Chats (realtime)
+title: Chats
 slug: chats
 group: Concepts
 weight: 9

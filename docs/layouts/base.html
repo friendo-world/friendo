@@ -5,6 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site.name }}{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='white'/%3E%3Ctext x='16' y='24' font-size='24' text-anchor='middle' fill='black'%3E%E2%9C%BF%3C/text%3E%3C/svg%3E">
+  <script>
+    // Theme, before first paint so there is no flash. The page follows the
+    // system preference unless the footer toggle has saved a choice; the
+    // choice lives in localStorage as "light" or "dark" under "theme".
+    (function () {
+      document.documentElement.classList.add("js");
+      try {
+        var t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
@@ -45,5 +57,64 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  <footer class="colophon label">
+    <span>&#10047; friendo docs</span>
+    <button type="button" class="theme-toggle" aria-label="Switch theme">dark</button>
+  </footer>
+
+  <script>
+    // The theme toggle. Clicking flips the page to the other mode and saves
+    // it. Flipping back to what the system already prefers clears the saved
+    // choice, so the page follows the system again. The button always names
+    // the mode it would switch to.
+    (function () {
+      var root = document.documentElement;
+      var btn = document.querySelector(".theme-toggle");
+      var system = window.matchMedia("(prefers-color-scheme: dark)");
+      function current() { return root.getAttribute("data-theme") || (system.matches ? "dark" : "light"); }
+      function relabel() { btn.textContent = current() === "dark" ? "light" : "dark"; }
+      btn.addEventListener("click", function () {
+        var next = current() === "dark" ? "light" : "dark";
+        var systemWants = system.matches ? "dark" : "light";
+        try {
+          if (next === systemWants) { localStorage.removeItem("theme"); root.removeAttribute("data-theme"); }
+          else { localStorage.setItem("theme", next); root.setAttribute("data-theme", next); }
+        } catch (e) { root.setAttribute("data-theme", next); }
+        relabel();
+      });
+      system.addEventListener("change", relabel);
+      relabel();
+    })();
+
+    // A copy button on every code block. Needs the clipboard, so nothing is
+    // added when it isn't there (plain http, old browsers) and the page reads as before.
+    (function () {
+      if (!navigator.clipboard) return;
+      document.querySelectorAll("main pre").forEach(function (pre) {
+        var wrap = document.createElement("div");
+        wrap.className = "codeblock";
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(pre);
+
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "copy-code label";
+        btn.textContent = "\u273f copy";
+        btn.setAttribute("aria-label", "Copy code");
+        btn.addEventListener("click", function () {
+          navigator.clipboard.writeText(pre.textContent.replace(/\n$/, "")).then(function () {
+            btn.textContent = "\u273f copied";
+            btn.classList.add("done");
+            setTimeout(function () {
+              btn.textContent = "\u273f copy";
+              btn.classList.remove("done");
+            }, 1500);
+          });
+        });
+        wrap.appendChild(btn);
+      });
+    })();
+  </script>
 </body>
 </html>
