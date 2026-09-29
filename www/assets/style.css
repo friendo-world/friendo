@@ -217,90 +217,13 @@ main.page { flex: 1 0 auto; width: 100%; }
 .panel p { margin: 0; }
 .panel a { color: black; }
 
-/* Community: one card per feature, on shared hairlines like .cells. Each card
-   has a small drawing of what the tag shows (plain HTML, not the live tag:
-   this page has no posts or members of its own), the one line of markup, and
-   a docs link. */
+/* Community: a plain list of features, each linking to its docs page. */
 .community { margin: 0 0 3rem; }
-.section-h { font-size: clamp(1.6rem, 3.5vw, 2.2rem); margin: 1rem 0 0.75rem; }
-.section-lead { font-size: 1.1rem; max-width: var(--measure); }
-.script-line { display: inline-block; margin: 0 0 1.5rem; }
-.features {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px;
-  background: var(--rule); border: 1px solid var(--rule);
-}
-.feature { background: var(--paper); padding: 1.1rem 1.1rem 1.25rem; display: flex; flex-direction: column; min-width: 0; }
-.feature h3 { font-size: 1.25rem; margin: 1rem 0 0.35rem; }
-.feature p { color: var(--dim); font-size: 0.95rem; margin: 0 0 0.75rem; }
-.feature pre { margin: auto 0 0.6rem; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.feature .doc-link { color: var(--ink); }
-.feature .doc-link:hover { color: var(--link); }
-.section-foot { margin: 1rem 0 0; color: var(--dim); max-width: var(--measure); }
-
-/* The drawings. A fixed height so the row lines up; hairlines and square
-   corners; the house tint for fields, ink for pressed buttons. */
-.mock {
-  position: relative; height: 170px; overflow: hidden;
-  border: 1px solid var(--ink); padding: 0.7rem 0.8rem; font-size: 0.85rem; line-height: 1.35;
-  display: flex; flex-direction: column; gap: 0.4rem;
-}
-.mock b { font-weight: bold; margin-right: 0.35rem; }
-.m-field { border: 1px solid var(--rule); background: var(--tint); color: var(--dim); padding: 0.3rem 0.5rem; }
-.m-btn { display: inline-block; align-self: flex-start; background: var(--ink); color: var(--paper); font-weight: bold; font-size: 0.75rem; letter-spacing: 0.03em; padding: 5px 9px 3px; }
-.m-small, .m-time { color: var(--dim); font-size: 0.75rem; }
-.m-q { font-weight: bold; }
-
-.m-comment { border-bottom: 1px solid var(--manila); padding-bottom: 0.3rem; }
-.m-reacts, .m-rsvp { display: flex; gap: 0.35rem; flex-wrap: wrap; }
-.m-reacts span, .m-rsvp span { border: 1px solid var(--ink); padding: 1px 7px; font-size: 0.8rem; }
-.m-reacts .on, .m-rsvp .on { background: var(--ink); color: var(--paper); }
-
-.m-cal-h { font-weight: bold; font-size: 0.8rem; }
-.m-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-top: 0.25rem; }
-.m-grid span { background: var(--paper); font-size: 0.65rem; line-height: 1; padding: 3px 3px 2px; height: 15px; }
-.m-grid .ev { background: var(--manila); color: black; font-weight: bold; }
-.m-rsvp { margin-top: auto; }
-
-.m-chat { gap: 0.3rem; }
-.m-time { align-self: center; }
-.m-msg { align-self: flex-start; max-width: 80%; border: 1px solid var(--rule); background: var(--tint); padding: 0.2rem 0.5rem; }
-.m-msg.me { align-self: flex-end; background: var(--ink); color: var(--paper); border-color: var(--ink); }
-.m-chat .m-field { margin-top: auto; }
-
-.m-map {
-  padding: 0; background-color: var(--tint);
-  background-image:
-    linear-gradient(var(--rule) 1px, transparent 1px),
-    linear-gradient(90deg, var(--rule) 1px, transparent 1px),
-    linear-gradient(25deg, transparent 48%, var(--manila) 48%, var(--manila) 56%, transparent 56%);
-  background-size: 34px 34px, 34px 34px, 100% 100%;
-}
-.m-map .pin { position: absolute; color: var(--link); font-size: 1.3rem; line-height: 1; transform: translate(-50%, -50%); }
-.m-map-label { position: absolute; left: 44%; top: 62%; transform: translate(-50%, 0.9rem); background: var(--paper); border: 1px solid var(--ink); padding: 1px 6px; font-size: 0.72rem; white-space: nowrap; }
-
-.m-group-h { display: flex; flex-direction: column; }
-.m-group-h span { color: var(--dim); font-size: 0.8rem; }
-.m-faces { display: flex; gap: 4px; }
-.m-faces span, .m-avatar { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ink); font-size: 0.65rem; font-weight: bold; background: var(--tint); }
-.m-faces span:last-child { background: var(--paper); color: var(--dim); border-style: dashed; }
-.m-group-h + .m-faces + .m-btn { margin-top: auto; }
-
-.m-profile { display: flex; gap: 0.6rem; align-items: flex-start; }
-.m-avatar { width: 44px; height: 44px; flex: none; font-size: 0.8rem; background: var(--manila); color: black; }
-.m-profile div { display: flex; flex-direction: column; }
-.m-profile div span { color: var(--dim); font-size: 0.8rem; }
-.m-follow { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.8rem; color: var(--dim); }
-.m-inbox { margin-top: auto; border-top: 1px solid var(--rule); padding-top: 0.35rem; font-size: 0.8rem; }
-.m-inbox::before { content: "\273f  "; }
-
-.m-bar { position: relative; border: 1px solid var(--ink); height: 26px; }
-.m-bar span { position: absolute; inset: 0 auto 0 0; background: var(--manila); }
-.m-bar em { position: relative; font-style: normal; font-size: 0.78rem; line-height: 24px; padding-left: 0.5rem; }
-.m-small { margin-top: auto; }
-
-.m-locked { background: repeating-linear-gradient(135deg, var(--paper) 0 10px, var(--tint) 10px 20px); }
-.m-lock { align-self: flex-start; background: var(--paper); border: 1px dashed var(--ink); padding: 1px 6px; font-family: var(--mono); font-weight: normal; }
-.m-locked .m-field { background: var(--paper); }
+.section-lead { max-width: var(--measure); }
+.features { margin: 0; padding-left: 1.25rem; columns: 2; column-gap: 2.5rem; }
+.features li { margin: 0 0 0.3rem; break-inside: avoid; }
+.features li::marker { content: "\273f  "; }
+.features a:hover { color: var(--link); }
 
 /* Footer */
 .footer { border-top: 1px solid var(--rule); margin: 1rem auto 0; padding: 1rem var(--gutter) 3rem; font-size: 0.85rem; color: var(--dim); }
@@ -340,7 +263,7 @@ friendo-account::part(site) { border-bottom: 1px solid var(--rule); }
   .hero { grid-template-columns: minmax(0, 1fr); gap: 1.5rem 0; padding-top: 2rem; }
   .folder-wrap { max-width: 380px; }
   .cells { grid-template-columns: 1fr; }
-  .features { grid-template-columns: 1fr; }
+  .features { columns: 1; }
   .program p { text-align: left; }
 }
 
