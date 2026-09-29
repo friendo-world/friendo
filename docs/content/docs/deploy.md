@@ -1,79 +1,76 @@
 ---
-title: Deploy
+title: Put it on the internet
 slug: deploy
-section: Getting started
-weight: 3
+section: Tutorials
+weight: 50
+description: One command puts the folder on friendo.world. Five minutes.
 ---
 
-When your site is ready, one command puts it on the internet.
+Your site is a folder on your machine. This tutorial puts that folder on the
+internet with `friendo deploy`, which hosts it on **friendo.world** at a
+subdomain of your choosing. There are other ways to host, and they use the same
+binary; this is the one with the fewest steps.
+
+## 1. Pick a name
 
 ```bash
-friendo deploy            # subdomain from your site's name
-friendo deploy my-club    # or pick the subdomain
+cd my-site
+friendo deploy my-club
 ```
 
-`deploy` puts the current folder on a **network**, friendo.world by default. If
-you're not signed in it opens your browser to sign you in (a one-time code, no
-password), then claims the subdomain for your account and pushes your templates
-and assets. Point it at any other network with `--network https://sites.example.com`.
+`my-club` becomes `https://my-club.friendo.world`. Leave the name off and friendo
+makes one from your site's name. Some names (`www`, `docs`, `api`, `admin`) are
+the network's own; pick another if it says so.
 
-## friendo.world
+## 2. Sign in
 
-By default `deploy` targets **friendo.world**, which hosts your site on a
-subdomain, `your-site.friendo.world`, with its own database and asset storage.
-You only run `deploy` once; it saves the target in `friendo.toml`.
+The first time, `deploy` opens your browser to sign you in: enter your email,
+enter the code it sends. No password. That's your **network account**, the thing
+that owns your sites, and it's separate from the members inside your site. The
+terminal picks up where you left off.
+
+> **Note:** friendo.world is invite-only by default. If the sign-in page says
+> you haven't been invited, that's the operator's call, not a bug.
+
+## 3. Watch it go
+
+`deploy` claims the subdomain for your account, pushes your templates and assets,
+and saves the target in `friendo.toml`:
+
+```toml
+[deploy]
+target = "https://my-club.friendo.world"
+```
+
+Open the address it prints. Your site is live, with its own database and asset
+storage. Its admin is at `/_/`, and `friendo deploy` already made you its owner,
+so there's no first-run setup screen.
+
+## 4. Push a change
+
+Edit a template, then:
 
 ```bash
-friendo deploy          # first time: makes the site and pushes
-friendo push            # push template and asset changes
-friendo push --posts    # also push your posts
-friendo push --users    # also push accounts and profiles
+friendo push            # templates and assets
+friendo push --posts    # also the posts you wrote locally
+friendo push --users    # also accounts and profiles
 ```
 
-Once it's up, **[friendo.world/account](https://friendo.world/account)** lists
-your sites: open a site's admin from there (no separate sign-in), connect
-[your own domain](/docs/custom-domains), or make another site. See
-[Your network account](/docs/network-account).
+A pushed stylesheet or image is live at once. What travels when, and how to pull
+changes back down, is in [Keep a deployed site in sync](/docs/push-and-pull).
 
-friendo.world is convenient, not required. Everything it does, you can do
-yourself on your own infrastructure.
+## 5. Find it again
 
-## Host it yourself
+[friendo.world/account](https://friendo.world/account) lists your sites. From
+there you can open a site's admin (no second sign-in), connect
+[your own domain](/docs/custom-domains), or claim another subdomain. From the
+terminal, `friendo open-admin my-club` does the same.
 
-friendo.world runs the same `friendo` binary you already have. Serve one site
-directly on a server you own ([Self-host a site](/docs/self-host-a-site)), or run
-your own **network**, one host serving many sites by subdomain
-([Run a network](/docs/run-a-network)); then `friendo deploy my-club --network
-https://sites.example.com` publishes to it, and `friendo push --target
-https://your-site.example.com` syncs to any site afterward.
+> **What you built.** A site on the internet, owned by your network account,
+> that you update from your laptop with one command. friendo.world is convenient,
+> not required: everything it does you can do on your own server.
 
-## Keeping in sync
-
-All sync goes through your site's own API. `deploy` signs you into the network and
-into the site's admin for you; for a self-hosted site the CLI asks for your email
-and the code it sends you (or a password, if the site allows them). Either way
-these work the same wherever the site is hosted:
-
-| Command | What |
-|---|---|
-| `friendo push` | Upload templates and assets (`--posts`, `--users` to include those) |
-| `friendo pull --posts` | Pull remote posts back into your local database |
-| `friendo pull --users` | Pull accounts and profiles back down |
-
-## Changes show up right away
-
-Files in `assets/` are served so that browsers and CDNs check back with your site
-on every request. A changed stylesheet or image is live as soon as you push it,
-and an unchanged one costs only a tiny "not modified" reply. If you want a file
-cached for a long time instead, give it a version in the URL,
-`/assets/style.css?v=2`, and bump the number when it changes.
-
-## Export instead
-
-Don't want a server at all? Write the site as plain HTML:
-
-```bash
-friendo export --mode static
-```
-
-See the [CLI reference](/docs/cli) for every command and flag.
+**Next:** [Keep a deployed site in sync](/docs/push-and-pull). Rather host it
+yourself? [Self-host a site](/docs/self-host-a-site) runs one site on your own
+server, [Run a network](/docs/run-a-network) runs many, and
+[Export a static site](/docs/static-export) needs no server at all.

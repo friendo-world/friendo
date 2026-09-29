@@ -11,11 +11,20 @@ import (
 	"github.com/flosch/pongo2/v6"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	gmrenderer "github.com/yuin/goldmark/renderer"
+	"github.com/yuin/goldmark/util"
 )
 
 // md is a shared goldmark instance (GitHub-flavored markdown: tables, strikethrough,
-// autolinks, task lists).
-var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
+// autolinks, task lists). Headings get GitHub-style ids ("## Hello World" is
+// <h2 id="hello-world">), so links to #a-section work; a fence's full info string
+// is kept as data-info on the <pre> (see fence.go).
+var md = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithParserOptions(parser.WithAutoHeadingID()),
+	goldmark.WithRendererOptions(gmrenderer.WithNodeRenderers(util.Prioritized(fenceInfoRenderer{}, 500))),
+)
 
 func init() {
 	RegisterFilters()

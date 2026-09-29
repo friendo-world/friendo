@@ -1,8 +1,10 @@
 ---
-title: Chats
+title: Add a chat
 slug: chats
-section: Concepts
-weight: 9
+section: Guides
+topic: Community
+weight: 40
+description: A realtime message feed on any page, post or group.
 ---
 
 A **chat** is a realtime message feed: a chat room, a live thread under an event.

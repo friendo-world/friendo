@@ -1,8 +1,9 @@
 ---
 title: Words friendo uses
 slug: words
-section: Concepts
-weight: 3
+section: Reference
+weight: 100
+description: One word for each idea. The whole dictionary on one page.
 ---
 
 Friendo tries to use one word for each idea, and the same word everywhere: in
@@ -45,7 +46,7 @@ moderators moderate every group.
 | Word | Meaning |
 |---|---|
 | **sign in** | Enter your email, get a code, enter the code. (The page and command are spelled `login`.) |
-| **review** | Where things wait for a human: comments, posts and requests to join a group are **approved** or **rejected** there. |
+| **review** | Where things wait for a human: comments and posts wait there until a moderator **approves** them (a comment can also be **rejected**). Requests to join a group wait in the group itself. See [Review comments and posts](/docs/review). |
 | **publish** | Make a post live. A post is a **draft** until then. |
 | **deploy** | Put a site on a network for the first time. After that, **push** changes up and **pull** changes down. |
 | **export** | Write the site as plain HTML files. |

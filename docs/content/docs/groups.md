@@ -1,8 +1,10 @@
 ---
-title: Groups
+title: Start groups
 slug: groups
-section: Concepts
-weight: 12
+section: Guides
+topic: Community
+weight: 30
+description: A group is a post with members. Make one, set who may join, and file posts under it.
 ---
 
 A **group** is a post with members, the way an [event](/docs/calendar) is a post
@@ -92,7 +94,7 @@ just a field.
 ## Pages for a group's members
 
 Templates see `user.groups`, the slugs the viewer belongs to, so the
-[members-only tag](/docs/templates#members-only-pages) takes it as a condition:
+[members-only tag](/docs/members-only) takes it as a condition:
 
 ```html
 {% members only if "board" in user.groups %}
@@ -107,5 +109,5 @@ groups = { "/board/*" = "board" }
 
 Memberships travel with `friendo push --posts`. The whole feature is the
 **Groups** switch in **Settings → Features**; joining, requests and additions
-write to the [inbox](/docs/community#notifications). The routes are in the
+write to the [inbox](/docs/profiles). The routes are in the
 [API](/docs/api#groups) reference.

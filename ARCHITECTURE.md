@@ -141,7 +141,9 @@ fill the same tables.
   `(collection, slug)`, so `content/` is the source of truth when present.
 
 This documentation site is authored this way (`docs/content/docs/*.md`), with its
-sidebar generated from the docs collection via `collections.docs|sort_by:"fields.weight"`.
+sidebar generated from the docs collection via `collections.docs|sort_by:"fields.weight"`,
+grouped by each page's `section` (and `topic` for Guides) in `docs/layouts/nav.html`.
+The section list lives once, at the top of `docs/layouts/base.html`.
 
 ## Calendar: an event is a post with a `when`
 

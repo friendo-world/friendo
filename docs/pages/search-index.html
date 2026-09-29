@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="robots" content="noindex">
+  <title>search index</title>
+</head>
+<body>
+{% comment %} Every page, rendered, for the search palette in assets/docs.js. Fetched once
+   when the palette first opens; not linked from anywhere else. {% endcomment %}
+{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section != "Moved" %}
+<article data-slug="{{ d.slug }}" data-title="{{ d.title }}" data-section="{{ d.fields.section }}" data-description="{{ d.fields.description }}">
+{{ d.body|markdown }}
+</article>
+{% endif %}{% endfor %}
+</body>
+</html>

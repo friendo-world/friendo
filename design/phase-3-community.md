@@ -4,7 +4,7 @@
 
 
 Activating the visitor-facing half of the data model: comments, reactions, and
-polls, written by verified visitors. See [Auth & users](/docs/auth) for the
+polls, written by verified visitors. See [Auth & users](/docs/signing-in) for the
 identity model this builds on.
 
 ## Identity model: accounts vs. profiles

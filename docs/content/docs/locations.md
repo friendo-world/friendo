@@ -1,8 +1,10 @@
 ---
-title: Locations
+title: Put posts on a map
 slug: locations
-section: Concepts
-weight: 10
+section: Guides
+topic: Content
+weight: 50
+description: Give a post a place and draw it on a map.
 ---
 
 Any post can have a **location**: a place with a label. One tag draws a post's
@@ -31,7 +33,7 @@ location:
 
 The label defaults to the post's title. Remove the key and the location goes with
 the next import. In the admin, every post has a **Location** section; a
-[`<friendo-form>`](/docs/community#posting-from-a-page) with a
+[`<friendo-form>`](/docs/forms) with a
 `<friendo-input type="location">` gives a post one from a page.
 
 Templates see it as `post.location`: `lat`, `lng`, `label`. An [event's](/docs/calendar)

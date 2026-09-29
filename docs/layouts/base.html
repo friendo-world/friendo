@@ -1,9 +1,17 @@
+{% comment %} The one place the docs' shape is set. Section names and their taglines, in
+   nav order; the Guides sub-topics; and the friendo version these pages describe.
+   Every page's front matter names one of these sections (Guides also a topic). {% endcomment %}
+{% set docs_version = "0.6" %}
+{% set sections = "Tutorials|learn by doing,Guides|get something done,Reference|look it up,Concepts|how friendo thinks"|split:"," %}
+{% set known_sections = "Tutorials,Guides,Reference,Concepts"|split:"," %}
+{% set guide_topics = "Content,Community,Hosting"|split:"," %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site.name }}{% endblock %}</title>
+  {% block head %}{% endblock %}
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='white'/%3E%3Ctext x='16' y='24' font-size='24' text-anchor='middle' fill='black'%3E%E2%9C%BF%3C/text%3E%3C/svg%3E">
   <script>
     // Theme, before first paint so there is no flash. The page follows the
@@ -23,98 +31,34 @@
   <a class="skip" href="#content">Skip to content</a>
   <header class="masthead">
     <a href="/" class="brand"><span class="flower">&#10047;</span> <span class="word">friendo</span> <span class="label">Docs</span></a>
-    <a href="https://friendo.world" class="home label">friendo.world &rarr;</a>
+    <span class="masthead-right">
+      {# The search button is added here by docs.js, so it only shows when it works. #}
+      <a href="https://friendo.world" class="home label">friendo.world &rarr;</a>
+    </span>
   </header>
 
   <div class="layout">
     <input type="checkbox" id="navtoggle" class="navtoggle">
     <label for="navtoggle" class="navtoggle-btn label" aria-label="Toggle navigation">&#9776; Contents</label>
     <aside class="sidebar">
-      <nav>
-        {# Nav generated from content/docs/*.md — group order editorial, links/order from fields.section/fields.weight. Active link is marked client-side (see script) to keep the template free of nested tags. #}
-        <p class="nav-group label">Getting started</p>
-        {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Getting started" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
-
-        <p class="nav-group label">Concepts</p>
-        {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Concepts" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
-
-        <p class="nav-group label">Reference</p>
-        {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Reference" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
-
-        <p class="nav-group label">Hosting</p>
-        {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Hosting" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+      <nav aria-label="All pages">
+        {% include "layouts/nav.html" %}
       </nav>
-      <script>
-        (function () {
-          var slug = location.pathname.replace(/^\/docs\//, "");
-          var link = document.querySelector('.sidebar a[data-slug="' + slug + '"]');
-          if (link) link.classList.add("active");
-        })();
-      </script>
     </aside>
 
     <main id="content" class="content">
       {% block content %}{% endblock %}
     </main>
+
+    {# "On this page": filled by docs.js from the article's h2/h3, empty otherwise. #}
+    <aside class="toc" aria-label="On this page"></aside>
   </div>
 
   <footer class="colophon label">
-    <span>&#10047; friendo docs</span>
+    <span>&#10047; Docs for friendo {{ docs_version }}</span>
     <button type="button" class="theme-toggle" aria-label="Switch theme">dark</button>
   </footer>
 
-  <script>
-    // The theme toggle. Clicking flips the page to the other mode and saves
-    // it. Flipping back to what the system already prefers clears the saved
-    // choice, so the page follows the system again. The button always names
-    // the mode it would switch to.
-    (function () {
-      var root = document.documentElement;
-      var btn = document.querySelector(".theme-toggle");
-      var system = window.matchMedia("(prefers-color-scheme: dark)");
-      function current() { return root.getAttribute("data-theme") || (system.matches ? "dark" : "light"); }
-      function relabel() { btn.textContent = current() === "dark" ? "light" : "dark"; }
-      btn.addEventListener("click", function () {
-        var next = current() === "dark" ? "light" : "dark";
-        var systemWants = system.matches ? "dark" : "light";
-        try {
-          if (next === systemWants) { localStorage.removeItem("theme"); root.removeAttribute("data-theme"); }
-          else { localStorage.setItem("theme", next); root.setAttribute("data-theme", next); }
-        } catch (e) { root.setAttribute("data-theme", next); }
-        relabel();
-      });
-      system.addEventListener("change", relabel);
-      relabel();
-    })();
-
-    // A copy button on every code block. Needs the clipboard, so nothing is
-    // added when it isn't there (plain http, old browsers) and the page reads as before.
-    (function () {
-      if (!navigator.clipboard) return;
-      document.querySelectorAll("main pre").forEach(function (pre) {
-        var wrap = document.createElement("div");
-        wrap.className = "codeblock";
-        pre.parentNode.insertBefore(wrap, pre);
-        wrap.appendChild(pre);
-
-        var btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "copy-code label";
-        btn.textContent = "\u273f copy";
-        btn.setAttribute("aria-label", "Copy code");
-        btn.addEventListener("click", function () {
-          navigator.clipboard.writeText(pre.textContent.replace(/\n$/, "")).then(function () {
-            btn.textContent = "\u273f copied";
-            btn.classList.add("done");
-            setTimeout(function () {
-              btn.textContent = "\u273f copy";
-              btn.classList.remove("done");
-            }, 1500);
-          });
-        });
-        wrap.appendChild(btn);
-      });
-    })();
-  </script>
+  <script src="/assets/docs.js" defer></script>
 </body>
 </html>

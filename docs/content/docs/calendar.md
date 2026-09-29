@@ -1,8 +1,10 @@
 ---
-title: Calendar & events
+title: Add events and a calendar
 slug: calendar
-section: Concepts
-weight: 11
+section: Guides
+topic: Content
+weight: 60
+description: Give a post a when and it has a date, a page, repeats, RSVPs and a feed anyone can subscribe to.
 ---
 
 An **event is a post with a `when`**. Give any post a time and it becomes an
@@ -126,7 +128,7 @@ app does the repeating.
 
 Each entry carries the post's title, its body as plain text, a link back to its
 page, and its [location](/docs/locations) as the place. Only **published** posts
-go out, and a collection whose page is [members-only](/docs/templates#members-only-pages)
+go out, and a collection whose page is [members-only](/docs/members-only)
 is left out, since the feed is public. A page of yours at `/calendar.ics` wins.
 
 ### Google Calendar, Apple Calendar, Outlook
@@ -208,7 +210,7 @@ moderators. `event.rsvps` is the tally for the next date, server-rendered:
 
 **Inviting people.** The organizer (the event's author, or a moderator) can ask
 people to come. Each gets an RSVP waiting for their answer (*You're invited — are
-you coming?* on the event page) and a note in their [inbox](/docs/community#notifications):
+you coming?* on the event page) and a note in their [inbox](/docs/profiles):
 
 ```html
 <friendo-invite post-id="{{ event.id }}"></friendo-invite>
@@ -232,37 +234,11 @@ event's date.
 
 ## Let people submit events
 
-A [`<friendo-form>`](/docs/community#posting-from-a-page) with a `when` field
-makes an event. An ordinary date input is all it takes; dotted names fill in the
-rest of the map:
+A [form](/docs/forms) with a `when` field makes an event: an ordinary
+`<input name="when" type="datetime-local">` is enough, or
+`<friendo-input name="when" type="when">` for start, end, all-day and repeats in
+one control. Contributors publish directly; a member's event waits for review.
+See [Let members post from a page](/docs/forms#events-from-a-form).
 
-```html
-<friendo-form collection="events">
-  <input name="title" placeholder="What's happening?" required>
-  <input name="when" type="datetime-local" required>
-  <input name="when.end" type="datetime-local">
-  <select name="when.repeats">
-    <option value="">Once</option><option>weekly</option><option>monthly</option>
-  </select>
-  <friendo-input name="body" type="richtext"></friendo-input>
-  <friendo-input name="where" type="location"></friendo-input>
-  <button type="submit">Submit event</button>
-</friendo-form>
-```
-
-For one control with start, end, all-day and repeats together, use
-`<friendo-input name="when" type="when">` in place of the native fields.
-
-Contributors publish directly. With **Members can post** on, a member's event
-waits for review like any post, with its date shown, until a moderator approves
-it. The [API](/docs/api#posts) works the same way: send `"when"` inside `fields`,
-as a string or a map, and it comes back on the post as `when`. An update that says
-nothing about `when` leaves the event alone; send `"when": null` to remove it.
-
-## Where it lives
-
-A post's time is one row in the site's `events` table, beside the post, the same
-way a location is. It travels on `friendo push --posts` and `pull`, and it's
-removed when the post is deleted or its `when` is taken away. Dates in the feed
-and on pages are computed from the rule each time, so editing a repeating event
-in one place changes every date at once.
+**Next:** [Events and time](/docs/time) for how repeats and timezones are
+worked out, or build one end to end in [Build an events site](/docs/events-site).

@@ -2,7 +2,8 @@
 title: A site is a folder
 slug: site-is-a-folder
 section: Concepts
-weight: 4
+weight: 10
+description: "The core idea: templates, pages, assets and a database in one folder you own."
 ---
 
 The core idea in friendo: **your site is a folder**. Templates, pages, assets and

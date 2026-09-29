@@ -1,13 +1,24 @@
 {% extends "layouts/base.html" %}
 
 {% block title %}{{ post.title }} — {{ site.name }}{% endblock %}
+{% block head %}{% if post.fields.description %}<meta name="description" content="{{ post.fields.description }}">{% endif %}{% endblock %}
 
 {% block content %}
-<article class="doc">
-  <span class="doc-kicker label">{{ post.fields.section }}</span>
+<article class="doc" data-section="{{ post.fields.section }}" data-slug="{{ post.slug }}">
+  <p class="doc-kicker label">
+    <a href="/">Docs</a> &rsaquo;
+    <a href="/#{{ post.fields.section|lower|cut:" " }}">{{ post.fields.section }}</a>{% if post.fields.topic %} &rsaquo; {{ post.fields.topic }}{% endif %}
+    <span class="right dim">about {{ (post.body|wordcount + 199) / 200 }} min</span>
+  </p>
   <h1 class="doc-title">{{ post.title }}</h1>
+  {% if post.fields.description %}<p class="lead">{{ post.fields.description }}</p>{% endif %}
   <div class="doc-body">
     {{ post.body|markdown }}
   </div>
+  <nav class="pager" aria-label="Previous and next page"></nav>
+  <p class="doc-foot label">
+    <a href="https://github.com/friendo-world/friendo/edit/main/docs/content/docs/{{ post.slug }}.md">Edit this page on GitHub</a>
+    <a href="https://github.com/friendo-world/friendo/issues/new?title=Docs%3A%20{{ post.title|urlencode }}&amp;body=Page%3A%20https%3A%2F%2Fdocs.friendo.world%2Fdocs%2F{{ post.slug }}%0A%0AWhat%27s%20wrong%3A%20">Report a problem</a>
+  </p>
 </article>
 {% endblock %}

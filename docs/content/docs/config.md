@@ -2,7 +2,8 @@
 title: friendo.toml
 slug: config
 section: Reference
-weight: 9
+weight: 20
+description: Every key in friendo.toml.
 ---
 
 `friendo.toml` sits at the root of your site and configures it. A minimal file:
@@ -71,7 +72,7 @@ and the admin shows those after the declared ones.
 
 ## `[profiles]`
 
-The fields a member's [profile](/docs/signing-in#profiles) carries beyond its
+The fields a member's [profile](/docs/profiles) carries beyond its
 name, avatar and bio. Same grammar as a collection's fields; the profile editor,
 `<friendo-profile>` and the admin lay themselves out from it, and the values are
 `profile.fields.<name>` on `pages/profiles/[slug].html`:
@@ -112,11 +113,11 @@ default_collections = ["blog", "pages"]   # built-in collections shown while [co
 |---|---|---|
 | `open_signups` | Anyone can sign up. Off, only people an admin adds have accounts | `true` |
 | `signups_are_contributors` | A new member starts as a contributor (can write their own posts). Off, a new member can comment, react, vote and RSVP | `false` |
-| `members_can_post` | Members can post from a [`<friendo-form>`](/docs/community#posting-from-a-page); their posts always wait for review | `false` |
+| `members_can_post` | Members can post from a [`<friendo-form>`](/docs/forms); their posts always wait for review | `false` |
 | `posts_need_review` | A contributor's post waits for review until a moderator approves it | `false` |
 | `comments_need_review` | A new comment waits for review until a moderator approves it | `true` |
 | `password_login` | Also allow signing in with a password. Everyone can always sign in with an emailed code. See [Signing in](/docs/signing-in) | `false` |
-| `profile_visibility` | Who may see [profiles](/docs/signing-in#profiles): `members` (anyone signed in) or `public` | `members` |
+| `profile_visibility` | Who may see [profiles](/docs/profiles): `members` (anyone signed in) or `public` | `members` |
 | `members_can_start_groups` | Any member can start a [group](/docs/groups) and is its admin. Off, contributors and up can | `false` |
 | `comments`, `reactions`, `polls`, `rsvp`, `locations`, `chats`, `follows`, `groups` | Feature switches (admin **Settings → Features**). Off, the feature's API refuses it, its `<friendo-*>` tag renders nothing, and `post.comments` (and so on) is empty. What people already wrote is kept | `true` |
 | `default_collections` | Which built-in collections (`blog`, `pages`) the admin lists while `[content] collections` is unset | both |
@@ -127,7 +128,7 @@ managed in the admin and travel to a deployed site with `friendo push`.
 ## `[access]`
 
 Paths that are for members only, so a whole folder can be
-[members-only](/docs/templates#members-only-pages) without a tag on each page:
+[members-only](/docs/members-only) without a tag on each page:
 
 ```toml
 [access]

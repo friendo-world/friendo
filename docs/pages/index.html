@@ -1,61 +1,54 @@
 {% extends "layouts/base.html" %}
 
 {% block title %}{{ site.name }} — Your site is a folder{% endblock %}
+{% block head %}<meta name="description" content="friendo is a local-first website builder. Build the folder on your machine, publish it anywhere. Tutorials, guides, reference and concepts.">{% endblock %}
 
 {% block content %}
-<article class="doc">
+<article class="doc home">
   <div class="hero">
     <span class="doc-kicker label">Documentation</span>
     <h1>Your site is a folder.</h1>
     <p class="lead">friendo is a local-first website builder. Build the folder on your machine,
-      publish it anywhere. These pages cover everything from the first <code>friendo init</code>
-      to running a network of your own.</p>
-    <a class="button" href="/docs/installation">Get started</a>
+      publish it anywhere. Three commands and you have a running site:</p>
   </div>
+
+<pre><code class="language-bash">curl -fsSL https://raw.githubusercontent.com/friendo-world/friendo/main/scripts/install.sh | sh
+friendo init my-site &amp;&amp; cd my-site
+friendo serve
+</code></pre>
 
   <div class="rule-head label">
     <span>Start here</span>
-    <span class="right">about ten minutes</span>
+    <span class="right">the tutorials, in order</span>
   </div>
   <div class="start">
-    <a href="/docs/installation">
-      <span class="n label">01</span>
-      <h3>Install</h3>
-      <p>Get the <code>friendo</code> command on your machine.</p>
+    {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Tutorials" %}
+    <a href="/docs/{{ d.slug }}">
+      <span class="n label"></span>
+      <h3>{{ d.title }}</h3>
+      <p>{{ d.fields.description }}</p>
     </a>
-    <a href="/docs/first-site">
-      <span class="n label">02</span>
-      <h3>Your first site</h3>
-      <p><code>init</code>, then <code>serve</code>. A running site in a minute.</p>
-    </a>
-    <a href="/docs/deploy">
-      <span class="n label">03</span>
-      <h3>Deploy</h3>
-      <p>One command to put the folder on the internet.</p>
-    </a>
+    {% endif %}{% endfor %}
   </div>
 
   <section class="guide">
-    {# Every page, grouped, straight from content/docs/*.md. #}
-    <div class="group">
-      <div class="rule-head label"><span>Getting started</span><span class="right">the path</span></div>
-      <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Getting started" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+    {# Every page, grouped, straight from content/docs/*.md. Same order as the sidebar. #}
+    {% for s in sections %}{% set pair = s|split:"|" %}
+    <div class="group" id="{{ pair.0|lower|cut:" " }}">
+      <div class="rule-head label"><span>{{ pair.0 }}</span><span class="right">{{ pair.1 }}</span></div>
+      {% if pair.0 == "Guides" %}
+        {% for t in guide_topics %}
+        <p class="nav-topic label">{{ t }}</p>
+        <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Guides" and d.fields.topic == t %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+        {% endfor %}
+      {% else %}
+        <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == pair.0 %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+      {% endif %}
     </div>
-    <div class="group">
-      <div class="rule-head label"><span>Concepts</span><span class="right">how friendo thinks</span></div>
-      <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Concepts" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
-    </div>
-    <div class="group">
-      <div class="rule-head label"><span>Reference</span><span class="right">look it up</span></div>
-      <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Reference" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
-    </div>
-    <div class="group">
-      <div class="rule-head label"><span>Hosting</span><span class="right">your server, or a network</span></div>
-      <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Hosting" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
-    </div>
+    {% endfor %}
   </section>
 
   <p class="meta">This site is itself a friendo site: rendered from markdown in a folder, and deployed
-    to <code>docs.friendo.world</code> with <code>friendo deploy</code>.</p>
+    to <code>docs.friendo.world</code> with <code>friendo deploy</code>. Press <kbd>/</kbd> to search.</p>
 </article>
 {% endblock %}

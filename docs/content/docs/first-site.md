@@ -1,13 +1,16 @@
 ---
 title: Your first site
 slug: first-site
-section: Getting started
-weight: 2
+section: Tutorials
+weight: 20
+description: init, then serve. A running site in a minute, and your first post in five.
 ---
 
-A friendo site is a folder on your machine. Let's make one, run it, and edit it.
+A friendo site is a folder on your machine. In this tutorial you make one, run
+it, write a post, and change how every page looks. You need
+[friendo installed](/docs/installation) and a text editor.
 
-## Scaffold
+## 1. Scaffold
 
 ```bash
 friendo init my-site
@@ -31,7 +34,7 @@ my-site/
 │   ├── groups/         # groups: a list and a group page
 │   └── profiles/
 │       └── [slug].html # a member's profile page
-├── content/            # optional: posts as markdown files
+├── content/            # posts as markdown files
 │   ├── blog/
 │   │   └── hello-world.md
 │   ├── events/
@@ -41,49 +44,63 @@ my-site/
 └── data/               # made on first run (SQLite)
 ```
 
-## Serve it
+## 2. Serve it
 
 ```bash
 friendo serve
 ```
 
-Your site is now at **http://localhost:3000**, with hot reload: edit a template
-and the browser refreshes.
+Open **http://localhost:3000**. You'll see the site's name and the *Hello, world*
+post. The server watches the folder: edit a file and the browser refreshes.
 
-| URL | What |
-|---|---|
-| `http://localhost:3000` | Your site |
-| `http://localhost:3000/_/` | The admin: posts, review, members, settings |
+> **Tip:** port 3000 taken? `friendo serve --port 4000` picks another.
 
-## Open the admin
+## 3. Write a post
 
-Open `http://localhost:3000/_/`. On your own machine there's nothing to sign in
-to; the admin just opens, and you're the owner. From here you can write posts,
-manage collections, and add people.
+Make a new file, `content/blog/second-post.md`:
 
-(Sign-in only appears once the site is somewhere other people can reach: on a
-server, you'll be asked to confirm your email with a code the first time. See
-[Signing in & roles](/docs/signing-in).)
+```markdown
+---
+title: My second post
+---
 
-## Edit a page
-
-Pages live in `pages/` and are plain templates. Open `pages/index.html`:
-
-```html
-{% extends "layouts/base.html" %}
-
-{% block content %}
-  <h1>{{ site.name }}</h1>
-  {% for post in collections.blog %}
-    <article>
-      <h2>{{ post.title }}</h2>
-      <a href="/blog/{{ post.slug }}">Read more</a>
-    </article>
-  {% endfor %}
-{% endblock %}
+Written in a **file**, on my own machine.
 ```
 
-That's the whole model: [templates](/docs/templates) render
-[posts](/docs/posts). When you're ready to share it, [deploy](/docs/deploy). And
-if a word puzzles you along the way, every one friendo uses is on one page:
+Save it and look at the home page: the post is there. The folder under `content/`
+is the collection (`blog`), the file name is the slug, so the post's own page is
+at **http://localhost:3000/blog/second-post**. That page is drawn by
+`pages/blog/[slug].html`.
+
+## 4. Change every page at once
+
+Every page extends `layouts/base.html`. Open it and add a footer after `</main>`:
+
+```diff
+     <main>
+         {% block content %}{% endblock %}
+     </main>
++    <footer>Made with friendo.</footer>
+     <script src="/friendo.js" defer></script>
+```
+
+Save. Every page on the site now has the footer. That's the whole model:
+[templates](/docs/templates) render [posts](/docs/posts), and a layout holds
+what they share.
+
+## 5. Open the admin
+
+Open **http://localhost:3000/_/**. On your own machine there's nothing to sign in
+to: the admin opens and you're the owner. Your two posts are under **blog**. From
+here you can write posts without files, change settings, and add people.
+
+Sign-in only appears once the site is somewhere other people can reach. See
+[Members, roles and sign-in](/docs/signing-in).
+
+> **What you built.** A site that's a folder: posts in `content/`, pages in
+> `pages/`, one layout shared by all of them, and an admin, running on your
+> laptop with no account anywhere.
+
+**Next:** [Add sign-in and comments](/docs/add-a-community). And if a word puzzles
+you along the way, every one friendo uses is on one page:
 [Words friendo uses](/docs/words).

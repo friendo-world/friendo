@@ -1,7 +1,12 @@
 /* docs.friendo.world — the friendo house style, set for reading.
    Paper and ink: a white page, silver hairlines (dimgray in dark mode), no rounded corners, no
    shadows. Liberation Sans for everything, in bold for small labels, headings
-   and the wordmark; Courier for code. Links are blue. Named CSS colours on purpose. */
+   and the wordmark; Courier for code. Links are blue. Named CSS colours on purpose.
+
+   Layout: three columns on a wide screen (all pages | the article | on this page),
+   two under 1100px (the right rail goes), one under 860px (the sidebar folds
+   behind a "Contents" toggle). Everything interactive is added by assets/docs.js
+   and styled here under .js, so the page reads fine without it. */
 
 @font-face { font-family: "Liberation Sans"; font-weight: normal; src: url("/assets/fonts/LiberationSans-Regular.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "Liberation Sans"; font-style: italic; src: url("/assets/fonts/LiberationSans-Italic.woff2") format("woff2"); font-display: swap; }
@@ -18,7 +23,9 @@
   --rule: silver;
   --sans: "Liberation Sans", Arial, Helvetica, sans-serif;
   --mono: Courier, "Courier New", monospace;
+  --max-w: 1280px;
   --sidebar-w: 240px;
+  --toc-w: 210px;
   --masthead-h: 60px;
   --gutter: 1rem;
 }
@@ -64,6 +71,7 @@ h1, h2, h3, h4 { font-weight: bold; line-height: 1.1; margin: 0 0 0.5rem; letter
 b, strong { font-weight: bold; }
 em { font-style: italic; }
 ::selection { background: var(--manila); color: black; }
+kbd { font-family: var(--mono); border: 1px solid var(--rule); padding: 0 0.3em; font-size: 0.9em; }
 
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 8px; top: 8px; background: var(--manila); color: black; padding: 8px 12px; z-index: 20; }
@@ -78,19 +86,13 @@ em { font-style: italic; }
   border-bottom: 1px solid var(--rule); padding-bottom: 2px; margin: 0 0 0.75rem;
 }
 .rule-head .right { font-weight: normal; text-align: right; }
-.badge {
-  display: inline-block; vertical-align: 0.1em;
-  background: var(--ink); color: var(--paper);
-  padding: 2px 5px 1px; border-radius: 5px;
-  font-size: 0.6rem; font-weight: bold; letter-spacing: 0.03em; line-height: 1.2;
-}
 .dim { color: var(--dim); }
 
 /* Masthead: the wordmark on a rule, same width as the layout below it. */
 .masthead {
   position: sticky; top: 0; z-index: 10;
   height: var(--masthead-h);
-  max-width: 1120px; margin: 0 auto; padding: 1.2rem var(--gutter) 0;
+  max-width: var(--max-w); margin: 0 auto; padding: 1.2rem var(--gutter) 0;
   background: var(--paper); border-bottom: 1px solid var(--rule);
   display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
 }
@@ -98,14 +100,24 @@ em { font-style: italic; }
 .masthead .brand .word { font-weight: bold; font-size: 1.25rem; letter-spacing: 0.01em; line-height: 1; }
 .masthead .brand .flower { font-size: 1.1rem; line-height: 1; font-weight: normal; }
 .masthead .brand .label { color: var(--dim); }
+.masthead-right { display: inline-flex; align-items: baseline; gap: 1.25rem; }
 .masthead .home { color: var(--ink); text-decoration: none; }
 .masthead .home:hover { text-decoration: underline; }
+.search-btn {
+  display: none; padding: 0; border: 0; background: none; color: var(--ink);
+  font: inherit; cursor: pointer;
+}
+.search-btn:hover { text-decoration: underline; }
+.search-btn kbd { border-color: var(--dim); color: var(--dim); }
+.js .search-btn { display: inline; }
 
-/* Layout */
-.layout { display: flex; align-items: flex-start; max-width: 1120px; margin: 0 auto; }
+/* Layout: a grid of three columns. */
+.layout {
+  display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w);
+  align-items: start; max-width: var(--max-w); margin: 0 auto;
+}
 .sidebar {
   position: sticky; top: var(--masthead-h);
-  width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
   height: calc(100vh - var(--masthead-h));
   overflow-y: auto;
   padding: 1.5rem var(--gutter) 3rem;
@@ -116,6 +128,8 @@ em { font-style: italic; }
   border-bottom: 1px solid var(--rule);
 }
 .nav-group:first-child { margin-top: 0; }
+.nav-other:not(:empty)::before { content: "Other"; display: block; margin: 1.5rem 0 0.35rem; padding-bottom: 2px; border-bottom: 1px solid var(--rule); font-weight: bold; font-size: 0.85rem; letter-spacing: 0.02em; }
+.nav-topic { margin: 0.6rem 0 0.1rem; color: var(--dim); font-size: 0.75rem; }
 .sidebar nav a {
   display: block; padding: 0.2rem 0.4rem; margin: 0 -0.4rem;
   color: var(--ink); text-decoration: none; font-size: 0.925rem;
@@ -123,13 +137,33 @@ em { font-style: italic; }
 .sidebar nav a:hover { text-decoration: underline; }
 .sidebar nav a.active { color: var(--link); font-weight: bold; }
 
+/* On this page: the right rail. Empty until docs.js fills it. */
+.toc {
+  position: sticky; top: var(--masthead-h);
+  max-height: calc(100vh - var(--masthead-h)); overflow-y: auto;
+  padding: 1.5rem var(--gutter) 3rem; border-left: 1px solid var(--rule);
+  font-size: 0.85rem;
+}
+.toc:empty { border-left: 0; }
+.toc .label { margin: 0 0 0.35rem; padding-bottom: 2px; border-bottom: 1px solid var(--rule); }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin: 0; }
+.toc a { display: block; padding: 0.15rem 0; color: var(--ink); text-decoration: none; line-height: 1.3; }
+.toc a:hover { text-decoration: underline; }
+.toc a.active { color: var(--link); font-weight: bold; }
+.toc li.h3 a { padding-left: 0.75rem; }
+
 /* Content */
-.content { flex: 1 1 auto; min-width: 0; padding: 2rem 2rem 5rem; }
+.content { min-width: 0; padding: 2rem 2rem 5rem; }
 .doc { max-width: 700px; }
-.doc-kicker { display: block; margin: 0 0 0.6rem; color: var(--dim); }
-.doc-title { font-size: 2.1rem; line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 1.25rem; }
+.doc-kicker { display: flex; gap: 0.35rem; align-items: baseline; margin: 0 0 0.6rem; color: var(--dim); }
+.doc-kicker a { color: var(--dim); text-decoration: none; }
+.doc-kicker a:hover { text-decoration: underline; }
+.doc-kicker .right { margin-left: auto; font-weight: normal; }
+.doc-title { font-size: 2.1rem; line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 1rem; }
+.doc > .lead { margin-bottom: 1.5rem; }
 .doc-body > :first-child { margin-top: 0; }
-.doc-body h2, .doc-body h3, .doc-body h4 { letter-spacing: -0.01em; line-height: 1.2; }
+.doc-body h2, .doc-body h3, .doc-body h4 { letter-spacing: -0.01em; line-height: 1.2; scroll-margin-top: calc(var(--masthead-h) + 0.75rem); }
 .doc-body h2 {
   font-size: 1.35rem; margin: 2.5rem 0 0.75rem; padding-top: 0.6rem;
   border-top: 1px solid var(--rule);
@@ -142,6 +176,20 @@ em { font-style: italic; }
 .doc-body img { max-width: 100%; border: 1px solid var(--rule); }
 .doc-body hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
 
+/* Heading anchors: a ✿ that appears on hover, links to the heading itself. */
+.doc-body .anchor { color: var(--dim); text-decoration: none; margin-left: 0.4rem; font-weight: normal; font-size: 0.8em; opacity: 0; }
+.doc-body h2:hover .anchor, .doc-body h3:hover .anchor, .doc-body .anchor:focus-visible { opacity: 1; }
+
+/* Prev / next, and the page's foot. */
+.pager { display: flex; justify-content: space-between; gap: 1rem; margin: 3rem 0 0; border-top: 1px solid var(--rule); padding-top: 0.75rem; }
+.pager:empty { display: none; }
+.pager a { text-decoration: none; max-width: 48%; }
+.pager a:hover { text-decoration: underline; }
+.pager .next { margin-left: auto; text-align: right; }
+.pager .label { display: block; color: var(--dim); }
+.doc-foot { display: flex; gap: 1.5rem; margin: 1.5rem 0 0; color: var(--dim); }
+.doc-foot a { color: var(--dim); }
+
 /* Code — typewriter. */
 code, kbd, pre { font-family: var(--mono); font-size: 0.95em; }
 code { padding: 0 0.15em; }
@@ -151,11 +199,13 @@ pre {
   line-height: 1.4; font-size: 0.9rem;
 }
 pre code { padding: 0; font-size: inherit; }
+.doc-body h2 code, .doc-body h3 code, .doc-body h4 code { font-size: 0.9em; }
 
-/* Copy button on every code block. The script in layouts/base.html wraps each
-   <pre> in .codeblock and adds the button, so it only shows up when the
-   clipboard is available. Bare text, dim until pointed at, same florette as the landing. */
+/* Copy button on every code block. docs.js wraps each <pre> in .codeblock and
+   adds the button, so it only shows up when the clipboard is available. Bare
+   text, dim until pointed at, same florette as the landing. */
 .codeblock { position: relative; }
+.codeblock pre { padding-right: 5rem; }
 .codeblock .copy-code {
   position: absolute; top: 0; right: 0;
   padding: 4px 8px; border: 0; background: none; color: var(--ink);
@@ -163,7 +213,28 @@ pre code { padding: 0; font-size: inherit; }
   opacity: 0.35; transition: opacity 0.15s;
 }
 .codeblock .copy-code:hover, .codeblock .copy-code:focus-visible, .codeblock .copy-code.done { opacity: 1; }
-.doc-body h2 code, .doc-body h3 code, .doc-body h4 code { font-size: 0.9em; }
+
+/* Highlighting: three roles only. Comments dim, strings blue, keywords bold.
+   Diff lines: added blue, removed dim and struck. */
+.tok-comment { color: var(--dim); }
+.tok-string { color: var(--link); }
+.tok-keyword, .tok-attr { font-weight: bold; }
+.tok-add { color: var(--link); }
+.tok-del { color: var(--dim); text-decoration: line-through; }
+
+/* Tabbed code groups: bare labels on a hairline; the chosen one is bold with a
+   2px underline. Built by docs.js from consecutive fences carrying tab="…". */
+.tabs { margin: 1rem 0; }
+.tablist { display: flex; gap: 1.25rem; border-bottom: 1px solid var(--rule); margin: 0; }
+.tablist button {
+  padding: 0.3rem 0 0.25rem; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent;
+  background: none; color: var(--dim); font: inherit; font-weight: bold; font-size: 0.85rem; letter-spacing: 0.02em; cursor: pointer;
+}
+.tablist button:hover { color: var(--ink); }
+.tablist button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.tabs .panel[hidden] { display: none; }
+.tabs .panel .codeblock { margin: 0; }
+.tabs .panel pre { margin: 0; border-top: 0; }
 
 /* Tables: hairlines, small bold headers. */
 .doc-body table { border-collapse: collapse; width: 100%; margin: 1rem 0; display: block; overflow-x: auto; font-size: 0.95rem; }
@@ -173,7 +244,9 @@ pre code { padding: 0; font-size: inherit; }
   font-weight: bold; letter-spacing: 0.02em; font-size: 0.8rem;
 }
 
-/* Blockquotes: a manila note. */
+/* Blockquotes: a manila note. With a bold lead (Note, Tip, Warning, Common
+   mistake) docs.js turns it into a callout: the lead becomes a label line, and
+   a warning gets a heavier rule. Same colours; the words carry the meaning. */
 .doc-body blockquote {
   margin: 1rem 0; padding: 0.6rem 0.9rem;
   border: 1px solid black; border-left-width: 4px;
@@ -182,11 +255,47 @@ pre code { padding: 0; font-size: inherit; }
 .doc-body blockquote p { margin: 0.35rem 0; }
 .doc-body blockquote a { color: black; }
 .doc-body blockquote code { color: black; }
+.doc-body .callout-kind { display: block; margin-bottom: 0.15rem; font-size: 0.75rem; letter-spacing: 0.04em; }
+.doc-body .callout-warning, .doc-body .callout-common-mistake { border-left-width: 8px; }
+
+/* Reference pages: prose left, code right, per heading. docs.js builds the
+   rows on wide screens only; everywhere else it's the ordinary column. */
+.doc[data-section="Reference"] { max-width: 860px; }
+.doc[data-section="Reference"].railed { max-width: none; }
+.ref-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
+.ref-row > .ref-prose > :first-child { margin-top: 0; }
+.ref-code { position: sticky; top: calc(var(--masthead-h) + 1rem); }
+.ref-code > :first-child { margin-top: 0; }
+.ref-code pre { margin-top: 0; }
+.railed .doc-body h2 { border-top: 1px solid var(--rule); }
+
+/* Search palette: a square dialog, one hairline, no shadow. */
+.palette {
+  width: min(640px, calc(100vw - 2rem)); max-height: min(70vh, 560px);
+  padding: 0; border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
+  display: none; flex-direction: column; margin: 8vh auto 0;
+}
+.palette[open] { display: flex; }
+.palette::backdrop { background: rgba(0, 0, 0, 0.2); }
+.palette input {
+  width: 100%; padding: 0.8rem 1rem; border: 0; border-bottom: 1px solid var(--rule);
+  background: var(--paper); color: var(--ink); font: inherit; font-size: 1.05rem; outline: none;
+}
+.palette ol { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.palette .group { padding: 0.5rem 1rem 0.1rem; color: var(--dim); }
+.palette li a { display: block; padding: 0.45rem 1rem; color: var(--ink); text-decoration: none; }
+.palette li a .where { color: var(--dim); font-size: 0.85rem; }
+.palette li a .snippet { display: block; color: var(--dim); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette li a mark { background: var(--manila); color: black; }
+.palette li.active a { background: var(--tint); }
+.palette .empty { padding: 1rem; color: var(--dim); }
+.palette .hint { padding: 0.5rem 1rem; border-top: 1px solid var(--rule); color: var(--dim); display: flex; gap: 1rem; }
 
 /* Home page */
-.hero { padding: 0.5rem 0 1.5rem; }
+.hero { padding: 0.5rem 0 0.5rem; }
 .hero h1 { font-size: clamp(2rem, 4.5vw, 2.6rem); line-height: 1.1; margin: 0 0 0.6rem; letter-spacing: -0.01em; }
-.lead { font-size: 1.1rem; max-width: 46ch; margin: 0 0 1rem; }
+.lead { font-size: 1.1rem; max-width: 50ch; margin: 0 0 1rem; }
+.home > pre { margin: 0 0 2rem; }
 
 /* Button: black block. Slightly heavier top padding so the text sits on the
    baseline of the box. */
@@ -199,8 +308,9 @@ pre code { padding: 0; font-size: inherit; }
 .button:hover { background: var(--link); color: var(--paper); border-color: var(--link); }
 
 .guide { margin: 2rem 0; }
-.guide .group { margin: 0 0 1.5rem; }
+.guide .group { margin: 0 0 1.5rem; scroll-margin-top: calc(var(--masthead-h) + 0.75rem); }
 .guide .group .rule-head { margin-bottom: 0.4rem; }
+.guide .nav-topic { margin: 0.5rem 0 0.1rem; }
 .guide ol { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 2rem; }
 .guide li { break-inside: avoid; padding: 0.2rem 0; }
 .guide li a { text-decoration: none; }
@@ -209,13 +319,16 @@ pre code { padding: 0; font-size: inherit; }
 
 /* Numbered cells with shared hairlines */
 .start {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px;
   background: var(--rule); border: 1px solid var(--rule); margin: 1.5rem 0 2rem;
 }
 .start a { background: var(--paper); color: var(--ink); padding: 1rem 1rem 1.1rem; text-decoration: none; display: block; }
 .start a:hover { background: var(--tint); }
 .start a:hover h3 { color: var(--link); }
+.start { counter-reset: step; }
+.start a { counter-increment: step; }
 .start .n { display: block; margin-bottom: 0.6rem; color: var(--dim); }
+.start .n::before { content: counter(step, decimal-leading-zero); }
 .start h3 { font-size: 1.05rem; margin: 0 0 0.3rem; line-height: 1.2; }
 .start p { margin: 0; color: var(--dim); font-size: 0.95rem; }
 
@@ -225,7 +338,7 @@ pre code { padding: 0; font-size: inherit; }
    toggle is a bare label, like the copy button, and reads as the mode it
    switches to ("dark" while the page is light). Hidden without JS. */
 .colophon {
-  max-width: 1120px; margin: 0 auto; padding: 1rem var(--gutter) 2rem;
+  max-width: var(--max-w); margin: 0 auto; padding: 1rem var(--gutter) 2rem;
   border-top: 1px solid var(--rule); color: var(--dim);
   display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
 }
@@ -237,37 +350,54 @@ pre code { padding: 0; font-size: inherit; }
 .theme-toggle:hover { text-decoration: none; }
 .js .theme-toggle { display: inline; }
 
-/* Navigation toggle (mobile) */
+/* Two columns: the right rail goes. */
+@media (max-width: 1099px) {
+  .layout { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+  .toc { display: none; }
+}
+
+/* One column: the sidebar folds behind a toggle. */
 .navtoggle, .navtoggle-btn { display: none; }
 @media (max-width: 860px) {
-  .content { padding: 1.5rem var(--gutter) 4rem; }
+  .layout { grid-template-columns: 1fr; }
+  .content { padding: 1.5rem var(--gutter) 4rem; width: 100%; }
   .navtoggle-btn {
     display: block; position: sticky; top: var(--masthead-h); z-index: 5;
     background: var(--paper); color: var(--ink); border-bottom: 1px solid var(--rule);
     padding: 0.55rem var(--gutter) 0.4rem; cursor: pointer;
   }
   .sidebar {
-    display: none; position: static; width: 100%; flex-basis: 100%; height: auto;
+    display: none; position: static; width: 100%; height: auto;
     border-right: none; border-bottom: 1px solid var(--rule);
   }
   .navtoggle:checked ~ .sidebar { display: block; }
-  .layout { flex-direction: column; align-items: stretch; }
-  .content { width: 100%; }
   .start { grid-template-columns: 1fr; }
   .guide ol { columns: 1; }
+  .doc-kicker { flex-wrap: wrap; }
+  .masthead { padding-top: 1.1rem; }
+  .masthead-right { gap: 0.9rem; white-space: nowrap; }
+  .search-btn kbd { display: none; }
+  .pager { flex-direction: column; }
+  .pager a { max-width: none; }
+  .pager .next { margin-left: 0; text-align: left; }
 }
 
-/* Print: black on white, no chrome. */
+/* Print: black on white, no chrome, every tab open. */
 @media print {
   @page { margin: 0.6in; }
   :root { --paper: white; --tint: white; --ink: black; --dim: dimgray; --rule: black; --link: black; }
   html, body { background: white; color: black; font-size: 10.5pt; }
   .masthead { position: static; border-bottom: 4px double black; height: auto; padding: 0 0 0.1in; max-width: none; }
-  .masthead .home, .sidebar, .navtoggle-btn, .skip { display: none; }
+  .masthead .home, .masthead .search-btn, .sidebar, .navtoggle-btn, .skip, .toc, .pager, .doc-foot, .anchor { display: none; }
+  .layout { display: block; }
   .content { padding: 0.2in 0 0; }
   .doc { max-width: none; }
   pre { border: 1px solid black; background: none; white-space: pre-wrap; }
   .copy-code, .colophon { display: none; }
   .doc-body blockquote { background: none; }
+  .tabs .panel[hidden] { display: block; }
+  .tablist { display: none; }
+  .tok-comment, .tok-string, .tok-add, .tok-del { color: black; }
+  .ref-row { display: block; }
   a { color: black; text-decoration: none; }
 }

@@ -76,14 +76,14 @@
       <h2 class="hero-h">One file, a page for every post.</h2>
       <p class="lead">The square brackets mean: render this once per post in the blog collection, at
         <code>/blog/its-slug</code>. Add a post and its page just exists.</p>
-      <a class="doc-link label dim" href="https://docs.friendo.world/docs/content">read about collections</a>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/posts">read about collections</a>
     </div>
     <div class="x" data-k="content">
       <span class="label kicker"><code>content/</code></span>
       <h2 class="hero-h">Posts as markdown files.</h2>
       <p class="lead">Drop <code>hello.md</code> in <code>content/blog/</code> and it's a post. Or write in the
         admin. Either way it lands in the same little database.</p>
-      <a class="doc-link label dim" href="https://docs.friendo.world/docs/content">read about authoring in files</a>
+      <a class="doc-link label dim" href="https://docs.friendo.world/docs/posts-in-files">read about authoring in files</a>
     </div>
     <div class="x" data-k="data">
       <span class="label kicker"><code>data/</code></span>
@@ -112,6 +112,144 @@ cd my-site &amp;&amp; friendo serve</code></pre>
     </div>
     <p class="copy-line label dim" hidden><button class="copy" type="button" data-copy="install-cmd">&#10047; copy these three lines</button>, then run them in your terminal.</p>
   </div>
+</section>
+
+
+<section class="community" aria-labelledby="community-h">
+  <div class="rule-head label"><span>Bring people in</span><span class="right">one tag each</span></div>
+  <h2 id="community-h" class="section-h">A site people can join.</h2>
+  <p class="section-lead">Every friendo site can host a community. Load one script in your layout, then
+    drop a tag wherever you want people to talk, meet, vote or find each other. Visitors sign in
+    with a code sent to their email. No plugins, no third-party service, and it all lives in
+    the same folder.</p>
+  <pre class="script-line"><code>&lt;script src="/friendo.js" defer&gt;&lt;/script&gt;</code></pre>
+
+  <div class="features">
+
+    <article class="feature">
+      <div class="mock" aria-hidden="true">
+        <div class="m-comment"><b>Pat</b> Lovely write-up. Same time next year?</div>
+        <div class="m-comment"><b>Sam</b> Bringing the good bread this time.</div>
+        <div class="m-field">Write a comment&hellip;</div>
+        <div class="m-reacts"><span class="on">&#128077; 12</span><span>&#10084;&#65039; 4</span><span>&#127881; 2</span></div>
+      </div>
+      <h3>Comments and reactions</h3>
+      <p>A comment box under every post, with a moderator's approval if you want one, and emoji
+        reactions with live counts.</p>
+      <pre><code>&lt;friendo-comments
+  post-id="{{ "{{ post.id }}" }}"&gt;&lt;/friendo-comments&gt;
+&lt;friendo-reactions
+  post-id="{{ "{{ post.id }}" }}"&gt;&lt;/friendo-reactions&gt;</code></pre>
+      <a class="doc-link label" href="https://docs.friendo.world/docs/add-a-community">add sign-in and comments</a>
+    </article>
+
+    <article class="feature">
+      <div class="mock" aria-hidden="true">
+        <div class="m-cal">
+          <span class="m-cal-h">October</span>
+          <div class="m-grid"><span>1</span><span class="ev">2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span class="ev">9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span class="ev">16</span><span>17</span><span class="ev">18</span><span>19</span><span>20</span><span>21</span><span>22</span><span class="ev">23</span><span>24</span><span>25</span><span>26</span><span>27</span><span>28</span><span>29</span><span class="ev">30</span><span>31</span><span></span><span></span><span></span><span></span></div>
+        </div>
+        <div class="m-rsvp"><span class="on">Going</span><span>Maybe</span><span>Can&rsquo;t go</span></div>
+      </div>
+      <h3>Events and RSVPs</h3>
+      <p>Give a post a <code>when</code> and it's an event. Weekly repeats, a month view, RSVPs, and a
+        feed people subscribe to from Google, Apple or Outlook.</p>
+      <pre><code>&lt;friendo-calendar&gt;&lt;/friendo-calendar&gt;
+&lt;friendo-rsvp
+  post-id="{{ "{{ event.id }}" }}"&gt;&lt;/friendo-rsvp&gt;</code></pre>
+      <a class="doc-link label" href="https://docs.friendo.world/docs/events-site">build an events site</a>
+    </article>
+
+    <article class="feature">
+      <div class="mock m-chat" aria-hidden="true">
+        <span class="m-time">Tue 7:02 pm</span>
+        <div class="m-msg"><b>Robin</b> Is anyone at the hall yet?</div>
+        <div class="m-msg"><b>Jo</b> Unlocking it now</div>
+        <div class="m-msg me">On my way with the chairs</div>
+        <div class="m-field">Message&hellip;</div>
+      </div>
+      <h3>Chats</h3>
+      <p>A live message feed on any page, one per post, or one per group. Naming a chat is making it.</p>
+      <pre><code>&lt;friendo-chat chat-id="general"&gt;&lt;/friendo-chat&gt;</code></pre>
+      <a class="doc-link label" href="https://docs.friendo.world/docs/chats">add a chat</a>
+    </article>
+
+    <article class="feature">
+      <div class="mock m-map" aria-hidden="true">
+        <span class="pin" style="left:22%;top:34%">&#10047;</span>
+        <span class="pin" style="left:58%;top:22%">&#10047;</span>
+        <span class="pin" style="left:44%;top:62%">&#10047;</span>
+        <span class="pin" style="left:78%;top:55%">&#10047;</span>
+        <span class="m-map-label">Harvest Fair &middot; Sat 10 am</span>
+      </div>
+      <h3>Maps</h3>
+      <p>Put <code>location: 47.6, -122.3</code> on a post and it has a place. One tag draws it, or every
+        post on one map, each marker linking home.</p>
+      <pre><code>&lt;friendo-map&gt;&lt;/friendo-map&gt;</code></pre>
+      <a class="doc-link label" href="https://docs.friendo.world/docs/locations">put posts on a map</a>
+    </article>
+
+    <article class="feature">
+      <div class="mock" aria-hidden="true">
+        <div class="m-group-h"><b>The Board</b><span>9 members &middot; ask to join</span></div>
+        <div class="m-faces"><span>PA</span><span>SM</span><span>RO</span><span>JO</span><span>AL</span><span>+4</span></div>
+        <div class="m-btn">Ask to join</div>
+      </div>
+      <h3>Groups</h3>
+      <p>Groups inside your site with their own admins, members, chats and calendar. Public, members
+        only, or private enough that nobody else can tell they exist.</p>
+      <pre><code>&lt;friendo-group
+  post-id="{{ "{{ group.id }}" }}"&gt;&lt;/friendo-group&gt;</code></pre>
+      <a class="doc-link label" href="https://docs.friendo.world/docs/groups">start groups</a>
+    </article>
+
+    <article class="feature">
+      <div class="mock" aria-hidden="true">
+        <div class="m-profile"><span class="m-avatar">PA</span><div><b>Pat Alvarez</b><span>Bakes on Sundays. Mostly sourdough.</span></div></div>
+        <div class="m-follow"><span class="m-btn">Follow</span><span>24 followers</span></div>
+        <div class="m-inbox"><b>Sam</b> started following you</div>
+      </div>
+      <h3>Profiles and follows</h3>
+      <p>Every member gets a profile page. Follow people, see a feed of their posts, and get a note in
+        your inbox when someone follows you or replies.</p>
+      <pre><code>&lt;friendo-follow
+  profile-id="{{ "{{ profile.id }}" }}"&gt;&lt;/friendo-follow&gt;</code></pre>
+      <a class="doc-link label" href="https://docs.friendo.world/docs/profiles">add profiles and follows</a>
+    </article>
+
+    <article class="feature">
+      <div class="mock" aria-hidden="true">
+        <div class="m-q">Where should the picnic be?</div>
+        <div class="m-bar"><span style="width:62%"></span><em>The park &middot; 62%</em></div>
+        <div class="m-bar"><span style="width:38%"></span><em>The beach &middot; 38%</em></div>
+        <div class="m-small">21 votes</div>
+      </div>
+      <h3>Polls</h3>
+      <p>Declare a poll in a post's front matter and it exists. Members vote once and everyone sees the
+        tally, even with JavaScript off.</p>
+      <pre><code>&lt;friendo-poll poll-slug="picnic"&gt;&lt;/friendo-poll&gt;</code></pre>
+      <a class="doc-link label" href="https://docs.friendo.world/docs/polls">add a poll</a>
+    </article>
+
+    <article class="feature">
+      <div class="mock m-locked" aria-hidden="true">
+        <span class="m-lock label">/board/minutes</span>
+        <div class="m-q">Sign in to see this page.</div>
+        <div class="m-field">you@example.com</div>
+        <div class="m-btn">Email me a code</div>
+      </div>
+      <h3>Members-only pages</h3>
+      <p>One line at the top of a page keeps it for members, for editors, or for one group. Visitors see
+        a sign-in box at the same address.</p>
+      <pre><code>&#123;% members only %&#125;</code></pre>
+      <a class="doc-link label" href="https://docs.friendo.world/docs/members-only">make members-only pages</a>
+    </article>
+
+  </div>
+
+  <p class="section-foot">Every tag also has a server-rendered spelling, so comments, tallies and RSVPs
+    are in the HTML for readers and search engines before any script runs.
+    <a href="https://docs.friendo.world/docs/components">See every tag</a>.</p>
 </section>
 
 <script>

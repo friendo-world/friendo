@@ -1,8 +1,10 @@
 ---
-title: Static export
+title: Export a static site
 slug: static-export
-section: Reference
-weight: 22
+section: Guides
+topic: Hosting
+weight: 50
+description: Write the site as plain HTML for any static host.
 ---
 
 Don't want a server at all? Render the whole site to plain HTML and put it on
@@ -17,16 +19,22 @@ posts, every published post's page, `assets/`, and, if any post has a `when`, th
 [calendar feeds](/docs/calendar#subscribe-calendarics) `calendar.ics` and
 `calendar.json`, so a static site is subscribable. Only **published** posts are
 included; drafts and posts waiting for review stay out, the same as on the live
-site. [Members-only pages](/docs/templates#members-only-pages) are skipped too
+site. [Members-only pages](/docs/members-only) are skipped too
 (the export lists each one), since a static host can't tell who's asking.
 
-Community features that need the runtime (signing in, writing comments, live
-chats) don't work in a static export, since there's no API behind it. The
-**server-rendered** spellings still do: `post.comments`, `post.reactions`,
-`post.poll` and `post.gallery` are rendered into the HTML at export time, so
-readers get the content even without the runtime.
+Community features need the runtime, so they don't work in a static export:
+there's no API behind it for signing in, writing comments or live chats. The
+community's server-rendered lists are empty too. `post.comments`,
+`post.reactions`, `post.poll`, `post.gallery` and `post.rsvps` are attached by the
+live server, not by the export, so a template that renders them prints nothing.
 
-The social pieces follow the same rule. [Profile pages](/docs/signing-in#profiles)
+> **Common mistake:** a page that lists comments or reaction tallies with
+> `{% for c in post.comments %}` looks right under `friendo serve` and empty in
+> `dist/`. Give that part a `{% empty %}` line, or keep a site with a community
+> on a server. See [Server-rendered and live](/docs/two-spellings).
+
+What an export does carry: each post's `when`, `location`, `author` and `group`.
+Profiles and groups follow what a visitor may see. [Profile pages](/docs/profiles)
 are exported only when `profile_visibility` is `public`; a members-only site
 exports none. A [group](/docs/groups) that isn't public, and every post filed
 under it, is left out, as it is for a visitor. `post.author`, `group.members` and

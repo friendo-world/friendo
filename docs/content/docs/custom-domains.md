@@ -1,8 +1,10 @@
 ---
-title: Custom domains
+title: Connect a custom domain
 slug: custom-domains
-section: Hosting
-weight: 32
+section: Guides
+topic: Hosting
+weight: 40
+description: Serve a friendo.world site from your own domain.
 ---
 
 A site on a network lives at `my-site.friendo.world`. You can point a domain you
@@ -21,7 +23,7 @@ with whoever you bought the domain from; on friendo.world that's a single
 `CNAME`. Nothing changes yet: **an unverified domain never serves traffic**, which
 is what stops someone connecting a domain that isn't theirs.
 
-The same thing, in a browser: open your [account page](/docs/network-account),
+The same thing, in a browser: open your [account page](/docs/site-vs-network),
 press **Domains** on the site, and enter the domain. The DNS records appear right
 there.
 

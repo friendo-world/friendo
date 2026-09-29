@@ -2,7 +2,8 @@
 title: CLI commands
 slug: cli
 section: Reference
-weight: 8
+weight: 10
+description: Every friendo command and flag.
 ---
 
 The `friendo` command scaffolds sites, runs them locally, and syncs with any
@@ -25,7 +26,7 @@ and again on every edit.
 | `--no-login` | `false` | Skip the admin sign-in for every request (never on a public site) |
 
 ### `friendo import`
-Read the [`content/`](/docs/posts#writing-posts-in-files) folder (markdown files)
+Read the [`content/`](/docs/posts-in-files) folder (markdown files)
 into the site's database. `serve`, `push` and `deploy` do it for you; use it on
 its own for one-off imports or CI.
 
@@ -77,7 +78,7 @@ Sign out: clear the cached network token and site sessions.
 
 ### `friendo open-admin [subdomain]`
 Open a site's admin in your browser, signed in from your network account, the
-terminal twin of the **Open admin** button on your [account page](/docs/network-account).
+terminal twin of the **Open admin** button on your [account page](/docs/site-vs-network).
 Defaults to the site in the current folder; `--network <url>` for another network.
 
 ### `friendo network …`
@@ -145,5 +146,5 @@ Credentials are cached in `~/.friendo/config`. Site sync (`push`, `pull`) signs 
 to the **site**, with a code sent to your email or a password where the site
 allows one, and caches the session per site; `deploy` skips that by signing you in
 from your network sign-in. Signing in to a **network** is `friendo login`, always
-passwordless. See [Signing in](/docs/signing-in#your-site-vs-your-network-account)
+passwordless. See [Signing in](/docs/site-vs-network)
 for the distinction.

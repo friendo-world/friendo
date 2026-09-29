@@ -1,0 +1,18 @@
+{% comment %} The sidebar, built from content/docs/*.md. Group order comes from `sections`
+   in layouts/base.html; within a group, pages sort by fields.weight. Guides are
+   split again by fields.topic. A page whose section isn't a known one lands in
+   "Other" at the bottom, so a typo is visible instead of silently hidden. Pages
+   with section "Moved" (stubs for old URLs) never appear. {% endcomment %}
+{% for s in sections %}{% set pair = s|split:"|" %}
+<p class="nav-group label">{{ pair.0 }}</p>
+{% if pair.0 == "Guides" %}
+  {% for t in guide_topics %}
+  <p class="nav-topic label">{{ t }}</p>
+  {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Guides" and d.fields.topic == t %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+  {% endfor %}
+  {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Guides" and not (d.fields.topic in guide_topics) %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+{% else %}
+  {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == pair.0 %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+{% endif %}
+{% endfor %}
+<div class="nav-other">{% for d in collections.docs|sort_by:"fields.weight" %}{% if not (d.fields.section in known_sections) and d.fields.section != "Moved" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}</div>

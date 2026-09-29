@@ -1,8 +1,10 @@
 ---
 title: Self-host a site
 slug: self-host-a-site
-section: Hosting
-weight: 30
+section: Guides
+topic: Hosting
+weight: 20
+description: Run one site on a server you own.
 ---
 
 One site, one server, the same binary you run on your laptop. This is the
@@ -11,7 +13,7 @@ smallest possible deployment: no network, no accounts beyond the site's own.
 ## What you need
 
 - A server (any Linux box) with a hostname pointing at it: `mysite.example.com`.
-- The `friendo` binary on it ([Installation](/docs/installation)).
+- The `friendo` binary on it ([Install](/docs/installation)).
 - Something in front to terminate HTTPS: [Caddy](https://caddyserver.com) is the
   least work; nginx or Traefik are fine.
 
@@ -39,13 +41,15 @@ Caddy gets the certificate on its own.
 
 Open `https://mysite.example.com/_/`. Because the request isn't from the server
 itself, the admin asks you to **set up the owner**: your email, then the code it
-emails you. That's your account. If you didn't set an email provider, the code is
-printed in the terminal where `friendo serve` is running.
+emails you. That's your account. If the email provider isn't working yet, this
+first code is also printed in the terminal where `friendo serve` is running.
 
-> **Set an email provider.** With `RESEND_API_KEY` + `FRIENDO_EMAIL_FROM`, sign-in
-> codes reach people's inboxes. Without one, only the server log sees them: fine
-> for you, useless for members who want to comment. Never set `FRIENDO_OTP_ECHO`
-> on a public site; that flag hands codes back in API responses for local dev.
+> **Warning:** set an email provider before anyone else can reach the site.
+> With no `RESEND_API_KEY`, `friendo serve` assumes it's on your laptop and hands
+> every sign-in code back to the browser that asked for it, so anyone who knows a
+> member's email can sign in as them, the owner included. Set `RESEND_API_KEY`
+> and `FRIENDO_EMAIL_FROM` (the command above does), or at the very least
+> `FRIENDO_OTP_ECHO=0`. See [Send real email](/docs/email).
 
 ## Keeping it updated
 
@@ -62,11 +66,9 @@ in `friendo.toml` and you can drop the flag.
 
 ## Media and backups
 
-Uploads land in `assets/uploads/` on disk by default; set `FRIENDO_S3_*` to keep
-them in S3-compatible storage instead ([Run a network](/docs/run-a-network) lists
-the variables; they're the same for one site). Back up the folder:
-`data/friendo.db` (SQLite, WAL mode: copy it with `sqlite3 .backup` or stop the
-server first) and `assets/`.
+Uploads land in `assets/uploads/` on disk by default, or in S3-compatible storage
+with the `FRIENDO_S3_*` variables. Back up `data/friendo.db` and `assets/`. The
+details are in [Upload images and back up media](/docs/images#back-up-media).
 
 ## Want more than one site?
 
