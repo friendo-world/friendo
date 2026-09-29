@@ -5,7 +5,7 @@ import type { Role } from "../api";
 export function RoleBadge({ role }: { role: Role }) {
   return (
     <span class="inline-block rounded-[5px] bg-ink px-1.5 py-0.5 text-[0.65rem] font-bold leading-tight text-white">
-      {role}
+      {role === "member" ? "member (no role)" : role}
     </span>
   );
 }

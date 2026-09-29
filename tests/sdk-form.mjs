@@ -33,7 +33,7 @@ writeFileSync(
     '<select name="mood"><option value="calm">calm</option><option value="hyped">hyped</option></select>' +
     '<button type="submit">Publish</button>' +
     "</friendo-form>" +
-    "<script>window.__record=null;document.addEventListener('friendo:submitted',function(e){window.__record=e.detail.record;});</script>" +
+    "<script>window.__record=null;document.addEventListener('friendo:submitted',function(e){window.__record=e.detail.post;});</script>" +
     '<script src="/friendo.js" defer></script></body></html>'
 );
 
@@ -125,21 +125,21 @@ try {
   if (record.title !== "My Story") throw new Error(`title = ${JSON.stringify(record.title)}`);
   if (record.body !== "**Hello world**") throw new Error(`body (bolded via toolbar) = ${JSON.stringify(record.body)}`);
   if (record.status !== "published") throw new Error(`status = ${JSON.stringify(record.status)} (owner should publish directly)`);
-  if (record.data?.mood !== "hyped") throw new Error(`data.mood = ${JSON.stringify(record.data?.mood)}`);
-  if (JSON.stringify(record.data?.tags) !== JSON.stringify(["alpha", "beta"])) throw new Error(`data.tags = ${JSON.stringify(record.data?.tags)}`);
-  if (typeof record.data?.where?.lat !== "number" || typeof record.data?.where?.lng !== "number") {
-    throw new Error(`data.where = ${JSON.stringify(record.data?.where)}`);
+  if (record.fields?.mood !== "hyped") throw new Error(`data.mood = ${JSON.stringify(record.fields?.mood)}`);
+  if (JSON.stringify(record.fields?.tags) !== JSON.stringify(["alpha", "beta"])) throw new Error(`data.tags = ${JSON.stringify(record.fields?.tags)}`);
+  if (typeof record.fields?.where?.lat !== "number" || typeof record.fields?.where?.lng !== "number") {
+    throw new Error(`data.where = ${JSON.stringify(record.fields?.where)}`);
   }
 
   // Confirm it persisted server-side (not just in the event payload).
-  const fetched = await (await fetch(ORIGIN + "/_/api/records/" + record.id, { headers: { Cookie: "friendo_session=" + cookie } })).json();
-  const r = fetched.record;
+  const fetched = await (await fetch(ORIGIN + "/_/api/posts/" + record.id, { headers: { Cookie: "friendo_session=" + cookie } })).json();
+  const r = fetched.post;
   if (!r || r.slug !== "my-story") throw new Error(`server slug (auto-derived) = ${JSON.stringify(r?.slug)}`);
-  if (r.status !== "published" || r.data?.mood !== "hyped") throw new Error(`server record mismatch: ${JSON.stringify(r)}`);
+  if (r.status !== "published" || r.fields?.mood !== "hyped") throw new Error(`server record mismatch: ${JSON.stringify(r)}`);
 
   // The location input geo-tags the post via the locations API, so <friendo-map>
   // can surface it — not just stashes coords in data.where.
-  const locs = await (await fetch(ORIGIN + "/_/api/locations?target_type=post&target_id=" + record.id)).json();
+  const locs = await (await fetch(ORIGIN + "/_/api/locations?post_id=" + record.id)).json();
   if (!locs.locations || locs.locations.length !== 1) throw new Error(`expected 1 geo-tag, got ${JSON.stringify(locs.locations)}`);
 
   if (errors.length) throw new Error("page errors: " + errors.join("; "));

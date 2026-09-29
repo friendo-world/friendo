@@ -50,7 +50,7 @@ func TestLocalOpenRule(t *testing.T) {
 		{"forwarded proto", mk("localhost:3000", "127.0.0.1:5555", map[string]string{"X-Forwarded-Proto": "https"}), nil, true, false},
 		{"email configured", mk("localhost:3000", "127.0.0.1:5555", nil), map[string]string{"RESEND_API_KEY": "k", "FRIENDO_EMAIL_FROM": "f"}, true, false},
 		{"require-login", mk("localhost:3000", "127.0.0.1:5555", nil), nil, false, false},
-		{"not from the admin UI (a <friendo-auth> call)", mk("localhost:3000", "127.0.0.1:5555", map[string]string{adminHeader: ""}), nil, true, false},
+		{"not from the admin UI (a <friendo-signin> call)", mk("localhost:3000", "127.0.0.1:5555", map[string]string{adminHeader: ""}), nil, true, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

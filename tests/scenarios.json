@@ -43,23 +43,23 @@
   },
   {
     "name": "create a record",
-    "method": "POST", "path": "/collections/blog/records",
+    "method": "POST", "path": "/collections/blog/posts",
     "body": { "title": "Hello", "slug": "hello", "body": "first post", "status": "published" },
     "expect": {
       "status": 201,
-      "json": { "record.title": "Hello", "record.collection": "blog", "record.status": "published" }
+      "json": { "post.title": "Hello", "post.collection": "blog", "post.status": "published" }
     },
-    "capture": { "recordId": "record.id" }
+    "capture": { "recordId": "post.id" }
   },
   {
     "name": "fetch the record by id (round-trips captured id)",
-    "method": "GET", "path": "/records/${recordId}",
-    "expect": { "status": 200, "json": { "record.id": "${recordId}", "record.slug": "hello" } }
+    "method": "GET", "path": "/posts/${recordId}",
+    "expect": { "status": 200, "json": { "post.id": "${recordId}", "post.slug": "hello" } }
   },
   {
     "name": "list records in the collection",
-    "method": "GET", "path": "/collections/blog/records",
-    "expect": { "status": 200, "length": { "records": 1 } }
+    "method": "GET", "path": "/collections/blog/posts",
+    "expect": { "status": 200, "length": { "posts": 1 } }
   },
   {
     "name": "collections count reflects the new record",
@@ -68,18 +68,18 @@
   },
   {
     "name": "update the record",
-    "method": "PUT", "path": "/records/${recordId}",
+    "method": "PUT", "path": "/posts/${recordId}",
     "body": { "title": "Edited", "slug": "hello", "body": "changed", "status": "draft" },
-    "expect": { "status": 200, "json": { "record.title": "Edited", "record.status": "draft" } }
+    "expect": { "status": 200, "json": { "post.title": "Edited", "post.status": "draft" } }
   },
   {
     "name": "delete the record",
-    "method": "DELETE", "path": "/records/${recordId}",
+    "method": "DELETE", "path": "/posts/${recordId}",
     "expect": { "status": 204 }
   },
   {
     "name": "fetching the deleted record is a 404",
-    "method": "GET", "path": "/records/${recordId}",
+    "method": "GET", "path": "/posts/${recordId}",
     "expect": { "status": 404 }
   },
   {
@@ -151,10 +151,10 @@
   },
   {
     "name": "create a post to receive comments",
-    "method": "POST", "path": "/collections/blog/records",
+    "method": "POST", "path": "/collections/blog/posts",
     "body": { "title": "Commentable", "slug": "commentable", "body": "hi", "status": "published" },
     "expect": { "status": 201 },
-    "capture": { "commentPostId": "record.id" }
+    "capture": { "commentPostId": "post.id" }
   },
   {
     "name": "request an OTP code for a new member",
@@ -300,13 +300,13 @@
   },
   {
     "name": "reaction counts are public and start empty",
-    "method": "GET", "path": "/reactions?target_type=post&target_id=${commentPostId}",
+    "method": "GET", "path": "/reactions?post_id=${commentPostId}",
     "expect": { "status": 200, "length": { "reactions": 0 } }
   },
   {
     "name": "anonymous cannot react",
     "method": "POST", "path": "/reactions",
-    "body": { "target_type": "post", "target_id": "${commentPostId}", "emoji": "👍" },
+    "body": { "post_id": "${commentPostId}", "emoji": "👍" },
     "expect": { "status": 401 }
   },
   {
@@ -318,7 +318,7 @@
   {
     "name": "add a reaction",
     "method": "POST", "path": "/reactions",
-    "body": { "target_type": "post", "target_id": "${commentPostId}", "emoji": "👍" },
+    "body": { "post_id": "${commentPostId}", "emoji": "👍" },
     "expect": {
       "status": 200,
       "json": { "reacted": true, "reactions.0.emoji": "👍", "reactions.0.count": 1, "reactions.0.reacted": true }
@@ -327,13 +327,13 @@
   {
     "name": "reacting again toggles it off",
     "method": "POST", "path": "/reactions",
-    "body": { "target_type": "post", "target_id": "${commentPostId}", "emoji": "👍" },
+    "body": { "post_id": "${commentPostId}", "emoji": "👍" },
     "expect": { "status": 200, "json": { "reacted": false }, "length": { "reactions": 0 } }
   },
   {
     "name": "re-add the reaction",
     "method": "POST", "path": "/reactions",
-    "body": { "target_type": "post", "target_id": "${commentPostId}", "emoji": "👍" },
+    "body": { "post_id": "${commentPostId}", "emoji": "👍" },
     "expect": { "status": 200, "json": { "reacted": true, "reactions.0.count": 1 } }
   },
   {
@@ -392,15 +392,15 @@
     "expect": { "status": 404 }
   },
   {
-    "name": "settings report auto-approve off by default",
+    "name": "settings report comments waiting for review by default",
     "method": "GET", "path": "/settings",
-    "expect": { "status": 200, "json": { "moderation.auto_approve": false } }
+    "expect": { "status": 200, "json": { "comments_need_review": true } }
   },
   {
-    "name": "enable comment auto-approval",
+    "name": "let comments show without review",
     "method": "PUT", "path": "/settings",
-    "body": { "moderation": { "auto_approve": true } },
-    "expect": { "status": 200, "json": { "moderation.auto_approve": true } }
+    "body": { "comments_need_review": false },
+    "expect": { "status": 200, "json": { "comments_need_review": false } }
   },
   {
     "name": "a comment posted with auto-approve is immediately approved",
@@ -414,20 +414,20 @@
     "expect": { "status": 200, "length": { "comments": 2 } }
   },
   {
-    "name": "disable comment auto-approval again",
+    "name": "comments wait for review again",
     "method": "PUT", "path": "/settings",
-    "body": { "moderation": { "auto_approve": false } },
-    "expect": { "status": 200, "json": { "moderation.auto_approve": false } }
+    "body": { "comments_need_review": true },
+    "expect": { "status": 200, "json": { "comments_need_review": true } }
   },
   {
     "name": "create a post that declares a poll in its front matter",
-    "method": "POST", "path": "/collections/blog/records",
+    "method": "POST", "path": "/collections/blog/posts",
     "body": {
       "title": "Poll host", "slug": "poll-host", "body": "x", "status": "published",
-      "data": { "poll": { "slug": "fav-color", "question": "Favorite color?", "options": ["Red", "Blue"] } }
+      "fields": { "poll": { "slug": "fav-color", "question": "Favorite color?", "options": ["Red", "Blue"] } }
     },
     "expect": { "status": 201 },
-    "capture": { "pollHostId": "record.id" }
+    "capture": { "pollHostId": "post.id" }
   },
   {
     "name": "by-slug resolves and lazily creates the poll from front matter",
@@ -452,10 +452,10 @@
   },
   {
     "name": "edit the poll's question via the post front matter",
-    "method": "PUT", "path": "/records/${pollHostId}",
+    "method": "PUT", "path": "/posts/${pollHostId}",
     "body": {
       "slug": "poll-host", "title": "Poll host", "body": "x", "status": "published",
-      "data": { "poll": { "slug": "fav-color", "question": "Best color?", "options": ["Red", "Blue"] } }
+      "fields": { "poll": { "slug": "fav-color", "question": "Best color?", "options": ["Red", "Blue"] } }
     },
     "expect": { "status": 200 }
   },
@@ -525,32 +525,32 @@
   },
   {
     "name": "a contributor cannot access the review queue",
-    "method": "GET", "path": "/records?status=pending",
+    "method": "GET", "path": "/posts?status=pending",
     "expect": { "status": 403 }
   },
   {
     "name": "a contributor cannot flip a post's status",
-    "method": "PUT", "path": "/records/${commentPostId}/status",
+    "method": "PUT", "path": "/posts/${commentPostId}/status",
     "body": { "status": "draft" },
     "expect": { "status": 403 }
   },
   {
     "name": "a contributor creates a post (published immediately, approval off)",
-    "method": "POST", "path": "/collections/blog/records",
+    "method": "POST", "path": "/collections/blog/posts",
     "body": { "title": "Con post", "slug": "con-post", "body": "hi", "status": "draft" },
-    "expect": { "status": 201, "json": { "record.status": "published" } },
-    "capture": { "conPostId": "record.id" }
+    "expect": { "status": 201, "json": { "post.status": "published" } },
+    "capture": { "conPostId": "post.id" }
   },
   {
     "name": "a contributor can edit their own post",
-    "method": "PUT", "path": "/records/${conPostId}",
+    "method": "PUT", "path": "/posts/${conPostId}",
     "body": { "title": "Con post edited", "slug": "con-post", "body": "hi again", "status": "draft" },
-    "expect": { "status": 200, "json": { "record.title": "Con post edited" } }
+    "expect": { "status": 200, "json": { "post.title": "Con post edited" } }
   },
   {
     "name": "a contributor's record list shows only their own",
-    "method": "GET", "path": "/collections/blog/records",
-    "expect": { "status": 200, "length": { "records": 1 } }
+    "method": "GET", "path": "/collections/blog/posts",
+    "expect": { "status": 200, "length": { "posts": 1 } }
   },
   {
     "name": "the second contributor logs in",
@@ -560,12 +560,12 @@
   },
   {
     "name": "a contributor cannot read another's post in the editor",
-    "method": "GET", "path": "/records/${conPostId}",
+    "method": "GET", "path": "/posts/${conPostId}",
     "expect": { "status": 403 }
   },
   {
     "name": "a contributor cannot edit another's post",
-    "method": "PUT", "path": "/records/${conPostId}",
+    "method": "PUT", "path": "/posts/${conPostId}",
     "body": { "title": "hijack", "slug": "con-post", "body": "x", "status": "draft" },
     "expect": { "status": 403 }
   },
@@ -577,9 +577,9 @@
   },
   {
     "name": "an editor can edit anyone's post",
-    "method": "PUT", "path": "/records/${conPostId}",
+    "method": "PUT", "path": "/posts/${conPostId}",
     "body": { "title": "Edited by editor", "slug": "con-post", "body": "x", "status": "published" },
-    "expect": { "status": 200, "json": { "record.title": "Edited by editor", "record.status": "published" } }
+    "expect": { "status": 200, "json": { "post.title": "Edited by editor", "post.status": "published" } }
   },
   {
     "name": "owner logs in to require post approval",
@@ -590,8 +590,8 @@
   {
     "name": "owner turns on post approval",
     "method": "PUT", "path": "/settings",
-    "body": { "access": { "require_approval": true } },
-    "expect": { "status": 200, "json": { "access.require_approval": true } }
+    "body": { "posts_need_review": true },
+    "expect": { "status": 200, "json": { "posts_need_review": true } }
   },
   {
     "name": "the contributor logs back in",
@@ -601,10 +601,10 @@
   },
   {
     "name": "with approval on, a contributor's post starts pending",
-    "method": "POST", "path": "/collections/blog/records",
+    "method": "POST", "path": "/collections/blog/posts",
     "body": { "title": "Needs review", "slug": "needs-review", "body": "hi", "status": "published" },
-    "expect": { "status": 201, "json": { "record.status": "pending" } },
-    "capture": { "pendingPostId": "record.id" }
+    "expect": { "status": 201, "json": { "post.status": "pending" } },
+    "capture": { "pendingPostId": "post.id" }
   },
   {
     "name": "an editor logs in to publish it",
@@ -614,25 +614,25 @@
   },
   {
     "name": "the review queue lists the pending post",
-    "method": "GET", "path": "/records?status=pending",
-    "expect": { "status": 200, "length": { "records": 1 }, "json": { "records.0.id": "${pendingPostId}", "records.0.author_name": "Con" } }
+    "method": "GET", "path": "/posts?status=pending",
+    "expect": { "status": 200, "length": { "posts": 1 }, "json": { "posts.0.id": "${pendingPostId}", "posts.0.author_name": "Con" } }
   },
   {
     "name": "an invalid record status is rejected",
-    "method": "PUT", "path": "/records/${pendingPostId}/status",
+    "method": "PUT", "path": "/posts/${pendingPostId}/status",
     "body": { "status": "bogus" },
     "expect": { "status": 400 }
   },
   {
     "name": "an editor publishes the pending post from the review queue",
-    "method": "PUT", "path": "/records/${pendingPostId}/status",
+    "method": "PUT", "path": "/posts/${pendingPostId}/status",
     "body": { "status": "published" },
-    "expect": { "status": 200, "json": { "record.status": "published" } }
+    "expect": { "status": 200, "json": { "post.status": "published" } }
   },
   {
     "name": "the review queue is now empty",
-    "method": "GET", "path": "/records?status=pending",
-    "expect": { "status": 200, "length": { "records": 0 } }
+    "method": "GET", "path": "/posts?status=pending",
+    "expect": { "status": 200, "length": { "posts": 0 } }
   },
   {
     "name": "a visitor signs in to comment on the contributor's post",
@@ -702,8 +702,8 @@
   {
     "name": "owner turns approval back off",
     "method": "PUT", "path": "/settings",
-    "body": { "access": { "require_approval": false } },
-    "expect": { "status": 200, "json": { "access.require_approval": false } }
+    "body": { "posts_need_review": false },
+    "expect": { "status": 200, "json": { "posts_need_review": false } }
   },
   {
     "name": "the sole owner cannot demote themselves",
@@ -740,24 +740,24 @@
   {
     "name": "an editor attaches a location to a target",
     "method": "POST", "path": "/locations",
-    "body": { "target_type": "post", "target_id": "p1", "lat": 40.5, "lng": -74.25, "label": "NYC" },
+    "body": { "post_id": "p1", "lat": 40.5, "lng": -74.25, "label": "NYC" },
     "expect": { "status": 201, "json": { "location.label": "NYC", "location.lat": 40.5 } },
     "capture": { "locationId": "location.id" }
   },
   {
     "name": "locations are listed for a target",
-    "method": "GET", "path": "/locations?target_type=post&target_id=p1",
+    "method": "GET", "path": "/locations?post_id=p1",
     "expect": { "status": 200, "length": { "locations": 1 }, "json": { "locations.0.id": "${locationId}", "locations.0.label": "NYC" } }
   },
   {
-    "name": "listing locations needs a target",
+    "name": "listing locations without a post is the aggregate map",
     "method": "GET", "path": "/locations",
-    "expect": { "status": 400 }
+    "expect": { "status": 200 }
   },
   {
     "name": "out-of-range coordinates are rejected",
     "method": "POST", "path": "/locations",
-    "body": { "target_type": "post", "target_id": "p1", "lat": 200, "lng": 0 },
+    "body": { "post_id": "p1", "lat": 200, "lng": 0 },
     "expect": { "status": 400 }
   },
   {
@@ -769,7 +769,7 @@
   {
     "name": "a contributor can geo-tag a post they authored",
     "method": "POST", "path": "/locations",
-    "body": { "target_type": "post", "target_id": "${conPostId}", "lat": 51.5, "lng": -0.12, "label": "London" },
+    "body": { "post_id": "${conPostId}", "lat": 51.5, "lng": -0.12, "label": "London" },
     "expect": { "status": 201, "json": { "location.label": "London" } },
     "capture": { "ownLocationId": "location.id" }
   },
@@ -797,7 +797,7 @@
   {
     "name": "a contributor cannot geo-tag a post they don't own",
     "method": "POST", "path": "/locations",
-    "body": { "target_type": "post", "target_id": "${conPostId}", "lat": 0, "lng": 0 },
+    "body": { "post_id": "${conPostId}", "lat": 0, "lng": 0 },
     "expect": { "status": 403 }
   },
   {
@@ -828,7 +828,7 @@
   },
   {
     "name": "a record with no media lists no files",
-    "method": "GET", "path": "/files?record_type=post&record_id=p1",
+    "method": "GET", "path": "/files?post_id=p1",
     "expect": { "status": 200, "length": { "files": 0 } }
   },
   {
@@ -956,54 +956,54 @@
   },
   {
     "name": "the synced media now shows on its record",
-    "method": "GET", "path": "/files?record_type=post&record_id=p1",
+    "method": "GET", "path": "/files?post_id=p1",
     "expect": { "status": 200, "length": { "files": 1 }, "json": { "files.0.id": "sf1", "files.0.url": "/assets/uploads/sf1.png" } }
   },
 
   {
-    "name": "log in as owner for the persona flow",
+    "name": "log in as owner for the profile flow",
     "method": "POST", "path": "/auth/login",
     "body": { "email": "owner@test.com", "password": "password12345" },
     "expect": { "status": 200 }
   },
   {
-    "name": "the account starts with one persona, marked default",
-    "method": "GET", "path": "/me/personas",
-    "expect": { "status": 200, "length": { "personas": 1 }, "json": { "personas.0.is_default": true } },
-    "capture": { "persona0": "personas.0.id" }
+    "name": "the account starts with one profile, marked default",
+    "method": "GET", "path": "/me/profiles",
+    "expect": { "status": 200, "length": { "profiles": 1 }, "json": { "profiles.0.is_default": true } },
+    "capture": { "persona0": "profiles.0.id" }
   },
   {
-    "name": "create a second persona",
-    "method": "POST", "path": "/me/personas",
+    "name": "create a second profile",
+    "method": "POST", "path": "/me/profiles",
     "body": { "name": "Alter Ego" },
-    "expect": { "status": 201, "json": { "persona.name": "Alter Ego", "persona.is_default": false } },
-    "capture": { "persona1": "persona.id" }
+    "expect": { "status": 201, "json": { "profile.name": "Alter Ego", "profile.is_default": false } },
+    "capture": { "persona1": "profile.id" }
   },
   {
-    "name": "both personas now list, earliest first, only the first default",
-    "method": "GET", "path": "/me/personas",
-    "expect": { "status": 200, "length": { "personas": 2 }, "json": { "personas.0.is_default": true, "personas.1.name": "Alter Ego", "personas.1.is_default": false } }
+    "name": "both profiles now list, earliest first, only the first default",
+    "method": "GET", "path": "/me/profiles",
+    "expect": { "status": 200, "length": { "profiles": 2 }, "json": { "profiles.0.is_default": true, "profiles.1.name": "Alter Ego", "profiles.1.is_default": false } }
   },
   {
-    "name": "switch the default to the second persona",
-    "method": "POST", "path": "/me/personas/${persona1}/default",
+    "name": "switch the default to the second profile",
+    "method": "POST", "path": "/me/profiles/${persona1}/default",
     "expect": { "status": 200, "json": { "ok": true } }
   },
   {
     "name": "the default now follows the chosen persona",
-    "method": "GET", "path": "/me/personas",
-    "expect": { "status": 200, "json": { "personas.0.is_default": false, "personas.1.is_default": true } }
+    "method": "GET", "path": "/me/profiles",
+    "expect": { "status": 200, "json": { "profiles.0.is_default": false, "profiles.1.is_default": true } }
   },
   {
     "name": "cannot default to a persona that isn't yours",
-    "method": "POST", "path": "/me/personas/does-not-exist/default",
+    "method": "POST", "path": "/me/profiles/does-not-exist/default",
     "expect": { "status": 404 }
   },
 
   {
     "name": "member submissions are off by default",
     "method": "GET", "path": "/settings",
-    "expect": { "status": 200, "json": { "content.accept_submissions": false } }
+    "expect": { "status": 200, "json": { "members_can_post": false } }
   },
   {
     "name": "owner creates a plain member to submit posts",
@@ -1019,8 +1019,8 @@
   },
   {
     "name": "a member cannot submit a post while submissions are off",
-    "method": "POST", "path": "/collections/blog/records",
-    "body": { "title": "From a member", "body": "hello", "data": { "mood": "calm" } },
+    "method": "POST", "path": "/collections/blog/posts",
+    "body": { "title": "From a member", "body": "hello", "fields": { "mood": "calm" } },
     "expect": { "status": 403 }
   },
   {
@@ -1032,8 +1032,8 @@
   {
     "name": "owner turns on member submissions",
     "method": "PUT", "path": "/settings",
-    "body": { "content": { "accept_submissions": true } },
-    "expect": { "status": 200, "json": { "content.accept_submissions": true } }
+    "body": { "members_can_post": true },
+    "expect": { "status": 200, "json": { "members_can_post": true } }
   },
   {
     "name": "the submitter logs back in",
@@ -1043,17 +1043,17 @@
   },
   {
     "name": "a member submission is forced pending and carries arbitrary data",
-    "method": "POST", "path": "/collections/blog/records",
-    "body": { "title": "My Trip", "slug": "my-trip", "body": "the story", "status": "published", "data": { "mood": "calm", "tags": ["travel", "summer"], "where": { "lat": 48.8584, "lng": 2.2945 } } },
+    "method": "POST", "path": "/collections/blog/posts",
+    "body": { "title": "My Trip", "slug": "my-trip", "body": "the story", "status": "published", "fields": { "mood": "calm", "tags": ["travel", "summer"], "where": { "lat": 48.8584, "lng": 2.2945 } } },
     "expect": {
       "status": 201,
-      "json": { "record.collection": "blog", "record.status": "pending", "record.title": "My Trip", "record.slug": "my-trip", "record.data.mood": "calm", "record.data.tags.0": "travel", "record.data.where.lat": 48.8584 }
+      "json": { "post.collection": "blog", "post.status": "pending", "post.title": "My Trip", "post.slug": "my-trip", "post.fields.mood": "calm", "post.fields.tags.0": "travel", "post.fields.where.lat": 48.8584 }
     },
-    "capture": { "submissionId": "record.id" }
+    "capture": { "submissionId": "post.id" }
   },
   {
     "name": "the server auto-geo-tagged the member submission from its data.where",
-    "method": "GET", "path": "/locations?target_type=post&target_id=${submissionId}",
+    "method": "GET", "path": "/locations?post_id=${submissionId}",
     "expect": { "status": 200, "length": { "locations": 1 }, "json": { "locations.0.lat": 48.8584, "locations.0.lng": 2.2945, "locations.0.label": "My Trip" } }
   },
   {
@@ -1064,100 +1064,100 @@
   },
   {
     "name": "the member submission is in the review queue as pending",
-    "method": "GET", "path": "/records?status=pending",
-    "expect": { "status": 200, "length": { "records": 1 }, "json": { "records.0.id": "${submissionId}", "records.0.status": "pending" } }
+    "method": "GET", "path": "/posts?status=pending",
+    "expect": { "status": 200, "length": { "posts": 1 }, "json": { "posts.0.id": "${submissionId}", "posts.0.status": "pending" } }
   },
   {
     "name": "owner turns member submissions back off",
     "method": "PUT", "path": "/settings",
-    "body": { "content": { "accept_submissions": false } },
-    "expect": { "status": 200, "json": { "content.accept_submissions": false } }
+    "body": { "members_can_post": false },
+    "expect": { "status": 200, "json": { "members_can_post": false } }
   },
 
   {
     "name": "a record with a `when` in its data becomes an event (when lifted out of data)",
-    "method": "POST", "path": "/collections/events/records",
+    "method": "POST", "path": "/collections/events/posts",
     "body": { "title": "Harvest Fair", "slug": "harvest-fair", "body": "Bring a dish", "status": "published",
-              "data": { "when": "2026-10-04 10:00 to 16:00", "repeats": "weekly", "except": ["2026-10-11"], "mood": "festive" } },
+              "fields": { "when": { "start": "2026-10-04 10:00 to 16:00", "repeats": "weekly", "except": ["2026-10-11"] }, "mood": "festive" } },
     "expect": {
       "status": 201,
-      "json": { "record.when.starts": "2026-10-04T10:00:00Z", "record.when.ends": "2026-10-04T16:00:00Z",
-                "record.when.all_day": false, "record.when.repeats": "weekly", "record.when.rule": "FREQ=WEEKLY",
-                "record.when.except.0": "2026-10-11", "record.data.mood": "festive" }
+      "json": { "post.when.start": "2026-10-04T10:00:00Z", "post.when.end": "2026-10-04T16:00:00Z",
+                "post.when.all_day": false, "post.when.repeats": "weekly", "post.when.rule": "FREQ=WEEKLY",
+                "post.when.except.0": "2026-10-11", "post.fields.mood": "festive" }
     },
-    "capture": { "eventId": "record.id" }
+    "capture": { "eventId": "post.id" }
   },
   {
     "name": "the lifted keys are not in the record's data",
-    "method": "GET", "path": "/records/${eventId}",
-    "expect": { "status": 200, "json": { "record.data.mood": "festive", "record.when.repeats": "weekly", "record.when.next.starts": "2026-10-04T10:00:00Z" } }
+    "method": "GET", "path": "/posts/${eventId}",
+    "expect": { "status": 200, "json": { "post.fields.mood": "festive", "post.when.repeats": "weekly", "post.when.next.start": "2026-10-04T10:00:00Z" } }
   },
   {
     "name": "a record with no when has when: null",
-    "method": "POST", "path": "/collections/events/records",
+    "method": "POST", "path": "/collections/events/posts",
     "body": { "title": "Plain", "slug": "plain", "status": "published" },
-    "expect": { "status": 201, "json": { "record.when": null } }
+    "expect": { "status": 201, "json": { "post.when": null } }
   },
   {
     "name": "updating the record moves the event (all day, no repeat)",
-    "method": "PUT", "path": "/records/${eventId}",
+    "method": "PUT", "path": "/posts/${eventId}",
     "body": { "title": "Harvest Fair", "slug": "harvest-fair", "body": "Bring a dish", "status": "published",
-              "data": { "when": "2026-10-05", "mood": "festive" } },
-    "expect": { "status": 200, "json": { "record.when.starts": "2026-10-05T00:00:00Z", "record.when.all_day": true, "record.when.repeats": "", "record.data.mood": "festive" } }
+              "fields": { "when": "2026-10-05", "mood": "festive" } },
+    "expect": { "status": 200, "json": { "post.when.start": "2026-10-05T00:00:00Z", "post.when.all_day": true, "post.when.repeats": "", "post.fields.mood": "festive" } }
   },
   {
     "name": "an update that leaves data out keeps the event",
-    "method": "PUT", "path": "/records/${eventId}",
+    "method": "PUT", "path": "/posts/${eventId}",
     "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published" },
-    "expect": { "status": 200, "json": { "record.title": "Harvest Fair!", "record.when.all_day": true } }
+    "expect": { "status": 200, "json": { "post.title": "Harvest Fair!", "post.when.all_day": true } }
   },
   {
     "name": "an update whose data says nothing about when keeps the event (a read-modify-write round trip is safe)",
-    "method": "PUT", "path": "/records/${eventId}",
-    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "data": { "mood": "calm" } },
-    "expect": { "status": 200, "json": { "record.when.all_day": true, "record.data.mood": "calm" } }
+    "method": "PUT", "path": "/posts/${eventId}",
+    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "fields": { "mood": "calm" } },
+    "expect": { "status": 200, "json": { "post.when.all_day": true, "post.fields.mood": "calm" } }
   },
   {
     "name": "a bad when is logged and the existing event kept; the record still saves",
-    "method": "PUT", "path": "/records/${eventId}",
-    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "data": { "when": "next tuesday" } },
-    "expect": { "status": 200, "json": { "record.when.all_day": true } }
+    "method": "PUT", "path": "/posts/${eventId}",
+    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "fields": { "when": "next tuesday" } },
+    "expect": { "status": 200, "json": { "post.when.all_day": true } }
   },
   {
     "name": "when: null removes the event",
-    "method": "PUT", "path": "/records/${eventId}",
-    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "data": { "when": null, "mood": "calm" } },
-    "expect": { "status": 200, "json": { "record.when": null, "record.data.mood": "calm" } }
+    "method": "PUT", "path": "/posts/${eventId}",
+    "body": { "title": "Harvest Fair!", "slug": "harvest-fair", "body": "Bring a dish", "status": "published", "fields": { "when": null, "mood": "calm" } },
+    "expect": { "status": 200, "json": { "post.when": null, "post.fields.mood": "calm" } }
   },
   {
     "name": "the review queue lists when for a pending event",
-    "method": "POST", "path": "/collections/events/records",
-    "body": { "title": "Pending thing", "slug": "pending-thing", "status": "pending", "data": { "when": "2026-12-01 09:00" } },
-    "expect": { "status": 201, "json": { "record.status": "pending", "record.when.starts": "2026-12-01T09:00:00Z" } },
-    "capture": { "pendingEventId": "record.id" }
+    "method": "POST", "path": "/collections/events/posts",
+    "body": { "title": "Pending thing", "slug": "pending-thing", "status": "pending", "fields": { "when": "2026-12-01 09:00" } },
+    "expect": { "status": 201, "json": { "post.status": "pending", "post.when.start": "2026-12-01T09:00:00Z" } },
+    "capture": { "pendingEventId": "post.id" }
   },
   {
     "name": "the collection listing carries when for each record",
-    "method": "GET", "path": "/collections/events/records",
-    "expect": { "status": 200, "length": { "records": 3 } }
+    "method": "GET", "path": "/collections/events/posts",
+    "expect": { "status": 200, "length": { "posts": 3 } }
   },
   {
     "name": "deleting the record deletes its event",
-    "method": "DELETE", "path": "/records/${pendingEventId}",
+    "method": "DELETE", "path": "/posts/${pendingEventId}",
     "expect": { "status": 204 }
   },
 
   {
     "name": "owner creates a weekly event to RSVP to",
-    "method": "POST", "path": "/collections/events/records",
-    "body": { "title": "Choir", "slug": "choir", "status": "published", "data": { "when": "2027-03-01 19:00", "repeats": "weekly" } },
+    "method": "POST", "path": "/collections/events/posts",
+    "body": { "title": "Choir", "slug": "choir", "status": "published", "fields": { "when": { "start": "2027-03-01 19:00", "repeats": "weekly" } } },
     "expect": { "status": 201 },
-    "capture": { "choirId": "record.id" }
+    "capture": { "choirId": "post.id" }
   },
   {
-    "name": "rsvp counts are public and start empty (next occurrence by default)",
+    "name": "rsvp counts are public and start empty (next date by default)",
     "method": "GET", "path": "/posts/${choirId}/rsvps",
-    "expect": { "status": 200, "json": { "counts.going": 0, "counts.maybe": 0, "counts.not_going": 0, "mine": "", "occurrence": "2027-03-01T19:00:00Z" } }
+    "expect": { "status": 200, "json": { "counts.going": 0, "counts.maybe": 0, "counts.not_going": 0, "mine": "", "date": "2027-03-01T19:00:00Z" } }
   },
   {
     "name": "a bad answer is rejected",
@@ -1168,40 +1168,266 @@
   {
     "name": "a date the event doesn't happen on is rejected",
     "method": "POST", "path": "/posts/${choirId}/rsvps",
-    "body": { "answer": "going", "occurrence": "2027-03-02T19:00:00Z" },
+    "body": { "answer": "going", "date": "2027-03-02T19:00:00Z" },
     "expect": { "status": 400 }
   },
   {
-    "name": "owner says going to the next occurrence",
+    "name": "owner says going to the next date",
     "method": "POST", "path": "/posts/${choirId}/rsvps",
     "body": { "answer": "going" },
-    "expect": { "status": 200, "json": { "counts.going": 1, "mine": "going", "attendees.0.author_email": "owner@test.com", "attendees.0.answer": "going" } }
+    "expect": { "status": 200, "json": { "counts.going": 1, "mine": "going", "names.0.author_email": "owner@test.com", "names.0.answer": "going" } }
   },
   {
     "name": "changing the answer replaces it",
     "method": "POST", "path": "/posts/${choirId}/rsvps",
-    "body": { "answer": "maybe", "occurrence": "2027-03-01T19:00:00Z" },
+    "body": { "answer": "maybe", "date": "2027-03-01T19:00:00Z" },
     "expect": { "status": 200, "json": { "counts.going": 0, "counts.maybe": 1, "mine": "maybe" } }
   },
   {
-    "name": "another occurrence has its own tally",
-    "method": "GET", "path": "/posts/${choirId}/rsvps?occurrence=2027-03-08T19:00:00Z",
-    "expect": { "status": 200, "json": { "counts.maybe": 0, "mine": "", "occurrence": "2027-03-08T19:00:00Z" } }
+    "name": "another date has its own tally",
+    "method": "GET", "path": "/posts/${choirId}/rsvps?date=2027-03-08T19:00:00Z",
+    "expect": { "status": 200, "json": { "counts.maybe": 0, "mine": "", "date": "2027-03-08T19:00:00Z" } }
   },
   {
-    "name": "the organizer lists attendees",
-    "method": "GET", "path": "/posts/${choirId}/attendees",
-    "expect": { "status": 200, "length": { "attendees": 1 }, "json": { "attendees.0.author_email": "owner@test.com", "attendees.0.scheduled": true } }
+    "name": "the organizer lists who answered",
+    "method": "GET", "path": "/posts/${choirId}/rsvps/names",
+    "expect": { "status": 200, "length": { "names": 1 }, "json": { "names.0.author_email": "owner@test.com", "names.0.scheduled": true } }
   },
   {
     "name": "withdrawing the answer clears it",
-    "method": "DELETE", "path": "/posts/${choirId}/rsvps?occurrence=2027-03-01T19:00:00Z",
+    "method": "DELETE", "path": "/posts/${choirId}/rsvps?date=2027-03-01T19:00:00Z",
     "expect": { "status": 200, "json": { "counts.maybe": 0, "mine": "" } }
   },
   {
     "name": "a post with no time has nothing to RSVP to",
     "method": "GET", "path": "/posts/${recordId}/rsvps",
     "expect": { "status": 404 }
+  },
+
+  {
+    "name": "me names the persona attribution flows to",
+    "method": "GET", "path": "/me",
+    "expect": { "status": 200 },
+    "capture": { "ownerAuthorId": "user.profile_id" }
+  },
+  {
+    "name": "a persona has an address derived from its name",
+    "method": "GET", "path": "/me/profiles",
+    "expect": { "status": 200, "json": { "profiles.0.slug": "owner", "profiles.0.url": "/profiles/owner" } }
+  },
+  {
+    "name": "the owner edits their profile: bio, address, a declared field",
+    "method": "PUT", "path": "/me/profiles/${ownerAuthorId}",
+    "body": { "bio": "Runs this place", "slug": "the-owner", "fields": { "pronouns": "they/them" } },
+    "expect": { "status": 200, "json": { "profile.slug": "the-owner", "profile.bio": "Runs this place", "profile.fields.pronouns": "they/them" } }
+  },
+  {
+    "name": "the profile is readable at its new address (signed in)",
+    "method": "GET", "path": "/profiles/the-owner",
+    "expect": { "status": 200, "json": { "profile.name": "Alter Ego", "profile.bio": "Runs this place", "mine": true } }
+  },
+  {
+    "name": "profiles default to members-only",
+    "method": "GET", "path": "/settings",
+    "expect": { "status": 200, "json": { "profile_visibility": "members" } }
+  },
+  {
+    "name": "profile visibility must be members or public",
+    "method": "PUT", "path": "/settings",
+    "body": { "profile_visibility": "everyone" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "the owner makes profiles public",
+    "method": "PUT", "path": "/settings",
+    "body": { "profile_visibility": "public" },
+    "expect": { "status": 200, "json": { "profile_visibility": "public" } }
+  },
+  {
+    "name": "the profiles list is public now",
+    "method": "GET", "path": "/profiles",
+    "expect": { "status": 200, "json": { "visibility": "public" } }
+  },
+  {
+    "name": "follow status: nobody follows the owner yet",
+    "method": "GET", "path": "/follows?profile_id=${ownerAuthorId}",
+    "expect": { "status": 200, "json": { "following": false, "followers": 0, "following_count": 0 } }
+  },
+  {
+    "name": "you can't follow yourself",
+    "method": "POST", "path": "/follows",
+    "body": { "profile_id": "${ownerAuthorId}" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "following an unknown profile is a 404",
+    "method": "POST", "path": "/follows",
+    "body": { "slug": "nobody-here" },
+    "expect": { "status": 404 }
+  },
+  {
+    "name": "unfollowing someone you never followed is fine",
+    "method": "DELETE", "path": "/follows/nobody",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "the follows switch is on and listed",
+    "method": "GET", "path": "/features",
+    "expect": { "status": 200, "json": { "features.follows": true } }
+  },
+  {
+    "name": "the inbox lists what happened to the owner so far",
+    "method": "GET", "path": "/me/notifications",
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "read-all clears the unread count",
+    "method": "PUT", "path": "/me/notifications/read-all",
+    "expect": { "status": 200, "json": { "unread": 0 } }
+  },
+  {
+    "name": "marking an unknown notification read is a 404",
+    "method": "PUT", "path": "/me/notifications/nope/read",
+    "expect": { "status": 404 }
+  },
+  {
+    "name": "me carries the unread count",
+    "method": "GET", "path": "/me",
+    "expect": { "status": 200, "json": { "user.unread": 0 } }
+  },
+  {
+    "name": "the owner starts a group and is its admin",
+    "method": "POST", "path": "/collections/groups/posts",
+    "body": { "title": "Gardeners", "slug": "gardeners", "body": "", "status": "published", "fields": { "visibility": "public", "join": "request" } },
+    "expect": { "status": 201, "json": { "post.collection": "groups", "post.fields.join": "request" } },
+    "capture": { "groupId": "post.id" }
+  },
+  {
+    "name": "the group shows up with the founder as admin",
+    "method": "GET", "path": "/groups/gardeners",
+    "expect": { "status": 200, "json": { "group.member_count": 1, "group.moderates": true, "group.administers": true, "group.mine.role": "admin", "group.settings.visibility": "public", "group.url": "/groups/gardeners" } }
+  },
+  {
+    "name": "groups list carries can_create",
+    "method": "GET", "path": "/groups",
+    "expect": { "status": 200, "json": { "can_create": true }, "length": { "groups": 1 } }
+  },
+  {
+    "name": "a group starts with no chats",
+    "method": "GET", "path": "/groups/${groupId}/chats",
+    "expect": { "status": 200, "length": { "chats": 0 } }
+  },
+  {
+    "name": "an admin adds a chat to the group",
+    "method": "POST", "path": "/groups/${groupId}/chats",
+    "body": { "name": "Announcements" },
+    "expect": { "status": 201, "json": { "chats.0.id": "announcements", "chats.0.name": "Announcements" } }
+  },
+  {
+    "name": "the same key twice is a conflict",
+    "method": "POST", "path": "/groups/${groupId}/chats",
+    "body": { "id": "announcements" },
+    "expect": { "status": 409 }
+  },
+  {
+    "name": "a member of the group reads its chat, and may moderate it",
+    "method": "GET", "path": "/groups/${groupId}/chats/announcements/messages",
+    "expect": { "status": 200, "json": { "can_moderate": true, "can_post": true }, "length": { "messages": 0 } }
+  },
+  {
+    "name": "posting in the group's chat",
+    "method": "POST", "path": "/groups/${groupId}/chats/announcements/messages",
+    "body": { "body": "First!" },
+    "expect": { "status": 201, "json": { "message.body": "First!" } }
+  },
+  {
+    "name": "the site's chat list still answers (group chats live under their group)",
+    "method": "GET", "path": "/chats",
+    "expect": { "status": 200 }
+  },
+  {
+    "name": "an admin changes the join rule",
+    "method": "PUT", "path": "/groups/${groupId}/settings",
+    "body": { "join": "invite" },
+    "expect": { "status": 200, "json": { "group.settings.join": "invite" } }
+  },
+  {
+    "name": "an unknown setting value is refused",
+    "method": "PUT", "path": "/groups/${groupId}/settings",
+    "body": { "visibility": "secret" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "the last admin can't leave",
+    "method": "DELETE", "path": "/groups/${groupId}/join",
+    "expect": { "status": 409 }
+  },
+  {
+    "name": "an unknown group is a 404",
+    "method": "GET", "path": "/groups/nope",
+    "expect": { "status": 404 }
+  },
+  {
+    "name": "deleting the group cascades its memberships",
+    "method": "DELETE", "path": "/posts/${groupId}",
+    "expect": { "status": 204 }
+  },
+  {
+    "name": "the groups switch is on and listed",
+    "method": "GET", "path": "/features",
+    "expect": { "status": 200, "json": { "features.groups": true } }
+  },
+  {
+    "name": "the organizer invites a persona to the choir",
+    "method": "POST", "path": "/posts/${choirId}/invites",
+    "body": { "slugs": ["owner", "nobody-here"], "date": "2027-03-01T19:00:00Z" },
+    "expect": { "status": 200, "json": { "invited": 1, "skipped": 0, "unknown.0": "nobody-here", "counts.invited": 1 } }
+  },
+  {
+    "name": "inviting again skips people already asked",
+    "method": "POST", "path": "/posts/${choirId}/invites",
+    "body": { "slugs": ["owner"], "date": "2027-03-01T19:00:00Z" },
+    "expect": { "status": 200, "json": { "invited": 0, "skipped": 1 } }
+  },
+  {
+    "name": "a member can't give themselves the invited answer",
+    "method": "POST", "path": "/posts/${choirId}/rsvps",
+    "body": { "date": "2027-03-01T19:00:00Z", "answer": "invited" },
+    "expect": { "status": 400 }
+  },
+  {
+    "name": "the names list carries the invitation",
+    "method": "GET", "path": "/posts/${choirId}/rsvps/names",
+    "expect": { "status": 200, "length": { "names": 1 }, "json": { "names.0.answer": "invited" } }
+  },
+  {
+    "name": "an unknown group to invite is a 404",
+    "method": "POST", "path": "/posts/${choirId}/invites",
+    "body": { "group": "nope" },
+    "expect": { "status": 404 }
+  },
+  {
+    "name": "the owner has a private calendar link",
+    "method": "GET", "path": "/me/calendar",
+    "expect": { "status": 200 },
+    "capture": { "calToken": "token" }
+  },
+  {
+    "name": "resetting the link mints a new token",
+    "method": "POST", "path": "/me/calendar/reset",
+    "expect": { "status": 200 },
+    "capture": { "calToken2": "token" }
+  },
+  {
+    "name": "the link now shows the reset token",
+    "method": "GET", "path": "/me/calendar",
+    "expect": { "status": 200, "json": { "token": "${calToken2}" } }
+  },
+  {
+    "name": "the profiles collection name is reserved",
+    "method": "POST", "path": "/collections/profiles/posts",
+    "body": { "title": "Nope", "slug": "nope", "body": "", "status": "published" },
+    "expect": { "status": 400 }
   },
 
   {

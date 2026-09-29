@@ -24,7 +24,7 @@ export function UserForm({ id }: { id?: string }) {
   const [passwordLogin, setPasswordLogin] = useState(false);
 
   useEffect(() => {
-    api.settings().then((s) => setPasswordLogin(s.access.password_login)).catch(() => {});
+    api.settings().then((s) => setPasswordLogin(s.password_login)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export function UserForm({ id }: { id?: string }) {
         : { email, name, role, ...(password ? { password } : {}) };
       if (editing) await api.updateUser(id!, input);
       else await api.createUser(input);
-      route("/_/users");
+      route("/_/members");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.");
       setBusy(false);
@@ -68,7 +68,7 @@ export function UserForm({ id }: { id?: string }) {
 
   return (
     <div class="mx-auto max-w-[960px] px-4 py-8">
-      <h1 class="mb-6 text-xl font-bold">{editing ? "Edit user" : "Add user"}</h1>
+      <h1 class="mb-6 text-xl font-bold">{editing ? "Edit member" : "Add member"}</h1>
       {error && <div class="mb-4 border border-crimson bg-tint px-3 py-2 text-sm text-crimson">{error}</div>}
       <div class="bg-white p-6 border border-ink">
         <form onSubmit={submit}>
@@ -115,7 +115,7 @@ export function UserForm({ id }: { id?: string }) {
           )}
           <button type="submit" disabled={busy}
             class="bg-ink px-4 py-2 text-sm font-bold text-white hover:bg-link disabled:opacity-50">
-            {busy ? "Saving…" : editing ? "Save" : "Create user"}
+            {busy ? "Saving…" : editing ? "Save" : "Add member"}
           </button>
         </form>
       </div>

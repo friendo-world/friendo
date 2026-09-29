@@ -1,53 +1,60 @@
 {% extends "layouts/base.html" %}
 {% block content %}
 <article>
-    <h1>{{ record.title }}</h1>
+    <h1>{{ post.title }}</h1>
+    <!-- `post.author` is the writer's profile (attached by the runtime on every
+         post), and `post.group` the group it's filed under, if any. -->
+    <p class="post-meta">
+        {% if post.author %}by <a href="{{ post.author.url }}">{{ post.author.name }}</a>
+        <friendo-follow profile-id="{{ post.author.id }}"></friendo-follow>{% endif %}
+        {% if post.group %}<span class="tag">in <a href="/groups/{{ post.group.slug }}">{{ post.group.title }}</a></span>{% endif %}
+    </p>
 
-    <!-- Metadata submitted through <friendo-form> lands in the post's `data` blob,
-         so it renders server-side with no extra wiring. A cover image lands in
-         `data.cover` (the uploaded asset's URL); `data.mood` / `data.tags` are the
-         plain fields the form's <select> and tags input produced. -->
-    {% if record.data.cover %}
-    <img class="cover" src="{{ record.data.cover }}" alt="">
+    <!-- Fields submitted through <friendo-form> land on the post as `fields`, so
+         they render server-side with no extra wiring. A cover image lands in
+         `fields.cover` (the uploaded asset's URL); `fields.mood` / `fields.tags` are
+         the plain fields the form's <select> and tags input produced. -->
+    {% if post.fields.cover %}
+    <img class="cover" src="{{ post.fields.cover }}" alt="">
     {% endif %}
 
-    {% if record.data.mood or record.data.tags %}
+    {% if post.fields.mood or post.fields.tags %}
     <p class="post-meta">
-        {% if record.data.mood %}<span class="mood">{{ record.data.mood }}</span>{% endif %}
-        {% for tag in record.data.tags %}<span class="tag">#{{ tag }}</span>{% endfor %}
+        {% if post.fields.mood %}<span class="mood">{{ post.fields.mood }}</span>{% endif %}
+        {% for tag in post.fields.tags %}<span class="tag">#{{ tag }}</span>{% endfor %}
     </p>
     {% endif %}
 
-    {{ record.body|markdown }}
+    {{ post.body|markdown }}
 </article>
 
-{% if record.gallery %}
+{% if post.gallery %}
 <!-- Gallery images imported from this post's page bundle (the images sitting next
-     to index.md). `record.gallery` is attached by the runtime, so they render with
+     to index.md). `post.gallery` is attached by the runtime, so they render with
      no upload step and no JS. -->
 <section class="gallery">
-    {% for img in record.gallery %}
+    {% for img in post.gallery %}
     <img src="{{ img.url }}" alt="">
     {% endfor %}
 </section>
 {% endif %}
 
-<!-- Server-rendered community content. `record.comments`, `record.reactions`, and
-     `record.poll` are attached to the post by the runtime, so approved comments,
+<!-- Server-rendered community content. `post.comments`, `post.reactions`, and
+     `post.poll` are attached to the post by the runtime, so approved comments,
      reaction tallies, and the poll render straight into the page with no JS — great
      for readers and search engines. The interactive versions live below. -->
 <section class="community-static">
     <h2>Reactions</h2>
     <ul class="tallies">
-        {% for r in record.reactions %}
+        {% for r in post.reactions %}
         <li>{{ r.emoji }} {{ r.count }}</li>
         {% endfor %}
     </ul>
 
-    {% if record.poll %}
-    <h2>{{ record.poll.question }}</h2>
+    {% if post.poll %}
+    <h2>{{ post.poll.question }}</h2>
     <ul class="poll-results">
-        {% for opt in record.poll.options %}
+        {% for opt in post.poll.options %}
         <li>{{ opt.text }} — {{ opt.votes }}</li>
         {% endfor %}
     </ul>
@@ -55,41 +62,41 @@
 
     <h2>Comments</h2>
     <ol class="comments">
-        {% for comment in record.comments %}
+        {% for comment in post.comments %}
         <li><strong>{{ comment.author_name }}</strong>: {{ comment.body }}</li>
         {% endfor %}
     </ol>
 </section>
 
-<!-- The same community data, interactive. `record.id` is the post's stable id; the
+<!-- The same community data, interactive. `post.id` is the post's stable id; the
      components talk to /_/api on their own, so no custom JavaScript is needed here.
      Two spellings of one idea — pick whichever the page needs. -->
 <section class="community">
     <div class="signin">
         <h2>Join in</h2>
-        <friendo-auth></friendo-auth>
+        <friendo-signin></friendo-signin>
     </div>
 
     <div>
         <h2>Reactions</h2>
-        <friendo-reactions target-type="post" target-id="{{ record.id }}" emojis="👍,❤️,🎉,🤯,Test"></friendo-reactions>
+        <friendo-reactions post-id="{{ post.id }}" emojis="👍,❤️,🎉,🤯,Test"></friendo-reactions>
     </div>
 
-    {% if record.data.poll %}
+    {% if post.fields.poll %}
     <div>
         <h2>Poll</h2>
-        <friendo-poll poll-slug="{{ record.data.poll.slug }}"></friendo-poll>
+        <friendo-poll poll-slug="{{ post.fields.poll.slug }}"></friendo-poll>
     </div>
     {% endif %}
 
     <div>
         <h2>Comments</h2>
-        <friendo-comments post-id="{{ record.id }}"></friendo-comments>
+        <friendo-comments post-id="{{ post.id }}"></friendo-comments>
     </div>
 
     <div>
         <h2>Map</h2>
-        <friendo-map target-type="post" target-id="{{ record.id }}"></friendo-map>
+        <friendo-map post-id="{{ post.id }}"></friendo-map>
     </div>
 </section>
 {% endblock %}

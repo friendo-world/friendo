@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { api, can, type Location, type Record as Rec } from "../api";
+import { api, can, type GroupMember, type Location, type Record as Rec } from "../api";
 import { useAuth } from "../auth";
 import { SidePanel } from "../components/side-panel";
 import { Button, Confirm, ErrorBox, Field, Input, LinkButton, Notice, Segmented, Select, StatusChip } from "../components/ui";
@@ -25,7 +25,7 @@ import {
 
 const stamp = (s?: string) => (s ? s.replace("T", " ").replace("Z", "").slice(0, 16) : "");
 
-// A value shaped {lat, lng} in data: the server pins it on create by itself.
+// A value shaped {lat, lng} in fields: the server places it on create by itself.
 function hasLatLng(data: Data): boolean {
   return Object.values(data).some(
     (v) => v && typeof v === "object" && !Array.isArray(v) && typeof (v as Data).lat === "number" && typeof (v as Data).lng === "number"
@@ -93,7 +93,7 @@ export function RecordPanel({
   // Fill the form from a record (or start empty), with the collection's fields
   // first and anything else the record carries after them.
   function seed(r: Rec | null) {
-    const d = stripWhenKeys((r?.data as Data) || {});
+    const d = stripWhenKeys((r?.fields as Data) || {});
     const keys = [...fields.map((f) => f.key)];
     for (const k of Object.keys(d).sort()) if (!keys.includes(k)) keys.push(k);
     const ks: { [k: string]: Kind } = {};
@@ -123,7 +123,7 @@ export function RecordPanel({
     (async () => {
       try {
         let r = initial;
-        if (!r) r = (await api.record(id)).record;
+        if (!r) r = (await api.record(id)).post;
         if (cancelled) return;
         setLoaded(r);
         seed(r);
@@ -138,7 +138,7 @@ export function RecordPanel({
         }
         isFileManaged(collection, r.slug, r.id).then((v) => !cancelled && setFileManaged(v));
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load record.");
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load post.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -233,7 +233,7 @@ export function RecordPanel({
       return;
     }
     if (!title.trim()) {
-      setError("Give the record a title.");
+      setError("Give the post a title.");
       return;
     }
     for (const f of fields) {
@@ -258,9 +258,9 @@ export function RecordPanel({
       const base = { title: title.trim(), slug: finalSlug, body, status };
       let record: Rec;
       if (editing) {
-        record = (await api.updateRecord(id, { ...base, data: { ...clean, ...whenToData(when) } })).record;
+        record = (await api.updateRecord(id, { ...base, fields: { ...clean, ...whenToData(when) } })).post;
       } else {
-        record = (await api.createRecord(collection, { ...base, data: { ...clean, ...whenToData(when) } })).record;
+        record = (await api.createRecord(collection, { ...base, fields: { ...clean, ...whenToData(when) } })).post;
       }
       // The pin. A new record whose data already holds a {lat,lng} was pinned by
       // the server on create, so don't add the Where pin on top of it.
@@ -276,7 +276,7 @@ export function RecordPanel({
           const up = await api.uploadFile(record.id, key, file);
           withUrls[key] = up.file.url;
         }
-        record = (await api.updateRecord(record.id, { ...base, data: withUrls })).record;
+        record = (await api.updateRecord(record.id, { ...base, fields: withUrls })).post;
         setPendingImages({});
       }
       setDirty(false);
@@ -300,7 +300,7 @@ export function RecordPanel({
     }
   }
 
-  const isEvent = when.starts !== "";
+  const isEvent = when.start !== "";
   const setW = <K extends keyof WhenForm>(key: K, value: WhenForm[K]) => {
     setWhen((w) => ({ ...w, [key]: value }));
     touch();
@@ -310,7 +310,7 @@ export function RecordPanel({
     touch();
   };
 
-  const heading = editing ? loaded?.title || "Edit record" : "New record";
+  const heading = editing ? loaded?.title || "Edit post" : "New post";
 
   return (
     <SidePanel onRequestClose={requestClose} label={heading}>
@@ -416,7 +416,7 @@ export function RecordPanel({
               <section data-section="fields" class="mb-5 border border-ink p-4">
                 <h2 class="text-sm font-bold">Fields</h2>
                 <p class="mb-2 text-xs text-dim">
-                  The record's own fields, readable in templates as <code>record.data.&lt;name&gt;</code>. Any record can
+                  The post's own fields, readable in templates as <code>post.fields.&lt;name&gt;</code>. Any post can
                   have any fields.
                 </p>
                 {order.length === 0 && <p class="py-2 text-xs text-dim">No fields yet.</p>}
@@ -458,11 +458,11 @@ export function RecordPanel({
                   empty for an ordinary post.
                 </p>
                 <div class="grid gap-3 sm:grid-cols-2">
-                  <Field label="Starts">
-                    <Input type={when.allDay ? "date" : "datetime-local"} name="when" value={when.starts} onInput={(e) => setW("starts", (e.target as HTMLInputElement).value)} />
+                  <Field label="Start">
+                    <Input type={when.allDay ? "date" : "datetime-local"} name="start" value={when.start} onInput={(e) => setW("start", (e.target as HTMLInputElement).value)} />
                   </Field>
-                  <Field label="Ends">
-                    <Input type={when.allDay ? "date" : "datetime-local"} name="ends" value={when.ends} onInput={(e) => setW("ends", (e.target as HTMLInputElement).value)} />
+                  <Field label="End">
+                    <Input type={when.allDay ? "date" : "datetime-local"} name="end" value={when.end} onInput={(e) => setW("end", (e.target as HTMLInputElement).value)} />
                   </Field>
                 </div>
                 <label class="mt-3 flex items-center gap-2 text-sm">
@@ -475,8 +475,8 @@ export function RecordPanel({
                       setWhen((w) => ({
                         ...w,
                         allDay,
-                        starts: allDay ? w.starts.slice(0, 10) : w.starts.length === 10 ? w.starts + "T09:00" : w.starts,
-                        ends: allDay ? w.ends.slice(0, 10) : w.ends.length === 10 ? w.ends + "T10:00" : w.ends,
+                        start: allDay ? w.start.slice(0, 10) : w.start.length === 10 ? w.start + "T09:00" : w.start,
+                        end: allDay ? w.end.slice(0, 10) : w.end.length === 10 ? w.end + "T10:00" : w.end,
                       }));
                       touch();
                     }}
@@ -516,13 +516,16 @@ export function RecordPanel({
                 </Field>
               </fieldset>
 
-              {/* --- Where: a map pin (unless pins are switched off) --- */}
+              {/* --- Members: who's in this group (groups collection only) --- */}
+              {collection === "groups" && editing && features.groups && loaded && <GroupMembers groupId={loaded.id} />}
+
+              {/* --- Location: a place on the map (unless locations are switched off) --- */}
               {features.locations && (
-              <fieldset class="mb-5 border border-ink p-4" data-section="where">
-                <legend class="px-1 text-sm font-bold">Where</legend>
+              <fieldset class="mb-5 border border-ink p-4" data-section="location">
+                <legend class="px-1 text-sm font-bold">Location</legend>
                 <p class="mb-3 text-xs text-dim">
-                  A latitude and longitude pin the post on the map (and put the place in the calendar feed). Clear both
-                  to remove the pin.
+                  A latitude and longitude put the post on the map (and the place in the calendar feed). Clear both
+                  to remove the location.
                 </p>
                 <div class="grid gap-3 sm:grid-cols-3">
                   <Field label="Latitude">
@@ -586,7 +589,7 @@ export function RecordPanel({
               )}
               <div class="ml-auto flex gap-2">
                 {loaded?.when && features.rsvp && (
-                  <LinkButton size="sm" href={`/_/records/${encodeURIComponent(loaded.id)}/attendees`}>
+                  <LinkButton size="sm" href={`/_/posts/${encodeURIComponent(loaded.id)}/rsvps`}>
                     Attendees
                   </LinkButton>
                 )}
@@ -601,5 +604,106 @@ export function RecordPanel({
         </footer>
       </form>
     </SidePanel>
+  );
+}
+
+// GroupMembers is the Members section of a group record: who's in (admins and
+// moderators first), who asked to join, and the levers — approve, decline,
+// make admin / make moderator / demote, remove, and add someone by profile name.
+function GroupMembers({ groupId }: { groupId: string }) {
+  const [members, setMembers] = useState<GroupMember[] | null>(null);
+  const [requested, setRequested] = useState<GroupMember[]>([]);
+  const [slug, setSlug] = useState("");
+  const [err, setErr] = useState("");
+
+  async function load() {
+    try {
+      const [m, r] = await Promise.all([api.groupMembers(groupId, "member"), api.groupMembers(groupId, "requested")]);
+      setMembers(m.members);
+      setRequested(r.members);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't load members.");
+    }
+  }
+  useEffect(() => {
+    load();
+  }, [groupId]);
+
+  async function act(fn: () => Promise<unknown>) {
+    setErr("");
+    try {
+      await fn();
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "That didn't work.");
+    }
+  }
+
+  return (
+    <fieldset class="mb-5 border border-ink p-4" data-section="members">
+      <legend class="px-1 text-sm font-bold">Members</legend>
+      {err && <ErrorBox>{err}</ErrorBox>}
+      {members === null ? (
+        <p class="text-xs text-dim">Loading…</p>
+      ) : (
+        <>
+          {requested.length > 0 && (
+            <div class="mb-3" data-requests>
+              <p class="mb-1 text-xs font-bold text-dim">Asked to join</p>
+              <ul class="space-y-1">
+                {requested.map((m) => (
+                  <li key={m.id} class="flex items-center gap-2 text-sm">
+                    <span class="font-bold">{m.name}</span>
+                    <span class="text-xs text-dim">/profiles/{m.slug}</span>
+                    <span class="ml-auto flex gap-1">
+                      <Button size="sm" onClick={() => act(() => api.setGroupMember(groupId, m.id, { status: "member" }))}>Approve</Button>
+                      <Button size="sm" variant="secondary" onClick={() => act(() => api.removeGroupMember(groupId, m.id))}>Decline</Button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <ul class="space-y-1" data-members>
+            {members.map((m) => (
+              <li key={m.id} class="flex items-center gap-2 text-sm">
+                <span class="font-bold">{m.name}</span>
+                <span class="text-xs text-dim">{m.role}</span>
+                <span class="ml-auto flex gap-1">
+                  {m.role !== "admin" && (
+                    <Button size="sm" variant="secondary" onClick={() => act(() => api.setGroupMember(groupId, m.id, { role: "admin" }))}>Make admin</Button>
+                  )}
+                  {m.role !== "moderator" && (
+                    <Button size="sm" variant="secondary" onClick={() => act(() => api.setGroupMember(groupId, m.id, { role: "moderator" }))}>Make moderator</Button>
+                  )}
+                  {m.role !== "member" && (
+                    <Button size="sm" variant="secondary" onClick={() => act(() => api.setGroupMember(groupId, m.id, { role: "member" }))}>Demote</Button>
+                  )}
+                  <Button size="sm" variant="danger" onClick={() => act(() => api.removeGroupMember(groupId, m.id))}>Remove</Button>
+                </span>
+              </li>
+            ))}
+            {members.length === 0 && <li class="text-xs text-dim">Nobody yet.</li>}
+          </ul>
+          <div class="mt-3 flex items-end gap-2">
+            <Field label="Add by profile address" class="flex-1">
+              <Input type="text" name="add-member" value={slug} placeholder="pat" onInput={(e) => setSlug((e.target as HTMLInputElement).value)} />
+            </Field>
+            <Button
+              size="sm"
+              disabled={!slug.trim()}
+              onClick={() =>
+                act(async () => {
+                  await api.addGroupMember(groupId, slug.trim());
+                  setSlug("");
+                })
+              }
+            >
+              Add
+            </Button>
+          </div>
+        </>
+      )}
+    </fieldset>
   );
 }

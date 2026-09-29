@@ -22,10 +22,10 @@ mkdirSync(join(siteDir, "pages", "events"), { recursive: true });
 writeFileSync(join(siteDir, "friendo.toml"), '[site]\nname = "Cal"\ntimezone = "America/Los_Angeles"\n');
 writeFileSync(
   join(siteDir, "pages", "events", "[slug].html"),
-  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>{{ record.title }}</title></head><body>' +
-    '<p id="ssr">{{ record.rsvps.going }} going</p>' +
-    '<friendo-rsvp post-id="{{ record.id }}" names></friendo-rsvp>' +
-    '<friendo-add-to-calendar post-id="{{ record.id }}"></friendo-add-to-calendar>' +
+  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>{{ post.title }}</title></head><body>' +
+    '<p id="ssr">{{ post.rsvps.going }} going</p>' +
+    '<friendo-rsvp post-id="{{ post.id }}" names></friendo-rsvp>' +
+    '<friendo-add-to-calendar post-id="{{ post.id }}"></friendo-add-to-calendar>' +
     '<friendo-add-to-calendar subscribe collection="events"></friendo-add-to-calendar>' +
     '<script src="/friendo.js" defer></script></body></html>'
 );
@@ -67,11 +67,11 @@ try {
   await waitForReady();
   const cookie = await setupOwner();
   const H = { "Content-Type": "application/json", Cookie: "friendo_session=" + cookie };
-  const created = await (await fetch(ORIGIN + "/_/api/collections/events/records", {
+  const created = await (await fetch(ORIGIN + "/_/api/collections/events/posts", {
     method: "POST", headers: H,
-    body: JSON.stringify({ title: "Book club", slug: "book-club", status: "published", data: { when: "2027-03-01 19:00 to 20:30", repeats: "weekly" } }),
+    body: JSON.stringify({ title: "Book club", slug: "book-club", status: "published", fields: { when: { start: "2027-03-01 19:00 to 20:30", repeats: "weekly" } } }),
   })).json();
-  const postId = created.record.id;
+  const postId = created.post.id;
 
   browser = await chromium.launch();
   const context = await browser.newContext();
@@ -125,12 +125,14 @@ try {
     throw new Error(`google event link = ${g}`);
   }
   const ics = eventLinks.find(([t]) => /Apple/.test(t))?.[1] || "";
-  if (!ics.includes("/calendar.ics?record=" + postId)) throw new Error(`ics link = ${ics}`);
+  if (!ics.includes("/calendar.ics?post=" + postId)) throw new Error(`ics link = ${ics}`);
   const sub = page.locator("friendo-add-to-calendar[subscribe]");
   await sub.locator('[part="button"]').click();
   const subLinks = await sub.locator('[part="item"]').evaluateAll((as) => as.map((a) => [a.textContent, a.getAttribute("href")]));
   const sg = subLinks.find(([t]) => /Google/.test(t))?.[1] || "";
-  if (!sg.startsWith("https://calendar.google.com/calendar/r?cid=") || !/calendar\.ics%3Fcollection%3Devents/.test(sg)) throw new Error(`google subscribe = ${sg}`);
+  // Signed in, the subscribe menu offers the member's private feed: the token in
+  // the address, then the collection.
+  if (!sg.startsWith("https://calendar.google.com/calendar/r?cid=") || !/calendar\.ics%3Ftoken%3D[0-9a-f]+%26collection%3Devents/.test(sg)) throw new Error(`google subscribe = ${sg}`);
   const wc = subLinks.find(([t]) => /Apple/.test(t))?.[1] || "";
   if (!wc.startsWith("webcal://127.0.0.1:")) throw new Error(`webcal = ${wc}`);
 

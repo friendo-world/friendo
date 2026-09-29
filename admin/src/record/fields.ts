@@ -2,7 +2,7 @@ import type { DeclaredField, Record as Rec } from "../api";
 import { WHEN_KEYS } from "./when-where";
 
 // A collection has no declared schema: its fields are whatever keys its records
-// carry in `data`. This module reads those keys back into something a form and a
+// carry in `fields`. This module reads those keys back into something a form and a
 // table can show — a kind per field, guessed from the values — without ever
 // deciding what a record may or may not hold.
 
@@ -36,10 +36,10 @@ export function kindFromDeclared(kind: string): Kind {
   return KINDS.some((k) => k.value === kind) ? (kind as Kind) : "text";
 }
 
-// Keys the server lifts out of `data` into the post's event (the When section).
+// Keys the server lifts out of `fields` into the post's event (the When section).
 export const RESERVED_KEYS: string[] = WHEN_KEYS;
 
-// A record's own columns, which a data field may not shadow.
+// A record's own columns, which a field may not shadow.
 const COLUMN_NAMES = ["title", "slug", "body", "status", "id", "collection", "created", "updated", "published_at", "author_id"];
 
 export function isImageUrl(s: string): boolean {
@@ -60,13 +60,13 @@ export function kindOf(v: unknown): Kind | null {
 }
 
 // inferFields reads a collection's fields: the ones friendo.toml declares come
-// first, in its order, then every other non-reserved data key its records carry,
+// first, in its order, then every other non-reserved field its records carry,
 // with the kind the values agree on, ordered by how many records carry the key
 // and then by name, so the table's columns are stable across reloads.
-export function inferFields(records: { data?: Data | null }[], declared: DeclaredField[] = []): FieldDef[] {
+export function inferFields(records: { fields?: Data | null }[], declared: DeclaredField[] = []): FieldDef[] {
   const stats = new Map<string, { count: number; votes: Map<Kind, number> }>();
   for (const r of records) {
-    const data = r.data;
+    const data = r.fields;
     if (!data || typeof data !== "object") continue;
     for (const key of Object.keys(data)) {
       if (RESERVED_KEYS.includes(key)) continue;
@@ -209,7 +209,7 @@ export function emptyValue(kind: Kind): unknown {
 export function searchMatches(r: Rec, q: string): boolean {
   const needle = q.trim().toLowerCase();
   if (!needle) return true;
-  const hay = [r.title, r.slug, r.body, r.status, r.data ? JSON.stringify(r.data) : ""].join("\n").toLowerCase();
+  const hay = [r.title, r.slug, r.body, r.status, r.fields ? JSON.stringify(r.fields) : ""].join("\n").toLowerCase();
   return hay.includes(needle);
 }
 
@@ -218,7 +218,7 @@ export type SortKey = "title" | "slug" | "status" | "when" | "created" | "update
 
 function sortValue(r: Rec, key: SortKey, kind?: Kind): string | number {
   if (key.startsWith("data:")) {
-    const v = r.data?.[key.slice(5)];
+    const v = r.fields?.[key.slice(5)];
     if (v === null || v === undefined) return kind === "number" ? Number.NEGATIVE_INFINITY : "";
     if (typeof v === "number") return v;
     if (typeof v === "boolean") return v ? 1 : 0;
@@ -228,7 +228,7 @@ function sortValue(r: Rec, key: SortKey, kind?: Kind): string | number {
   }
   switch (key) {
     case "when":
-      return r.when ? (r.when.next ? r.when.next.starts : r.when.starts) : "";
+      return r.when ? (r.when.next ? r.when.next.start : r.when.start) : "";
     case "created":
       return r.created || "";
     case "updated":

@@ -43,19 +43,52 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 	// declares: apply them to the DB now (overwriting any admin edit) and mark them
 	// so the settings API reports them read-only and refuses to change them.
 	managed := applyManagedSettings(db, siteDir)
-	// [content] types and their fields, read once; the admin lays itself out from them.
+	// [content] collections and their fields, read once; the admin lays itself out from them.
 	contentTypes, typesDeclared := loadContentTypes(siteDir)
+	contentTypes = withGroupFields(contentTypes)
+	// [profiles] fields — what a profile carries beyond name, avatar and bio.
+	profileFields := loadProfileFields(siteDir)
 	r.Route("/api", func(r chi.Router) {
 		// Public endpoints — used by the SPA to bootstrap and authenticate.
-		r.Get("/me", handleMe(authFunc))
+		r.Get("/me", handleMe(db, authFunc))
 		// Which community features are on (Settings → Features).
 		r.Get("/features", handleFeatures(db))
 
-		// Personas: an account's author profiles. Any authenticated member may
+		// Profiles: an account's author profiles. Any authenticated member may
 		// list/create their own and pick which one their comments/messages use.
-		r.Get("/me/personas", handleListPersonas(db, authFunc))
-		r.Post("/me/personas", handleCreatePersona(db, authFunc))
-		r.Post("/me/personas/{id}/default", handleSetDefaultPersona(db, authFunc))
+		r.Get("/me/profiles", handleListProfilesFor(db, authFunc))
+		r.Post("/me/profiles", handleCreateProfile(db, authFunc))
+		r.Post("/me/profiles/{id}/default", handleSetDefaultProfile(db, authFunc))
+		r.Put("/me/profiles/{id}", handleUpdateMyProfile(db, authFunc))
+		// The member's private calendar link (see calendar.go).
+		r.Get("/me/calendar", handleMyCalendar(db, authFunc))
+		r.Post("/me/calendar/reset", handleResetMyCalendar(db, authFunc))
+		r.Delete("/me/profiles/{id}", handleDeleteProfile(db, authFunc))
+		// Profiles: every profile has an address. Who may read follows the site's
+		// profile_visibility setting (members by default).
+		r.Get("/profiles", handleListProfiles(db, authFunc, profileFields))
+		r.Get("/profiles/{slug}", handleGetProfile(db, authFunc, profileFields))
+		// Follows: one-way; a friend is a mutual follow. Public counts, member writes.
+		r.Get("/follows", featureGate(db, "follows", handleFollowStatus(db, authFunc)))
+		r.Post("/follows", featureGate(db, "follows", handleToggleFollow(db, authFunc)))
+		r.Delete("/follows/{profile_id}", featureGate(db, "follows", handleUnfollow(db, authFunc)))
+		r.Get("/profiles/{slug}/followers", featureGate(db, "follows", handleProfileFollows(db, authFunc, "followers")))
+		r.Get("/profiles/{slug}/following", featureGate(db, "follows", handleProfileFollows(db, authFunc, "following")))
+		// Groups: a post in the `groups` collection with members. Public reads
+		// follow each group's visibility; joining is a member act; moderators run it.
+		r.Get("/groups", featureGate(db, "groups", handleListGroups(db, authFunc, permalink)))
+		r.Get("/groups/{id}", featureGate(db, "groups", handleGetGroup(db, authFunc, permalink)))
+		r.Get("/groups/{id}/members", featureGate(db, "groups", handleListGroupMembers(db, authFunc)))
+		r.Post("/groups/{id}/join", featureGate(db, "groups", handleJoinGroup(db, authFunc, permalink)))
+		r.Delete("/groups/{id}/join", featureGate(db, "groups", handleLeaveGroup(db, authFunc, permalink)))
+		r.Post("/groups/{id}/members", featureGate(db, "groups", handleAddGroupMember(db, authFunc)))
+		r.Put("/groups/{id}/members/{profile_id}", featureGate(db, "groups", handleSetGroupMember(db, authFunc)))
+		r.Delete("/groups/{id}/members/{profile_id}", featureGate(db, "groups", handleRemoveGroupMember(db, authFunc)))
+		r.Put("/groups/{id}/settings", featureGate(db, "groups", handleGroupSettings(db, authFunc, permalink)))
+		// The inbox: what happened to you, read when you visit. On while follows or groups is.
+		r.Get("/me/notifications", notificationsGate(db, handleListNotifications(db, authFunc, permalink)))
+		r.Put("/me/notifications/read-all", notificationsGate(db, handleMarkAllNotificationsRead(db, authFunc)))
+		r.Put("/me/notifications/{id}/read", notificationsGate(db, handleMarkNotificationRead(db, authFunc)))
 		r.Post("/auth/login", handleLogin(db))
 		r.Post("/auth/logout", handleLogout(db))
 		r.Get("/setup", handleSetupStatus(db))
@@ -79,12 +112,22 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/chats/{id}/stream", featureGate(db, "chats", handleChatStream(db))) // SSE: live new messages
 		r.Post("/chats/{id}/messages", featureGate(db, "chats", handlePostMessage(db, authFunc)))
 		r.Delete("/messages/{id}", featureGate(db, "chats", handleDeleteMessage(db, authFunc)))
+		// A group's chats: its members' rooms (see group_chats.go).
+		r.Get("/groups/{id}/chats", featureGate(db, "chats", featureGate(db, "groups", handleListGroupChats(db, authFunc))))
+		r.Post("/groups/{id}/chats", featureGate(db, "chats", featureGate(db, "groups", handleCreateGroupChat(db, authFunc))))
+		r.Delete("/groups/{id}/chats/{chat}", featureGate(db, "chats", featureGate(db, "groups", handleDeleteGroupChat(db, authFunc))))
+		r.Get("/groups/{id}/chats/{chat}/messages", featureGate(db, "chats", featureGate(db, "groups", handleListGroupChatMessages(db, authFunc))))
+		r.Post("/groups/{id}/chats/{chat}/messages", featureGate(db, "chats", featureGate(db, "groups", handlePostGroupChatMessage(db, authFunc))))
+		r.Get("/groups/{id}/chats/{chat}/stream", featureGate(db, "chats", featureGate(db, "groups", handleGroupChatStream(db, authFunc))))
 		// RSVP: public counts; a signed-in member answers (going / not_going /
-		// maybe) for one occurrence of a post's event. Names for organizers only.
+		// maybe) for one date of a post's event. Names for organizers only.
 		r.Get("/posts/{id}/rsvps", featureGate(db, "rsvp", handleGetRSVPs(db, authFunc)))
 		r.Post("/posts/{id}/rsvps", featureGate(db, "rsvp", handleSetRSVP(db, authFunc)))
 		r.Delete("/posts/{id}/rsvps", featureGate(db, "rsvp", handleDeleteRSVP(db, authFunc)))
-		r.Get("/posts/{id}/attendees", featureGate(db, "rsvp", handleAttendees(db, authFunc)))
+		r.Get("/posts/{id}/rsvps/names", featureGate(db, "rsvp", handleRSVPNames(db, authFunc)))
+		// Invitations: the organizer asks people (by address, group, or followers);
+		// each becomes an RSVP row awaiting an answer, plus a notification.
+		r.Post("/posts/{id}/invites", featureGate(db, "rsvp", handleInviteToEvent(db, authFunc)))
 		r.Get("/polls/by-slug/{slug}", featureGate(db, "polls", handleGetPollBySlug(db, authFunc)))
 		r.Get("/polls/{id}", featureGate(db, "polls", handleGetPoll(db, authFunc)))
 		r.Post("/polls/{id}/vote", featureGate(db, "polls", handleVotePoll(db, authFunc)))
@@ -99,26 +142,27 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 
 		// Content — contributor+ (holds content.create). The handlers scope to the
 		// actor's own posts unless they also hold content.edit.any.
-		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db, contentTypes, typesDeclared)))
+		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db, contentTypes, typesDeclared, profileFields)))
 		// The [content] block that matches the site as it is (to copy, or for `friendo pull`).
 		r.Get("/content/toml", capGate(authFunc, data.CapSiteConfigure, handleContentToml(db, contentTypes)))
-		r.Get("/collections/{collection}/records", capGate(authFunc, data.CapContentCreate, handleListRecords(db, authFunc)))
+		r.Get("/collections/{collection}/posts", capGate(authFunc, data.CapContentCreate, handleListRecords(db, authFunc)))
 		// Create self-gates: contributors+ (content.create) post directly; when the
 		// site opts in (content.accept_submissions), a signed-in member may submit a
 		// post that's forced into the pending review queue.
-		r.Post("/collections/{collection}/records", handleCreateRecord(db, authFunc))
-		// Post-review queue — editor+ (content.edit.any) lists posts by status;
-		// content.publish flips a post's status without touching its content.
-		r.Get("/records", capGate(authFunc, data.CapContentEditAny, handleListRecordsByStatus(db)))
-		r.Get("/records/{id}", capGate(authFunc, data.CapContentCreate, handleGetRecord(db, authFunc)))
-		r.Put("/records/{id}/status", capGate(authFunc, data.CapContentPublish, handleSetRecordStatus(db)))
-		r.Put("/records/{id}", capGate(authFunc, data.CapContentCreate, handleUpdateRecord(db, authFunc)))
-		r.Delete("/records/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteRecord(db, authFunc)))
+		r.Post("/collections/{collection}/posts", handleCreateRecord(db, authFunc))
+		// The review queue — moderator+ (review.posts) lists posts by status and
+		// approves or rejects a pending one; content.publish (editor+) may set any
+		// status. Neither touches the post's content.
+		r.Get("/posts", capGate(authFunc, data.CapReviewPosts, handleListRecordsByStatus(db)))
+		r.Get("/posts/{id}", capGate(authFunc, data.CapContentCreate, handleGetRecord(db, authFunc)))
+		r.Put("/posts/{id}/status", capGate(authFunc, data.CapReviewPosts, handleSetRecordStatus(db, authFunc)))
+		r.Put("/posts/{id}", capGate(authFunc, data.CapContentCreate, handleUpdateRecord(db, authFunc)))
+		r.Delete("/posts/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteRecord(db, authFunc)))
 
-		// Comment moderation — contributor+ (moderate.own); scoped to own posts
-		// unless the actor holds moderate.any.
-		r.Get("/comments", featureGate(db, "comments", capGate(authFunc, data.CapCommentModerateOwn, handleModerationList(db, authFunc))))
-		r.Put("/comments/{id}", featureGate(db, "comments", capGate(authFunc, data.CapCommentModerateOwn, handleUpdateComment(db, authFunc))))
+		// Comment review — contributor+ (review.own); scoped to own posts
+		// unless the actor holds review.any.
+		r.Get("/comments", featureGate(db, "comments", capGate(authFunc, data.CapReviewOwn, handleModerationList(db, authFunc))))
+		r.Put("/comments/{id}", featureGate(db, "comments", capGate(authFunc, data.CapReviewOwn, handleUpdateComment(db, authFunc))))
 		// Delete self-gates: a member may delete their own comment; moderators
 		// may delete comments they're allowed to moderate.
 		r.Delete("/comments/{id}", featureGate(db, "comments", handleDeleteComment(db, authFunc)))
@@ -184,14 +228,14 @@ func capGate(authFunc func(*http.Request) *data.User, cap data.Capability, h htt
 // --- Content (collections + records) ---
 
 // defaultCollections appear in the collections list when friendo.toml declares no
-// [content] types, so a fresh site has somewhere to create the first record.
+// [content] collections, so a fresh site has somewhere to create the first record.
 var defaultCollections = []string{"blog", "pages", "posts"}
 
 // handleListCollections lists the site's collections: the types friendo.toml
 // declares (in that order, with their fields), then any other collection that
 // has records — a collection can be started ad hoc, and the toml can catch up
 // later (see handleContentToml). With no declared types, the defaults stand in.
-func handleListCollections(db *data.DB, types []ContentType, declared bool) http.HandlerFunc {
+func handleListCollections(db *data.DB, types []ContentType, declared bool, profileFields []FieldDecl) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		counts, err := db.CollectionCounts()
 		if err != nil {
@@ -225,7 +269,7 @@ func handleListCollections(db *data.DB, types []ContentType, declared bool) http
 				out = append(out, collectionInfo{Name: c.Name, Count: c.Count, Fields: []FieldDecl{}})
 			}
 		}
-		jsonResponse(w, map[string]any{"collections": out, "declared": declared})
+		jsonResponse(w, map[string]any{"collections": out, "declared": declared, "profile_fields": profileFields})
 	}
 }
 
@@ -250,7 +294,7 @@ func handleListRecords(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			records = []map[string]any{}
 		}
 		attachWhenAll(db, records)
-		jsonResponse(w, map[string]any{"records": records})
+		jsonResponse(w, map[string]any{"posts": records})
 	}
 }
 
@@ -278,7 +322,7 @@ func handleGetRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.
 		id := chi.URLParam(r, "id")
 		record, err := db.GetRecordByID(id)
 		if err == sql.ErrNoRows {
-			jsonError(w, "record not found", http.StatusNotFound)
+			jsonError(w, "post not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -291,7 +335,7 @@ func handleGetRecord(db *data.DB, authFunc func(*http.Request) *data.User) http.
 			return
 		}
 		attachWhen(db, record)
-		jsonResponse(w, map[string]any{"record": record})
+		jsonResponse(w, map[string]any{"post": record})
 	}
 }
 
@@ -318,13 +362,15 @@ func handleListRecordsByStatus(db *data.DB) http.HandlerFunc {
 			return
 		}
 		attachWhenAll(db, records)
-		jsonResponse(w, map[string]any{"records": records})
+		jsonResponse(w, map[string]any{"posts": records})
 	}
 }
 
-// handleSetRecordStatus flips a post's publication status (publish/unpublish
-// from the review queue) without touching its content.
-func handleSetRecordStatus(db *data.DB) http.HandlerFunc {
+// handleSetRecordStatus flips a post's publication status without touching its
+// content. A moderator (review.posts) may only answer the review queue: a
+// pending post becomes published (approved) or draft (rejected). An editor
+// (content.publish) may set any status.
+func handleSetRecordStatus(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Status string `json:"status"`
@@ -338,9 +384,24 @@ func handleSetRecordStatus(db *data.DB) http.HandlerFunc {
 			return
 		}
 		id := chi.URLParam(r, "id")
+		if user := authFunc(r); !user.Can(data.CapContentPublish) {
+			current, err := db.GetRecordByID(id)
+			if err == sql.ErrNoRows {
+				jsonError(w, "post not found", http.StatusNotFound)
+				return
+			}
+			if err != nil {
+				jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+				return
+			}
+			if current["status"] != "pending" || in.Status == "pending" {
+				jsonError(w, "a moderator can only approve or reject a post waiting for review", http.StatusForbidden)
+				return
+			}
+		}
 		err := db.SetRecordStatus(id, in.Status)
 		if err == sql.ErrNoRows {
-			jsonError(w, "record not found", http.StatusNotFound)
+			jsonError(w, "post not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -348,7 +409,7 @@ func handleSetRecordStatus(db *data.DB) http.HandlerFunc {
 			return
 		}
 		record, _ := db.GetRecordByID(id)
-		jsonResponse(w, map[string]any{"record": record})
+		jsonResponse(w, map[string]any{"post": record})
 	}
 }
 
@@ -359,7 +420,7 @@ func recordStatusFor(db *data.DB, user *data.User, requested string) string {
 	if user.Can(data.CapContentPublish) {
 		return requested
 	}
-	if db.GetBoolSetting("content.require_approval", false) {
+	if db.GetBoolSetting(settingPostsNeedReview, false) {
 		return "pending"
 	}
 	return "published"
@@ -370,7 +431,7 @@ type recordInput struct {
 	Title  string          `json:"title"`
 	Body   string          `json:"body"`
 	Status string          `json:"status"`
-	Data   json.RawMessage `json:"data"` // optional front-matter fields; omitted leaves data untouched
+	Data   json.RawMessage `json:"fields"` // optional front-matter fields; omitted leaves data untouched
 }
 
 func (in recordInput) status() string {
@@ -387,20 +448,36 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		collection := chi.URLParam(r, "collection")
+		if collection == "profiles" {
+			// /profiles/<slug> pages read the authors table, not posts.
+			jsonError(w, "\"profiles\" is reserved for member profiles", http.StatusBadRequest)
+			return
+		}
 		// Contributors+ (content.create) create directly. A member without that
 		// capability may submit only when the site opts in; their post is
-		// rate-limited and forced into the pending review queue.
-		memberSubmission := false
+		// rate-limited and forced into the pending review queue. A group is the
+		// exception: with member_groups on, a member makes one live at once and
+		// becomes its first moderator.
+		memberSubmission, memberGroup := false, false
 		if !user.Can(data.CapContentCreate) {
-			if !db.GetBoolSetting(settingAcceptSubmissions, false) {
+			switch {
+			case collection == data.GroupsCollection && db.FeatureOn("groups") && db.MembersCanStartGroups():
+				if !db.RateLimitAllow("group:"+user.ID, commentRateLimit, commentRateWindow) {
+					jsonError(w, "you're creating groups too fast — slow down", http.StatusTooManyRequests)
+					return
+				}
+				memberGroup = true
+			case db.GetBoolSetting(settingMembersCanPost, false):
+				if !db.RateLimitAllow("submission:"+user.ID, commentRateLimit, commentRateWindow) {
+					jsonError(w, "you're submitting too fast — slow down", http.StatusTooManyRequests)
+					return
+				}
+				memberSubmission = true
+			default:
 				jsonError(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			if !db.RateLimitAllow("submission:"+user.ID, commentRateLimit, commentRateWindow) {
-				jsonError(w, "you're submitting too fast — slow down", http.StatusTooManyRequests)
-				return
-			}
-			memberSubmission = true
 		}
 
 		var in recordInput
@@ -408,11 +485,13 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		collection := chi.URLParam(r, "collection")
 		authorID := db.DefaultAuthorID(user.ID)
 		status := recordStatusFor(db, user, in.status())
 		if memberSubmission {
 			status = "pending" // community submissions always enter the review queue
+		}
+		if memberGroup {
+			status = "published"
 		}
 		id, err := db.CreateRecord(collection, in.Slug, in.Title, in.Body, status, authorID)
 		if err != nil {
@@ -424,18 +503,41 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			db.SetRecordData(id, string(cleaned))
 			autoGeotag(db, id, in.Title, cleaned)
 		}
+		// Whoever makes a group is its first admin.
+		if collection == data.GroupsCollection && authorID != "" {
+			db.SetMembership(id, authorID, data.GroupRoleAdmin, data.MembershipMember)
+		}
 		record, _ := db.GetRecordByID(id)
 		attachWhen(db, record)
 		w.WriteHeader(http.StatusCreated)
-		jsonResponse(w, map[string]any{"record": record})
+		jsonResponse(w, map[string]any{"post": record})
 	}
 }
 
-// liftWhen pulls the reserved calendar keys (when, ends, timezone, repeats,
-// except, rrule) out of a record's data blob into the post's events row and
-// returns the data without them — the API-side twin of the content importer's
-// lifting, so a <friendo-form> with an <input name="when"> makes an event with no
-// SDK knowledge.
+// administersGroupRecord: a group's admins may edit its record (title, body,
+// settings) even when they didn't found it — the capability gate on the route
+// still needs content.create, so this reaches contributors who run a group.
+func administersGroupRecord(db *data.DB, user *data.User, record map[string]any) bool {
+	if c, _ := record["collection"].(string); c != data.GroupsCollection {
+		return false
+	}
+	return db.IsGroupAdmin(record["id"].(string), db.DefaultAuthorID(user.ID))
+}
+
+// reviewsPendingRecord: a moderator (review.posts) may throw out a post that is
+// waiting for review, the same as rejecting it.
+func reviewsPendingRecord(db *data.DB, user *data.User, id string) bool {
+	if !user.Can(data.CapReviewPosts) {
+		return false
+	}
+	rec, err := db.GetRecordByID(id)
+	return err == nil && rec["status"] == "pending"
+}
+
+// liftWhen pulls `when` (a string, or {start, end, timezone, repeats, except,
+// rrule}) out of a record's fields into the post's events row and returns the
+// fields without it — the API-side twin of the content importer's lifting, so a
+// <friendo-form> with an <input name="when"> makes an event with no SDK knowledge.
 //
 // Data with no `when` key leaves the post's event as it is: the API hands `data`
 // back without the lifted keys, so a client that reads a record and writes it
@@ -509,7 +611,7 @@ func handleUpdateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		id := chi.URLParam(r, "id")
 		current, err := db.GetRecordByID(id)
 		if err == sql.ErrNoRows {
-			jsonError(w, "record not found", http.StatusNotFound)
+			jsonError(w, "post not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -517,7 +619,7 @@ func handleUpdateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			return
 		}
 		user := authFunc(r)
-		if !user.Can(data.CapContentEditAny) && !db.UserOwnsPost(user.ID, id) {
+		if !user.Can(data.CapContentEditAny) && !db.UserOwnsPost(user.ID, id) && !administersGroupRecord(db, user, current) {
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -541,7 +643,7 @@ func handleUpdateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		}
 		record, _ := db.GetRecordByID(id)
 		attachWhen(db, record)
-		jsonResponse(w, map[string]any{"record": record})
+		jsonResponse(w, map[string]any{"post": record})
 	}
 }
 
@@ -549,19 +651,21 @@ func handleDeleteRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		user := authFunc(r)
-		if !user.Can(data.CapContentEditAny) && !db.UserOwnsPost(user.ID, id) {
+		if !user.Can(data.CapContentEditAny) && !db.UserOwnsPost(user.ID, id) && !reviewsPendingRecord(db, user, id) {
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		err := db.DeleteRecord(id)
 		if err == sql.ErrNoRows {
-			jsonError(w, "record not found", http.StatusNotFound)
+			jsonError(w, "post not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
 			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
 			return
 		}
+		db.DeleteMembershipsForGroup(id) // a no-op for anything but a group
+		db.DeleteChatsForGroup(id)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -588,7 +692,7 @@ func handleListComments(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		canModerate := false
 		if u := authFunc(r); u != nil {
 			viewerID = u.ID
-			canModerate = u.Can(data.CapCommentModerateAny) || db.UserOwnsPost(u.ID, postID)
+			canModerate = u.Can(data.CapReviewAny) || db.UserOwnsPost(u.ID, postID)
 		}
 		comments, err := db.ListCommentsForViewer(postID, viewerID, canModerate)
 		if err != nil {
@@ -625,7 +729,7 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			return
 		}
 		status := "pending"
-		if db.GetBoolSetting(settingAutoApprove, false) {
+		if !commentsNeedReview(db) {
 			status = "approved"
 		}
 		authorID := db.DefaultAuthorID(user.ID)
@@ -634,6 +738,9 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
 		}
+		if status == "approved" {
+			notifyCommentOnPost(db, id)
+		}
 		comment, _ := db.GetComment(id)
 		w.WriteHeader(http.StatusCreated)
 		jsonResponse(w, map[string]any{"comment": comment})
@@ -641,7 +748,7 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 }
 
 // handleModerationList returns comments filtered by ?status (defaults to the
-// pending queue). Editors+ (comment.moderate.any) see the whole site; a
+// pending queue). Moderators+ (review.any) see the whole site; a
 // Contributor sees only comments on posts they authored.
 func handleModerationList(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -652,7 +759,7 @@ func handleModerationList(db *data.DB, authFunc func(*http.Request) *data.User) 
 		user := authFunc(r)
 		var comments []map[string]any
 		var err error
-		if user.Can(data.CapCommentModerateAny) {
+		if user.Can(data.CapReviewAny) {
 			comments, err = db.ListCommentsByStatus(status)
 		} else {
 			comments, err = db.ListCommentsByStatusForOwner(status, user.ID)
@@ -668,7 +775,7 @@ func handleModerationList(db *data.DB, authFunc func(*http.Request) *data.User) 
 // canModerateComment reports whether the actor may moderate this comment — any
 // comment with moderate.any, else only comments on their own posts.
 func canModerateComment(db *data.DB, user *data.User, commentID string) bool {
-	return user.Can(data.CapCommentModerateAny) || db.UserOwnsCommentPost(user.ID, commentID)
+	return user.Can(data.CapReviewAny) || db.UserOwnsCommentPost(user.ID, commentID)
 }
 
 // handleUpdateComment changes a comment's moderation status.
@@ -698,6 +805,9 @@ func handleUpdateComment(db *data.DB, authFunc func(*http.Request) *data.User) h
 		if err != nil {
 			jsonError(w, fmt.Sprintf("update error: %v", err), http.StatusInternalServerError)
 			return
+		}
+		if in.Status == "approved" {
+			notifyCommentOnPost(db, id)
 		}
 		comment, _ := db.GetComment(id)
 		jsonResponse(w, map[string]any{"comment": comment})
@@ -733,14 +843,25 @@ func handleDeleteComment(db *data.DB, authFunc func(*http.Request) *data.User) h
 
 // --- Reactions (community) ---
 
-// handleListReactions returns per-emoji counts for a target (public). If the
-// caller is an authenticated member, each entry reports whether they reacted.
+// targetOf reads what a reaction or location points at: post_id names a post,
+// comment_id a comment (reactions only). Returns "", "" when neither is given.
+func targetOf(get func(string) string) (targetType, targetID string) {
+	if id := get("post_id"); id != "" {
+		return "post", id
+	}
+	if id := get("comment_id"); id != "" {
+		return "comment", id
+	}
+	return "", ""
+}
+
+// handleListReactions returns per-emoji counts for a post or comment (public).
+// If the caller is an authenticated member, each entry reports whether they reacted.
 func handleListReactions(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		targetType := r.URL.Query().Get("target_type")
-		targetID := r.URL.Query().Get("target_id")
-		if targetType == "" || targetID == "" {
-			jsonError(w, "target_type and target_id are required", http.StatusBadRequest)
+		targetType, targetID := targetOf(r.URL.Query().Get)
+		if targetID == "" {
+			jsonError(w, "post_id or comment_id is required", http.StatusBadRequest)
 			return
 		}
 		authorID := ""
@@ -765,56 +886,62 @@ func handleToggleReaction(db *data.DB, authFunc func(*http.Request) *data.User) 
 			return
 		}
 		var in struct {
-			TargetType string `json:"target_type"`
-			TargetID   string `json:"target_id"`
-			Emoji      string `json:"emoji"`
+			PostID    string `json:"post_id"`
+			CommentID string `json:"comment_id"`
+			Emoji     string `json:"emoji"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if in.TargetType == "" || in.TargetID == "" || in.Emoji == "" {
-			jsonError(w, "target_type, target_id and emoji are required", http.StatusBadRequest)
+		targetType, targetID := targetOf(func(k string) string {
+			if k == "post_id" {
+				return in.PostID
+			}
+			return in.CommentID
+		})
+		if targetID == "" || in.Emoji == "" {
+			jsonError(w, "post_id (or comment_id) and emoji are required", http.StatusBadRequest)
 			return
 		}
 		authorID := db.DefaultAuthorID(user.ID)
-		reacted, err := db.ToggleReaction(in.TargetType, in.TargetID, authorID, in.Emoji)
+		reacted, err := db.ToggleReaction(targetType, targetID, authorID, in.Emoji)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("reaction error: %v", err), http.StatusInternalServerError)
 			return
 		}
-		reactions, _ := db.ReactionCounts(in.TargetType, in.TargetID, authorID)
+		reactions, _ := db.ReactionCounts(targetType, targetID, authorID)
 		jsonResponse(w, map[string]any{"reacted": reacted, "reactions": reactions})
 	}
 }
 
 // --- RSVP ---
 
-// rsvpPayload is the shape every RSVP call answers with: the occurrence asked
-// about, its tally, the caller's own answer, and (for organizers) who answered.
+// rsvpPayload is the shape every RSVP call answers with: the date asked about,
+// its tally, the caller's own answer, and (for organizers) who answered.
 func rsvpPayload(db *data.DB, user *data.User, ev *data.Event, key string) map[string]any {
 	counts, _ := db.RSVPCountsFor(ev.ID, key)
 	out := map[string]any{
-		"occurrence": key,
-		"counts":     counts,
-		"mine":       "",
+		"date":   key,
+		"counts": counts,
+		"mine":   "",
 	}
 	if t, err := time.Parse(time.RFC3339, key); err == nil {
-		out["occurrence_text"] = data.FormatWhen(t.In(ev.Location()), time.Time{}, ev.AllDay, time.Now().In(ev.Location()), "")
+		out["date_text"] = data.FormatWhen(t.In(ev.Location()), time.Time{}, ev.AllDay, time.Now().In(ev.Location()), "")
 	}
 	if user != nil {
 		out["mine"] = db.RSVPForUser(ev.ID, key, user.ID)
-		if user.Can(data.CapCommentModerateAny) || db.UserOwnsEventPost(user.ID, ev) {
+		if user.Can(data.CapReviewAny) || db.UserOwnsEventPost(user.ID, ev) {
 			if list, err := db.ListRSVPs(ev.ID, key); err == nil {
-				out["attendees"] = list
+				out["names"] = list
 			}
 		}
 	}
 	return out
 }
 
-// eventForPost resolves a post's series and the occurrence a request names
-// (?occurrence= or the body's; "" = the next one), or writes the error.
+// eventForPost resolves a post's series and the date a request names
+// (?date= or the body's; "" = the next one), or writes the error.
 func eventForPost(w http.ResponseWriter, db *data.DB, postID, requested string) (*data.Event, string, bool) {
 	rec, err := db.GetRecordByID(postID)
 	if err != nil {
@@ -838,10 +965,10 @@ func eventForPost(w http.ResponseWriter, db *data.DB, postID, requested string) 
 	return ev, key, true
 }
 
-// handleGetRSVPs returns the tally for an occurrence (public).
+// handleGetRSVPs returns the tally for a date (public).
 func handleGetRSVPs(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ev, key, ok := eventForPost(w, db, chi.URLParam(r, "id"), r.URL.Query().Get("occurrence"))
+		ev, key, ok := eventForPost(w, db, chi.URLParam(r, "id"), r.URL.Query().Get("date"))
 		if !ok {
 			return
 		}
@@ -849,7 +976,7 @@ func handleGetRSVPs(db *data.DB, authFunc func(*http.Request) *data.User) http.H
 	}
 }
 
-// handleSetRSVP records the caller's answer for an occurrence (any signed-in member).
+// handleSetRSVP records the caller's answer for a date (any signed-in member).
 func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
@@ -858,7 +985,7 @@ func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.Ha
 			return
 		}
 		var in struct {
-			Occurrence string `json:"occurrence"`
+			Occurrence string `json:"date"`
 			Answer     string `json:"answer"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -893,13 +1020,13 @@ func handleDeleteRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		ev, key, ok := eventForPost(w, db, chi.URLParam(r, "id"), r.URL.Query().Get("occurrence"))
+		ev, key, ok := eventForPost(w, db, chi.URLParam(r, "id"), r.URL.Query().Get("date"))
 		if !ok {
 			return
 		}
-		// Any of the account's personas may have answered; clear them all.
-		personas, _ := db.ListPersonas(user.ID)
-		for _, p := range personas {
+		// Any of the account's profiles may have answered; clear them all.
+		profiles, _ := db.ListProfilesFor(user.ID)
+		for _, p := range profiles {
 			if id, _ := p["id"].(string); id != "" {
 				db.DeleteRSVP(ev.ID, key, id)
 			}
@@ -908,9 +1035,9 @@ func handleDeleteRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http
 	}
 }
 
-// handleAttendees lists every answer on a post's event for its organizer (the
-// post's author, or a moderator), grouped by occurrence; ?format=csv downloads it.
-func handleAttendees(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+// handleRSVPNames lists every answer on a post's event for its organizer (the
+// post's author, or a moderator), grouped by date; ?format=csv downloads it.
+func handleRSVPNames(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
 		if user == nil {
@@ -923,7 +1050,7 @@ func handleAttendees(db *data.DB, authFunc func(*http.Request) *data.User) http.
 			jsonError(w, "this post has no time to RSVP to", http.StatusNotFound)
 			return
 		}
-		if !user.Can(data.CapCommentModerateAny) && !db.UserOwnsEventPost(user.ID, ev) {
+		if !user.Can(data.CapReviewAny) && !db.UserOwnsEventPost(user.ID, ev) {
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -934,40 +1061,35 @@ func handleAttendees(db *data.DB, authFunc func(*http.Request) *data.User) http.
 		}
 		if r.URL.Query().Get("format") == "csv" {
 			w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-			w.Header().Set("Content-Disposition", `attachment; filename="attendees.csv"`)
+			w.Header().Set("Content-Disposition", `attachment; filename="rsvps.csv"`)
 			cw := csv.NewWriter(w)
-			cw.Write([]string{"occurrence", "name", "email", "answer", "answered_at", "scheduled"})
+			cw.Write([]string{"date", "name", "email", "answer", "answered_at", "scheduled"})
 			for _, row := range rows {
 				str := func(k string) string { v, _ := row[k].(string); return v }
 				sched := "yes"
 				if s, _ := row["scheduled"].(bool); !s {
 					sched = "no longer scheduled"
 				}
-				cw.Write([]string{str("occurrence"), str("author_name"), str("author_email"), str("answer"), str("updated"), sched})
+				cw.Write([]string{str("date"), str("author_name"), str("author_email"), str("answer"), str("updated"), sched})
 			}
 			cw.Flush()
 			return
 		}
-		jsonResponse(w, map[string]any{"attendees": rows})
+		jsonResponse(w, map[string]any{"names": rows})
 	}
 }
 
 // --- Locations (geo-tagging) ---
 
-// handleListLocations returns locations (public). With target_id it returns one
-// target's pins (unchanged). Without target_id it returns every published post's
-// pin of that type — the aggregate "all posts on one map" query — optionally
-// bounded by a bbox=minLng,minLat,maxLng,maxLat viewport, and decorates each row
-// with the post's public "url" (via the permalink resolver) so markers can link
-// back. The aggregate path is published-only so it can't leak draft positions.
+// handleListLocations returns locations (public). With post_id it returns one
+// post's locations. Without it, every published post's location — the aggregate
+// "all posts on one map" query — optionally bounded by a
+// bbox=minLng,minLat,maxLng,maxLat viewport, each row decorated with the post's
+// public "url" (via the permalink resolver) so markers can link back. The
+// aggregate path is published-only so it can't leak draft positions.
 func handleListLocations(db *data.DB, permalink data.PermalinkFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		targetType := r.URL.Query().Get("target_type")
-		targetID := r.URL.Query().Get("target_id")
-		if targetType == "" {
-			jsonError(w, "target_type is required", http.StatusBadRequest)
-			return
-		}
+		targetType, targetID := "post", r.URL.Query().Get("post_id")
 		if targetID != "" {
 			locations, err := db.ListLocations(targetType, targetID)
 			if err != nil {
@@ -1017,34 +1139,34 @@ func parseBBox(s string) *data.BBox {
 	return &data.BBox{MinLng: v[0], MinLat: v[1], MaxLng: v[2], MaxLat: v[3]}
 }
 
-// handleCreateLocation attaches a location to a target. Contributors may tag a
-// post they authored; editors+ (content.edit.any) may tag anything.
+// handleCreateLocation gives a post a location. Contributors may place a post
+// they authored; editors+ (content.edit.any) may place anything.
 func handleCreateLocation(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			TargetType string  `json:"target_type"`
-			TargetID   string  `json:"target_id"`
-			Lat        float64 `json:"lat"`
-			Lng        float64 `json:"lng"`
-			Label      string  `json:"label"`
+			PostID string  `json:"post_id"`
+			Lat    float64 `json:"lat"`
+			Lng    float64 `json:"lng"`
+			Label  string  `json:"label"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if in.TargetType == "" || in.TargetID == "" {
-			jsonError(w, "target_type and target_id are required", http.StatusBadRequest)
+		targetType, targetID := "post", in.PostID
+		if targetID == "" {
+			jsonError(w, "post_id is required", http.StatusBadRequest)
 			return
 		}
 		if in.Lat < -90 || in.Lat > 90 || in.Lng < -180 || in.Lng > 180 {
 			jsonError(w, "lat/lng out of range", http.StatusBadRequest)
 			return
 		}
-		if !canTagTarget(db, authFunc(r), in.TargetType, in.TargetID) {
+		if !canTagTarget(db, authFunc(r), targetType, targetID) {
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		id, err := db.CreateLocation(in.TargetType, in.TargetID, in.Lat, in.Lng, in.Label)
+		id, err := db.CreateLocation(targetType, targetID, in.Lat, in.Lng, in.Label)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
@@ -1117,13 +1239,12 @@ func extForMime(mime string) string {
 	}
 }
 
-// handleListFiles returns the media attached to a record (public — URLs are public).
+// handleListFiles returns the images attached to a post (public — URLs are public).
 func handleListFiles(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		recordType := r.URL.Query().Get("record_type")
-		recordID := r.URL.Query().Get("record_id")
-		if recordType == "" || recordID == "" {
-			jsonError(w, "record_type and record_id are required", http.StatusBadRequest)
+		recordType, recordID := "post", r.URL.Query().Get("post_id")
+		if recordID == "" {
+			jsonError(w, "post_id is required", http.StatusBadRequest)
 			return
 		}
 		files, err := db.ListFiles(recordType, recordID)
@@ -1144,10 +1265,9 @@ func handleUploadFile(db *data.DB, siteDir string, store storage.Backend) http.H
 			jsonError(w, "expected a multipart form upload", http.StatusBadRequest)
 			return
 		}
-		recordType := r.FormValue("record_type")
-		recordID := r.FormValue("record_id")
-		if recordType == "" || recordID == "" {
-			jsonError(w, "record_type and record_id are required", http.StatusBadRequest)
+		recordType, recordID := "post", r.FormValue("post_id")
+		if recordID == "" {
+			jsonError(w, "post_id is required", http.StatusBadRequest)
 			return
 		}
 		file, header, err := r.FormFile("file")
@@ -1300,12 +1420,29 @@ func (h *messageHub) broadcast(chatID, event, data string) {
 // API; an `event: delete` frame is `{"id": …}` for a message that's gone.
 func handleChatStream(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		chatID := chi.URLParam(r, "id")
+		chat, err := db.GetChat(chatID)
+		if err != nil {
+			jsonError(w, "chat not found", http.StatusNotFound)
+			return
+		}
+		if g, _ := chat["group_id"].(string); g != "" {
+			// A group's chat streams under its group (with the membership check).
+			jsonError(w, "chat not found", http.StatusNotFound)
+			return
+		}
+		streamChat(w, r, chatID)
+	}
+}
+
+// streamChat is the SSE body shared by site and group chats.
+func streamChat(w http.ResponseWriter, r *http.Request, chatID string) {
+	{
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			jsonError(w, "streaming unsupported", http.StatusInternalServerError)
 			return
 		}
-		chatID := chi.URLParam(r, "id")
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -1400,17 +1537,32 @@ func handleDeleteChat(db *data.DB) http.HandlerFunc {
 // the caller is signed in).
 func handleListMessages(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		viewerID := ""
-		if u := authFunc(r); u != nil {
-			viewerID = u.ID
-		}
-		messages, err := db.ListMessages(chi.URLParam(r, "id"), viewerID)
+		user := authFunc(r)
+		chatID := chi.URLParam(r, "id")
+		chat, err := db.GetChat(chatID)
 		if err != nil {
-			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			chat = map[string]any{"group_id": ""} // a page names it before the tag asks; unknown = empty
+		} else if g, _ := chat["group_id"].(string); g != "" {
+			jsonError(w, "chat not found", http.StatusNotFound) // a group's chat lives under its group
 			return
 		}
-		jsonResponse(w, map[string]any{"messages": messages})
+		serveMessages(db, w, user, chatID, chatAccessFor(db, user, chat))
 	}
+}
+
+// serveMessages answers a chat's messages with what the viewer may do there
+// (`can_moderate`, so the tag shows delete on the right bubbles).
+func serveMessages(db *data.DB, w http.ResponseWriter, user *data.User, chatID string, access chatAccess) {
+	viewerID := ""
+	if user != nil {
+		viewerID = user.ID
+	}
+	messages, err := db.ListMessages(chatID, viewerID)
+	if err != nil {
+		jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, map[string]any{"messages": messages, "can_moderate": access.canModerate, "can_post": access.canPost})
 }
 
 // handlePostMessage posts a message to a chat. Member-gated + rate-limited.
@@ -1422,10 +1574,23 @@ func handlePostMessage(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			return
 		}
 		chatID := chi.URLParam(r, "id")
-		if _, err := db.GetChat(chatID); err != nil {
+		chat, err := db.GetChat(chatID)
+		if err != nil {
 			jsonError(w, "chat not found", http.StatusNotFound)
 			return
 		}
+		if g, _ := chat["group_id"].(string); g != "" {
+			jsonError(w, "chat not found", http.StatusNotFound)
+			return
+		}
+		postMessage(db, w, r, user, chatID)
+	}
+}
+
+// postMessage is the body shared by site and group chats: validate, rate-limit,
+// write, and push to everyone streaming.
+func postMessage(db *data.DB, w http.ResponseWriter, r *http.Request, user *data.User, chatID string) {
+	{
 		var in struct {
 			Body     string `json:"body"`
 			ParentID string `json:"parent_id"`
@@ -1457,7 +1622,8 @@ func handlePostMessage(db *data.DB, authFunc func(*http.Request) *data.User) htt
 	}
 }
 
-// handleDeleteMessage removes a message — its author, or a comment moderator.
+// handleDeleteMessage removes a message — its author, or whoever moderates its
+// chat (comment moderators; a group's moderators for the group's chats).
 func handleDeleteMessage(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
@@ -1466,14 +1632,25 @@ func handleDeleteMessage(db *data.DB, authFunc func(*http.Request) *data.User) h
 			return
 		}
 		id := chi.URLParam(r, "id")
-		if !db.UserOwnsMessage(user.ID, id) && !user.Can(data.CapCommentModerateAny) {
+		message, err := db.GetMessage(id) // for its chat: the rules, and the stream
+		if err == sql.ErrNoRows {
+			jsonError(w, "message not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		chat, _ := db.GetChat(message["chat_id"].(string))
+		if chat == nil {
+			chat = map[string]any{"group_id": ""}
+		}
+		access := chatAccessFor(db, user, chat)
+		if !access.canRead || (!db.UserOwnsMessage(user.ID, id) && !access.canModerate) {
 			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		message, err := db.GetMessage(id) // for its chat, to tell the stream
-		if err == nil {
-			err = db.DeleteMessage(id)
-		}
+		err = db.DeleteMessage(id)
 		if err == sql.ErrNoRows {
 			jsonError(w, "message not found", http.StatusNotFound)
 			return
@@ -1673,37 +1850,58 @@ func userJSON(u *data.User) map[string]any {
 	}
 }
 
-// handleMe returns the current user, or 401 if not authenticated.
-func handleMe(authFunc func(*http.Request) *data.User) http.HandlerFunc {
+// handleMe returns the current user, or 401 if not authenticated. Beside the
+// account it names the profile attribution flows to (author_id), so a tag can
+// tell "this is me" without a second call.
+func handleMe(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
 		if user == nil {
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		jsonResponse(w, map[string]any{"user": userJSON(user)})
+		me := userJSON(user)
+		authorID := db.DefaultAuthorID(user.ID)
+		me["profile_id"] = authorID
+		// Who they follow (author ids), so a page of follow buttons paints its
+		// pressed state without a call per button. Empty while follows is off.
+		me["following"] = []string{}
+		if db.FeatureOn("follows") {
+			me["following"] = db.Following(authorID)
+		}
+		// The groups they belong to, by slug.
+		me["groups"] = []string{}
+		if db.FeatureOn("groups") {
+			me["groups"] = db.GroupsFor(authorID)
+		}
+		// Unread notifications, for the badge in <friendo-auth>.
+		me["unread"] = 0
+		if db.NotificationsOn() {
+			me["unread"] = db.UnreadCount(user.ID)
+		}
+		jsonResponse(w, map[string]any{"user": me})
 	}
 }
 
-// handleListPersonas returns the caller's author profiles (personas).
-func handleListPersonas(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+// handleListProfilesFor returns the caller's author profiles (profiles).
+func handleListProfilesFor(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
 		if user == nil {
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		personas, err := db.ListPersonas(user.ID)
+		profiles, err := db.ListProfilesFor(user.ID)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
 		}
-		jsonResponse(w, map[string]any{"personas": personas})
+		jsonResponse(w, map[string]any{"profiles": profiles})
 	}
 }
 
-// handleCreatePersona adds a new persona to the caller's account.
-func handleCreatePersona(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+// handleCreateProfile adds a new profile to the caller's account.
+func handleCreateProfile(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
 		if user == nil {
@@ -1722,27 +1920,27 @@ func handleCreatePersona(db *data.DB, authFunc func(*http.Request) *data.User) h
 			jsonError(w, "name is required", http.StatusBadRequest)
 			return
 		}
-		persona, err := db.CreatePersona(user.ID, in.Name, in.Avatar)
+		profile, err := db.CreateProfile(user.ID, in.Name, in.Avatar)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		jsonResponse(w, map[string]any{"persona": persona})
+		jsonResponse(w, map[string]any{"profile": profile})
 	}
 }
 
-// handleSetDefaultPersona points the caller's default at one of their personas.
-func handleSetDefaultPersona(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+// handleSetDefaultProfile points the caller's default at one of their profiles.
+func handleSetDefaultProfile(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
 		if user == nil {
 			jsonError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		err := db.SetDefaultPersona(user.ID, chi.URLParam(r, "id"))
+		err := db.SetDefaultProfile(user.ID, chi.URLParam(r, "id"))
 		if err == sql.ErrNoRows {
-			jsonError(w, "persona not found", http.StatusNotFound)
+			jsonError(w, "profile not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -1934,16 +2132,23 @@ func handlePushAssets(siteDir string, store storage.Backend) http.HandlerFunc {
 }
 
 // handlePushData upserts records into the local database.
-// Expects JSON body: {"records": [{"id": "...", "collection": "blog", ...}]}
+// Expects JSON body: {"posts": [{"id": "...", "collection": "blog", ...}]}
 func handlePushData(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Records []map[string]any `json:"records"`
-			Events  []map[string]any `json:"events"` // calendar series, beside their posts
+			Records     []map[string]any `json:"posts"`
+			Events      []map[string]any `json:"events"`      // calendar series, beside their posts
+			Memberships []map[string]any `json:"memberships"` // who's in which group, beside the group posts
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 10<<20)).Decode(&body); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
+		}
+		for _, m := range body.Memberships {
+			str := func(key string) string { v, _ := m[key].(string); return v }
+			if err := db.UpsertMembership(str("id"), str("group_id"), str("author_id"), str("role"), str("status"), str("created")); err != nil {
+				log.Printf("Error upserting membership %s: %v", str("id"), err)
+			}
 		}
 
 		synced := 0
@@ -1966,9 +2171,9 @@ func handlePushData(db *data.DB) http.HandlerFunc {
 			}
 			now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
-			// `data` (arbitrary front matter) arrives as a nested object; store as JSON.
+			// `fields` (arbitrary front matter) arrives as a nested object; store as JSON.
 			dataJSON := "{}"
-			if d, ok := rec["data"]; ok && d != nil {
+			if d, ok := rec["fields"]; ok && d != nil {
 				if b, err := json.Marshal(d); err == nil {
 					dataJSON = string(b)
 				}
@@ -2010,6 +2215,7 @@ func handlePushUsers(db *data.DB) http.HandlerFunc {
 		var body struct {
 			Users   []map[string]any `json:"users"`
 			Authors []map[string]any `json:"authors"`
+			Follows []map[string]any `json:"follows"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 10<<20)).Decode(&body); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
@@ -2073,14 +2279,31 @@ func handlePushUsers(db *data.DB) http.HandlerFunc {
 		authors := 0
 		for _, a := range body.Authors {
 			str := func(key string) string { v, _ := a[key].(string); return v }
-			if err := db.UpsertAuthor(str("id"), str("user_id"), str("name"), str("email"), str("avatar"), str("role"), str("created")); err != nil {
+			dataJSON := ""
+			if d, ok := a["fields"]; ok && d != nil {
+				if b, err := json.Marshal(d); err == nil {
+					dataJSON = string(b)
+				}
+			}
+			if err := db.UpsertAuthor(str("id"), str("user_id"), str("name"), str("email"), str("avatar"), str("role"), str("slug"), str("bio"), dataJSON, str("created")); err != nil {
 				log.Printf("Error upserting author %s: %v", str("id"), err)
 				continue
 			}
 			authors++
 		}
 
-		jsonResponse(w, map[string]int{"synced": synced, "authors": authors})
+		// Follows ride with the profiles they connect.
+		follows := 0
+		for _, f := range body.Follows {
+			str := func(key string) string { v, _ := f[key].(string); return v }
+			if err := db.UpsertFollow(str("id"), str("follower_id"), str("followee_id"), str("created")); err != nil {
+				log.Printf("Error upserting follow %s: %v", str("id"), err)
+				continue
+			}
+			follows++
+		}
+
+		jsonResponse(w, map[string]int{"synced": synced, "authors": authors, "follows": follows})
 	}
 }
 
@@ -2152,7 +2375,7 @@ func handlePullData(db *data.DB) http.HandlerFunc {
 				"published_at": publishedAt,
 				"created":      created,
 				"updated":      updated,
-				"data":         dataJSON,
+				"fields":       dataJSON,
 			})
 		}
 
@@ -2165,7 +2388,8 @@ func handlePullData(db *data.DB) http.HandlerFunc {
 				events = append(events, e.Row())
 			}
 		}
-		jsonResponse(w, map[string]any{"records": records, "events": events})
+		memberships, _ := db.ListMemberships()
+		jsonResponse(w, map[string]any{"posts": records, "events": events, "memberships": memberships})
 	}
 }
 
@@ -2246,7 +2470,8 @@ func handlePullUsers(db *data.DB) http.HandlerFunc {
 			result = []map[string]any{}
 		}
 		authors, _ := db.ListAuthors()
-		jsonResponse(w, map[string]any{"users": result, "authors": authors})
+		follows, _ := db.ListFollows()
+		jsonResponse(w, map[string]any{"users": result, "authors": authors, "follows": follows})
 	}
 }
 
@@ -2476,11 +2701,11 @@ func handleRequestCode(db *data.DB) http.HandlerFunc {
 		user, err := db.GetUserByEmail(email)
 		if err != nil {
 			// New self-serve account. Honor the site's signup policy.
-			if !db.GetBoolSetting("access.signups_enabled", true) {
+			if !db.GetBoolSetting(settingOpenSignups, true) {
 				jsonError(w, "sign-ups are disabled for this site", http.StatusForbidden)
 				return
 			}
-			role := db.GetSetting("access.default_role", "member")
+			role := signupRole(db)
 			if role != "member" && role != "contributor" {
 				role = "member"
 			}
@@ -2573,7 +2798,13 @@ func handleListUsers(db *data.DB) http.HandlerFunc {
 		}
 		out := []map[string]any{}
 		for _, u := range users {
-			out = append(out, userJSON(u))
+			m := userJSON(u)
+			// The address of the profile attribution flows to, so the admin can
+			// link to a person's profile page.
+			if p, err := db.ProfileByID(db.DefaultAuthorID(u.ID)); err == nil {
+				m["profile_slug"] = p["slug"]
+			}
+			out = append(out, m)
 		}
 		jsonResponse(w, map[string]any{"users": out})
 	}
@@ -2720,16 +2951,22 @@ func handleDeleteUser(db *data.DB, authFunc func(*http.Request) *data.User) http
 
 // --- Settings ---
 
-// Setting keys.
+// Setting keys. One flat name each: the same word in friendo.toml's [settings]
+// block, in the database, in the admin and in the settings API.
 const (
-	settingAutoApprove       = "moderation.auto_approve"
-	settingDefaultRole       = "access.default_role"
-	settingSignupsEnabled    = "access.signups_enabled"
-	settingRequireApproval   = "content.require_approval"
-	settingAcceptSubmissions = "content.accept_submissions"
-	// settingPasswordLogin turns password sign-in on for the site. Off by
-	// default: everyone can always sign in with a code emailed to them.
-	settingPasswordLogin = "access.password_login"
+	// Anyone can sign up (else only accounts an admin adds).
+	settingOpenSignups = "open_signups"
+	// New members start as contributors (else as plain members).
+	settingSignupsAreContributors = "signups_are_contributors"
+	// Members can post from a <friendo-form>; their posts wait for review.
+	settingMembersCanPost = "members_can_post"
+	// Contributors' posts wait for review before they go live.
+	settingPostsNeedReview = "posts_need_review"
+	// Comments wait for review before they show (default on).
+	settingCommentsNeedReview = "comments_need_review"
+	// Password sign-in is allowed too. Off by default: everyone can always
+	// sign in with a code emailed to them.
+	settingPasswordLogin = "password_login"
 )
 
 // tomlSettingsConfig mirrors the [settings] block of friendo.toml. Pointer fields
@@ -2737,20 +2974,26 @@ const (
 // are treated as managed.
 type tomlSettingsConfig struct {
 	Settings struct {
-		AutoApprove       *bool   `toml:"auto_approve"`
-		DefaultRole       *string `toml:"default_role"`
-		SignupsEnabled    *bool   `toml:"signups_enabled"`
-		RequireApproval   *bool   `toml:"require_approval"`
-		AcceptSubmissions *bool   `toml:"accept_submissions"`
-		PasswordLogin     *bool   `toml:"password_login"`
+		OpenSignups            *bool `toml:"open_signups"`
+		SignupsAreContributors *bool `toml:"signups_are_contributors"`
+		MembersCanPost         *bool `toml:"members_can_post"`
+		PostsNeedReview        *bool `toml:"posts_need_review"`
+		CommentsNeedReview     *bool `toml:"comments_need_review"`
+		PasswordLogin          *bool `toml:"password_login"`
+		// Who may see profiles: "members" (default) or "public".
+		ProfileVisibility *string `toml:"profile_visibility"`
+		// Whether plain members may start groups (default off).
+		MembersCanStartGroups *bool `toml:"members_can_start_groups"`
 		// Feature switches (see data.Features) and the built-in collections a
-		// site without [content] types shows.
+		// site without [content] collections shows.
 		Comments           *bool    `toml:"comments"`
 		Reactions          *bool    `toml:"reactions"`
 		Polls              *bool    `toml:"polls"`
 		RSVP               *bool    `toml:"rsvp"`
 		Locations          *bool    `toml:"locations"`
 		Chats              *bool    `toml:"chats"`
+		Follows            *bool    `toml:"follows"`
+		Groups             *bool    `toml:"groups"`
 		DefaultCollections []string `toml:"default_collections"`
 	} `toml:"settings"`
 }
@@ -2779,31 +3022,26 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 		db.SetSetting(key, val)
 		managed[key] = true
 	}
-	if s.AutoApprove != nil {
-		set(settingAutoApprove, boolSetting(*s.AutoApprove))
+	for key, v := range map[string]*bool{
+		settingOpenSignups: s.OpenSignups, settingSignupsAreContributors: s.SignupsAreContributors,
+		settingMembersCanPost: s.MembersCanPost, settingPostsNeedReview: s.PostsNeedReview,
+		settingCommentsNeedReview: s.CommentsNeedReview, settingPasswordLogin: s.PasswordLogin,
+		data.SettingMembersCanStartGroups: s.MembersCanStartGroups,
+	} {
+		if v != nil {
+			set(key, boolSetting(*v))
+		}
 	}
-	if s.SignupsEnabled != nil {
-		set(settingSignupsEnabled, boolSetting(*s.SignupsEnabled))
-	}
-	if s.RequireApproval != nil {
-		set(settingRequireApproval, boolSetting(*s.RequireApproval))
-	}
-	if s.AcceptSubmissions != nil {
-		set(settingAcceptSubmissions, boolSetting(*s.AcceptSubmissions))
-	}
-	if s.PasswordLogin != nil {
-		set(settingPasswordLogin, boolSetting(*s.PasswordLogin))
-	}
-	if s.DefaultRole != nil {
-		if *s.DefaultRole == "member" || *s.DefaultRole == "contributor" {
-			set(settingDefaultRole, *s.DefaultRole)
+	if s.ProfileVisibility != nil {
+		if *s.ProfileVisibility == "members" || *s.ProfileVisibility == "public" {
+			set(data.SettingProfileVisibility, *s.ProfileVisibility)
 		} else {
-			log.Printf("friendo.toml: ignoring invalid [settings] default_role %q (want \"member\" or \"contributor\")", *s.DefaultRole)
+			log.Printf("friendo.toml: ignoring invalid [settings] profile_visibility %q (want \"members\" or \"public\")", *s.ProfileVisibility)
 		}
 	}
 	for name, v := range map[string]*bool{
 		"comments": s.Comments, "reactions": s.Reactions, "polls": s.Polls,
-		"rsvp": s.RSVP, "locations": s.Locations, "chats": s.Chats,
+		"rsvp": s.RSVP, "locations": s.Locations, "chats": s.Chats, "follows": s.Follows, "groups": s.Groups,
 	} {
 		if v != nil {
 			set(data.FeatureSetting(name), boolSetting(*v))
@@ -2815,10 +3053,28 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 	return managed
 }
 
+// boolSettings lists the on/off settings the API reads and writes by name.
+var boolSettings = []struct {
+	key string
+	def bool
+}{
+	{settingOpenSignups, true},
+	{settingSignupsAreContributors, false},
+	{settingMembersCanPost, false},
+	{settingPostsNeedReview, false},
+	{settingCommentsNeedReview, true},
+	{settingPasswordLogin, false},
+	{data.SettingMembersCanStartGroups, false},
+}
+
 // managedList returns the managed setting keys in a stable order for the API, so the
 // admin SPA can render those controls read-only.
 func managedList(managed map[string]bool) []string {
-	order := []string{settingAutoApprove, settingDefaultRole, settingSignupsEnabled, settingRequireApproval, settingAcceptSubmissions, settingPasswordLogin, settingDefaultCollections}
+	order := []string{}
+	for _, b := range boolSettings {
+		order = append(order, b.key)
+	}
+	order = append(order, data.SettingProfileVisibility, settingDefaultCollections)
 	for _, f := range data.Features {
 		order = append(order, data.FeatureSetting(f))
 	}
@@ -2838,100 +3094,100 @@ func boolSetting(b bool) string {
 	return "false"
 }
 
-// settingsPayload builds the settings object returned by GET/PUT /settings. The
-// `managed` list names the keys frozen by friendo.toml's [settings] block.
-func settingsPayload(db *data.DB, siteName string, managed map[string]bool, typesDeclared bool) map[string]any {
+// commentsNeedReview reports whether a new comment waits for review (the default).
+func commentsNeedReview(db *data.DB) bool {
+	return db.GetBoolSetting(settingCommentsNeedReview, true)
+}
+
+// signupRole is what a self-serve sign-up becomes.
+func signupRole(db *data.DB) string {
+	if db.GetBoolSetting(settingSignupsAreContributors, false) {
+		return "contributor"
+	}
+	return "member"
+}
+
+// settingsPayload builds the settings object returned by GET/PUT /settings: every
+// setting by its one name, plus the site's counts, the feature switches and the
+// `managed` list naming the keys frozen by friendo.toml's [settings] block.
+func settingsPayload(db *data.DB, siteName string, managed map[string]bool, collectionsDeclared bool) map[string]any {
 	users, _ := db.ListUsers()
 	counts, _ := db.CollectionCounts()
-	return map[string]any{
-		"site":        map[string]any{"name": siteName},
-		"collections": len(counts),
-		"users":       len(users),
-		"moderation":  map[string]any{"auto_approve": db.GetBoolSetting(settingAutoApprove, false)},
-		"access": map[string]any{
-			"default_role":     db.GetSetting(settingDefaultRole, "member"),
-			"signups_enabled":  db.GetBoolSetting(settingSignupsEnabled, true),
-			"require_approval": db.GetBoolSetting(settingRequireApproval, false),
-			"password_login":   db.GetBoolSetting(settingPasswordLogin, false),
-		},
-		"content": map[string]any{
-			"accept_submissions":  db.GetBoolSetting(settingAcceptSubmissions, false),
-			"default_collections": defaultCollectionsFor(db),
-			"types_declared":      typesDeclared,
-		},
-		"features": featuresMap(db),
-		"managed":  managedList(managed),
+	out := map[string]any{
+		"site":                 map[string]any{"name": siteName},
+		"collections":          len(counts),
+		"users":                len(users),
+		"profile_visibility":   db.ProfileVisibility(),
+		"default_collections":  defaultCollectionsFor(db),
+		"collections_declared": collectionsDeclared,
+		"features":             featuresMap(db),
+		"managed":              managedList(managed),
+	}
+	for _, b := range boolSettings {
+		out[b.key] = db.GetBoolSetting(b.key, b.def)
+	}
+	return out
+}
+
+func handleSettings(db *data.DB, siteName string, managed map[string]bool, collectionsDeclared bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, settingsPayload(db, siteName, managed, collectionsDeclared))
 	}
 }
 
-func handleSettings(db *data.DB, siteName string, managed map[string]bool, typesDeclared bool) http.HandlerFunc {
+// handleUpdateSettings persists admin-configurable settings, each by its one
+// name. Keys frozen by friendo.toml's [settings] block are silently skipped — the
+// SPA disables them, and this keeps the DB from drifting from the file (which
+// would just overwrite it on the next start anyway).
+func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool, collectionsDeclared bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse(w, settingsPayload(db, siteName, managed, typesDeclared))
-	}
-}
-
-// handleUpdateSettings persists admin-configurable settings: the comment
-// auto-approve toggle, the access policy (default role, signups, approval), and the
-// member-submissions toggle. Keys frozen by friendo.toml's [settings] block are
-// silently skipped — the SPA disables them, and this keeps the DB from drifting from
-// the file (which would just overwrite it on the next start anyway).
-func handleUpdateSettings(db *data.DB, siteName string, managed map[string]bool, typesDeclared bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Moderation *struct {
-				AutoApprove *bool `json:"auto_approve"`
-			} `json:"moderation"`
-			Access *struct {
-				DefaultRole     *string `json:"default_role"`
-				SignupsEnabled  *bool   `json:"signups_enabled"`
-				RequireApproval *bool   `json:"require_approval"`
-				PasswordLogin   *bool   `json:"password_login"`
-			} `json:"access"`
-			Content *struct {
-				AcceptSubmissions  *bool    `json:"accept_submissions"`
-				DefaultCollections []string `json:"default_collections"`
-			} `json:"content"`
-			Features map[string]*bool `json:"features"`
-		}
+		var in map[string]json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if in.Moderation != nil && in.Moderation.AutoApprove != nil && !managed[settingAutoApprove] {
-			db.SetSetting(settingAutoApprove, boolSetting(*in.Moderation.AutoApprove))
-		}
-		if in.Access != nil {
-			if in.Access.DefaultRole != nil && !managed[settingDefaultRole] {
-				role := *in.Access.DefaultRole
-				if role != "member" && role != "contributor" {
-					jsonError(w, "default_role must be member or contributor", http.StatusBadRequest)
-					return
-				}
-				db.SetSetting(settingDefaultRole, role)
-			}
-			if in.Access.SignupsEnabled != nil && !managed[settingSignupsEnabled] {
-				db.SetSetting(settingSignupsEnabled, boolSetting(*in.Access.SignupsEnabled))
-			}
-			if in.Access.RequireApproval != nil && !managed[settingRequireApproval] {
-				db.SetSetting(settingRequireApproval, boolSetting(*in.Access.RequireApproval))
-			}
-			if in.Access.PasswordLogin != nil && !managed[settingPasswordLogin] {
-				db.SetSetting(settingPasswordLogin, boolSetting(*in.Access.PasswordLogin))
-			}
-		}
-		if in.Content != nil && in.Content.AcceptSubmissions != nil && !managed[settingAcceptSubmissions] {
-			db.SetSetting(settingAcceptSubmissions, boolSetting(*in.Content.AcceptSubmissions))
-		}
-		if in.Content != nil && in.Content.DefaultCollections != nil && !managed[settingDefaultCollections] {
-			db.SetSetting(settingDefaultCollections, strings.Join(normalizeDefaultCollections(in.Content.DefaultCollections), ","))
-		}
-		for name, v := range in.Features {
-			if v == nil || data.FeatureLabel[name] == "" || managed[data.FeatureSetting(name)] {
+		for _, b := range boolSettings {
+			raw, ok := in[b.key]
+			if !ok || managed[b.key] {
 				continue
 			}
-			db.SetSetting(data.FeatureSetting(name), boolSetting(*v))
+			var v bool
+			if err := json.Unmarshal(raw, &v); err != nil {
+				jsonError(w, b.key+" must be true or false", http.StatusBadRequest)
+				return
+			}
+			db.SetSetting(b.key, boolSetting(v))
 		}
-		jsonResponse(w, settingsPayload(db, siteName, managed, typesDeclared))
+		if raw, ok := in[data.SettingProfileVisibility]; ok && !managed[data.SettingProfileVisibility] {
+			var v string
+			if err := json.Unmarshal(raw, &v); err != nil || (v != "members" && v != "public") {
+				jsonError(w, "profile_visibility must be members or public", http.StatusBadRequest)
+				return
+			}
+			db.SetSetting(data.SettingProfileVisibility, v)
+		}
+		if raw, ok := in[settingDefaultCollections]; ok && !managed[settingDefaultCollections] {
+			var v []string
+			if err := json.Unmarshal(raw, &v); err != nil {
+				jsonError(w, "default_collections must be a list", http.StatusBadRequest)
+				return
+			}
+			db.SetSetting(settingDefaultCollections, strings.Join(normalizeDefaultCollections(v), ","))
+		}
+		if raw, ok := in["features"]; ok {
+			var features map[string]*bool
+			if err := json.Unmarshal(raw, &features); err != nil {
+				jsonError(w, "features must be an object of switches", http.StatusBadRequest)
+				return
+			}
+			for name, v := range features {
+				if v == nil || data.FeatureLabel[name] == "" || managed[data.FeatureSetting(name)] {
+					continue
+				}
+				db.SetSetting(data.FeatureSetting(name), boolSetting(*v))
+			}
+		}
+		jsonResponse(w, settingsPayload(db, siteName, managed, collectionsDeclared))
 	}
 }
 

@@ -1,0 +1,23 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<h1>People</h1>
+<p>Every profile on the site has a page. <code>collections.profiles</code> lists
+them (empty for a visitor when profiles are members-only — this demo makes them public).</p>
+<ul>
+{% for p in collections.profiles %}
+  <li><a href="{{ p.url }}">{{ p.name }}</a>{% if p.bio %} — {{ p.bio }}{% endif %}</li>
+{% empty %}
+  <li>Nobody yet. Sign in on any post to make a profile.</li>
+{% endfor %}
+</ul>
+{% if user %}
+<h2>From people you follow</h2>
+<ul>
+{% for p in collections.blog|by_following:user %}
+  <li><a href="/blog/{{ p.slug }}">{{ p.title }}</a> by <a href="{{ p.author.url }}">{{ p.author.name }}</a></li>
+{% empty %}
+  <li>Follow someone and their posts land here.</li>
+{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

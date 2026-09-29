@@ -60,15 +60,15 @@ try {
   const cookie = await setupOwner();
   const H = { Cookie: "friendo_session=" + cookie, "Content-Type": "application/json" };
   const seed = async (body) => {
-    const r = await fetch(ORIGIN + "/_/api/collections/blog/records", { method: "POST", headers: H, body: JSON.stringify(body) });
+    const r = await fetch(ORIGIN + "/_/api/collections/blog/posts", { method: "POST", headers: H, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`seed failed: ${r.status} ${await r.text()}`);
-    return (await r.json()).record;
+    return (await r.json()).post;
   };
   const A = await seed({ title: "First post", slug: "first", body: "hello", status: "draft",
-    data: { tags: ["intro", "welcome"], weight: 1, featured: true, photo: "/assets/uploads/a.png" } });
+    fields: { tags: ["intro", "welcome"], weight: 1, featured: true, photo: "/assets/uploads/a.png" } });
   const B = await seed({ title: "Second post", slug: "second", body: "again", status: "draft",
-    data: { tags: ["second"], weight: 2, featured: false } });
-  await seed({ title: "Third post", slug: "third", body: "done", status: "published", data: {} });
+    fields: { tags: ["second"], weight: 2, featured: false } });
+  await seed({ title: "Third post", slug: "third", body: "done", status: "published", fields: {} });
 
   browser = await chromium.launch();
   const context = await browser.newContext();
@@ -104,8 +104,8 @@ try {
   await panel.locator('[data-field="subtitle"] input').fill("Hi");
   await panel.locator("button[type=submit]").click();
   await page.waitForURL(/\/_\/collections\/blog$/, { timeout: 10000 });
-  const afterAdd = (await (await fetch(ORIGIN + "/_/api/records/" + A.id, { headers: H })).json()).record;
-  const d = afterAdd.data || {};
+  const afterAdd = (await (await fetch(ORIGIN + "/_/api/posts/" + A.id, { headers: H })).json()).post;
+  const d = afterAdd.fields || {};
   if (d.subtitle !== "Hi" || JSON.stringify(d.tags) !== '["intro","welcome"]' || d.weight !== 1 || d.featured !== true || d.photo !== "/assets/uploads/a.png") {
     throw new Error("data after adding a field = " + JSON.stringify(d));
   }
@@ -122,9 +122,9 @@ try {
   await page.locator(`tr[data-id="${B.id}"] input[type=checkbox]`).check();
   await page.locator('[data-bulk-bar] button:text-is("Publish")').click();
   await page.locator('[data-bulk-bar] [role="alertdialog"] button:text-is("Publish")').click();
-  await page.locator('[role="status"]', { hasText: "2 records published" }).waitFor({ timeout: 10000 });
+  await page.locator('[role="status"]', { hasText: "2 posts published" }).waitFor({ timeout: 10000 });
   for (const id of [A.id, B.id]) {
-    const r = (await (await fetch(ORIGIN + "/_/api/records/" + id, { headers: H })).json()).record;
+    const r = (await (await fetch(ORIGIN + "/_/api/posts/" + id, { headers: H })).json()).post;
     if (r.status !== "published") throw new Error(`bulk publish left ${id} as ${r.status}`);
   }
 
@@ -150,7 +150,7 @@ try {
   await page.keyboard.press("Escape");
   await panel.locator('button:text-is("Discard")').click();
   await page.waitForURL(/\/_\/collections\/blog$/, { timeout: 10000 });
-  const untouched = (await (await fetch(ORIGIN + "/_/api/records/" + A.id, { headers: H })).json()).record;
+  const untouched = (await (await fetch(ORIGIN + "/_/api/posts/" + A.id, { headers: H })).json()).post;
   if (untouched.title !== "First post") throw new Error("discard saved the edit");
 
   if (errors.length) throw new Error("page errors: " + errors.join("; "));

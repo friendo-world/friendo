@@ -26,9 +26,9 @@ func TestTomlManagedSettings(t *testing.T) {
 name = "testsite"
 
 [settings]
-accept_submissions = true
-require_approval = true
-default_role = "contributor"
+members_can_post = true
+posts_need_review = true
+signups_are_contributors = true
 `
 	if err := os.WriteFile(filepath.Join(siteDir, "friendo.toml"), []byte(toml), 0o644); err != nil {
 		t.Fatalf("writing friendo.toml: %v", err)
@@ -45,14 +45,14 @@ default_role = "contributor"
 	admin.Mount(r, db, false, "testsite", siteDir, nil, nil, nil)
 
 	// The declared keys are now the DB's values, regardless of prior state.
-	if !db.GetBoolSetting("content.accept_submissions", false) {
-		t.Fatal("accept_submissions from [settings] was not applied to the DB")
+	if !db.GetBoolSetting("members_can_post", false) {
+		t.Fatal("members_can_post from [settings] was not applied to the DB")
 	}
-	if !db.GetBoolSetting("content.require_approval", false) {
-		t.Fatal("require_approval from [settings] was not applied to the DB")
+	if !db.GetBoolSetting("posts_need_review", false) {
+		t.Fatal("posts_need_review from [settings] was not applied to the DB")
 	}
-	if got := db.GetSetting("access.default_role", "member"); got != "contributor" {
-		t.Fatalf("default_role = %q, want contributor", got)
+	if !db.GetBoolSetting("signups_are_contributors", false) {
+		t.Fatal("signups_are_contributors from [settings] was not applied to the DB")
 	}
 
 	srv := httptest.NewServer(r)
@@ -89,25 +89,22 @@ default_role = "contributor"
 	for _, k := range s["managed"].([]any) {
 		managed[k.(string)] = true
 	}
-	for _, want := range []string{"content.accept_submissions", "content.require_approval", "access.default_role"} {
+	for _, want := range []string{"members_can_post", "posts_need_review", "signups_are_contributors"} {
 		if !managed[want] {
 			t.Fatalf("managed list %v is missing %q", s["managed"], want)
 		}
 	}
-	if managed["moderation.auto_approve"] {
-		t.Fatal("auto_approve should not be managed (it wasn't declared in [settings])")
+	if managed["comments_need_review"] {
+		t.Fatal("comments_need_review should not be managed (it wasn't declared in [settings])")
 	}
 
 	// A PUT that tries to flip a managed key is ignored, but an unmanaged key changes.
-	do("PUT", "/settings", map[string]any{
-		"content":    map[string]any{"accept_submissions": false},
-		"moderation": map[string]any{"auto_approve": true},
-	})
+	do("PUT", "/settings", map[string]any{"members_can_post": false, "comments_need_review": false})
 	after := do("GET", "/settings", nil)
-	if after["content"].(map[string]any)["accept_submissions"] != true {
-		t.Fatal("managed accept_submissions was changed via the API — it should be frozen")
+	if after["members_can_post"] != true {
+		t.Fatal("managed members_can_post was changed via the API — it should be frozen")
 	}
-	if after["moderation"].(map[string]any)["auto_approve"] != true {
-		t.Fatal("unmanaged auto_approve should have changed via the API")
+	if after["comments_need_review"] != false {
+		t.Fatal("unmanaged comments_need_review should have changed via the API")
 	}
 }

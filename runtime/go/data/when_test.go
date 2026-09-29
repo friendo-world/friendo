@@ -38,21 +38,21 @@ func TestParseWhenShapes(t *testing.T) {
 		{"crosses midnight", map[string]any{"when": "2026-10-04 22:00 to 02:00"}, d(2026, 10, 4, 22, 0), d(2026, 10, 5, 2, 0), false, "", false},
 		{"full end", map[string]any{"when": "2026-10-04 19:00 to 2026-10-05 02:00"}, d(2026, 10, 4, 19, 0), d(2026, 10, 5, 2, 0), false, "", false},
 		{"multi-day", map[string]any{"when": "2026-10-04 to 2026-10-06"}, d(2026, 10, 4, 0, 0), d(2026, 10, 6, 0, 0), true, "", false},
-		{"ends key", map[string]any{"when": "2026-10-07 19:00", "ends": "20:30"}, d(2026, 10, 7, 19, 0), d(2026, 10, 7, 20, 30), false, "", false},
-		{"ends key full", map[string]any{"when": "2026-10-07 19:00", "ends": "2026-10-07 20:30"}, d(2026, 10, 7, 19, 0), d(2026, 10, 7, 20, 30), false, "", false},
-		{"ends before start", map[string]any{"when": "2026-10-07 19:00", "ends": "2026-10-07 18:00"}, d(2026, 10, 7, 19, 0), time.Time{}, false, "", true},
+		{"end key", map[string]any{"when": map[string]any{"start": "2026-10-07 19:00", "end": "20:30"}}, d(2026, 10, 7, 19, 0), d(2026, 10, 7, 20, 30), false, "", false},
+		{"end key full", map[string]any{"when": map[string]any{"start": "2026-10-07 19:00", "end": "2026-10-07 20:30"}}, d(2026, 10, 7, 19, 0), d(2026, 10, 7, 20, 30), false, "", false},
+		{"end before start", map[string]any{"when": map[string]any{"start": "2026-10-07 19:00", "end": "2026-10-07 18:00"}}, d(2026, 10, 7, 19, 0), time.Time{}, false, "", true},
 		{"rfc3339 offset converts", map[string]any{"when": "2026-10-04T19:00:00-04:00"}, d(2026, 10, 4, 16, 0), time.Time{}, false, "", false},
-		{"repeats word", map[string]any{"when": "2026-10-07 19:00", "repeats": "weekly"}, d(2026, 10, 7, 19, 0), time.Time{}, false, "FREQ=WEEKLY", false},
-		{"repeats every 2 weeks", map[string]any{"when": "2026-10-07 19:00", "repeats": "every 2 weeks"}, d(2026, 10, 7, 19, 0), time.Time{}, false, "FREQ=WEEKLY;INTERVAL=2", false},
-		{"repeats map", map[string]any{"when": "2026-10-06 19:00", "repeats": map[string]any{"every": "month", "on": "first tuesday", "until": "2027-06-30"}},
+		{"repeats word", map[string]any{"when": map[string]any{"start": "2026-10-07 19:00", "repeats": "weekly"}}, d(2026, 10, 7, 19, 0), time.Time{}, false, "FREQ=WEEKLY", false},
+		{"repeats every 2 weeks", map[string]any{"when": map[string]any{"start": "2026-10-07 19:00", "repeats": "every 2 weeks"}}, d(2026, 10, 7, 19, 0), time.Time{}, false, "FREQ=WEEKLY;INTERVAL=2", false},
+		{"repeats map", map[string]any{"when": map[string]any{"start": "2026-10-06 19:00", "repeats": map[string]any{"every": "month", "on": "first tuesday", "until": "2027-06-30"}}},
 			d(2026, 10, 6, 19, 0), time.Time{}, false, "FREQ=MONTHLY;UNTIL=20270701T065959Z;BYDAY=+1TU", false},
-		{"repeats weekly on days", map[string]any{"when": "2026-10-06 19:00", "repeats": map[string]any{"every": "week", "on": []any{"tue", "thu"}, "count": 8}},
+		{"repeats weekly on days", map[string]any{"when": map[string]any{"start": "2026-10-06 19:00", "repeats": map[string]any{"every": "week", "on": []any{"tue", "thu"}, "count": 8}}},
 			d(2026, 10, 6, 19, 0), time.Time{}, false, "FREQ=WEEKLY;COUNT=8;BYDAY=TU,TH", false},
-		{"repeats monthly on 15th", map[string]any{"when": "2026-10-15", "repeats": map[string]any{"every": "month", "on": 15}},
+		{"repeats monthly on 15th", map[string]any{"when": map[string]any{"start": "2026-10-15", "repeats": map[string]any{"every": "month", "on": 15}}},
 			d(2026, 10, 15, 0, 0), time.Time{}, true, "FREQ=MONTHLY;BYMONTHDAY=15", false},
-		{"rrule escape hatch", map[string]any{"when": "2026-10-06 19:00", "rrule": "FREQ=WEEKLY;BYDAY=TU,TH"}, d(2026, 10, 6, 19, 0), time.Time{}, false, "FREQ=WEEKLY;BYDAY=TU,TH", false},
-		{"bad repeats warns", map[string]any{"when": "2026-10-06 19:00", "repeats": "sometimes"}, d(2026, 10, 6, 19, 0), time.Time{}, false, "", true},
-		{"bad zone warns", map[string]any{"when": "2026-10-06 19:00", "timezone": "Mars/Olympus"}, d(2026, 10, 6, 19, 0), time.Time{}, false, "", true},
+		{"rrule escape hatch", map[string]any{"when": map[string]any{"start": "2026-10-06 19:00", "rrule": "FREQ=WEEKLY;BYDAY=TU,TH"}}, d(2026, 10, 6, 19, 0), time.Time{}, false, "FREQ=WEEKLY;BYDAY=TU,TH", false},
+		{"bad repeats warns", map[string]any{"when": map[string]any{"start": "2026-10-06 19:00", "repeats": "sometimes"}}, d(2026, 10, 6, 19, 0), time.Time{}, false, "", true},
+		{"bad zone warns", map[string]any{"when": map[string]any{"start": "2026-10-06 19:00", "timezone": "Mars/Olympus"}}, d(2026, 10, 6, 19, 0), time.Time{}, false, "", true},
 	}
 	for _, c := range cases {
 		ev, warnings, present := ParseWhen(c.meta, loc)
@@ -99,7 +99,7 @@ func TestParseWhenBadAndAbsent(t *testing.T) {
 
 func TestParseWhenTimezoneOverride(t *testing.T) {
 	loc := la(t)
-	ev, _, _ := ParseWhen(map[string]any{"when": "2026-10-04 19:00", "timezone": "Europe/Paris"}, loc)
+	ev, _, _ := ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-04 19:00", "timezone": "Europe/Paris"}}, loc)
 	if ev.Timezone != "Europe/Paris" || ev.Starts.Location().String() != "Europe/Paris" || ev.Starts.Hour() != 19 {
 		t.Errorf("zone override: %+v", ev)
 	}
@@ -131,7 +131,7 @@ func TestWeekdaySugar(t *testing.T) {
 }
 
 func TestLiftWhenRemovesKeys(t *testing.T) {
-	meta := map[string]any{"title": "x", "when": "2026-10-04", "repeats": "weekly", "except": []any{"2026-10-11"}, "mood": "calm"}
+	meta := map[string]any{"title": "x", "when": map[string]any{"start": "2026-10-04", "repeats": "weekly", "except": []any{"2026-10-11"}}, "mood": "calm"}
 	ev, warnings := LiftWhen(meta, la(t))
 	if ev == nil || len(warnings) != 0 {
 		t.Fatalf("lift: %v %v", ev, warnings)
@@ -139,7 +139,7 @@ func TestLiftWhenRemovesKeys(t *testing.T) {
 	if _, has := meta["when"]; has {
 		t.Error("when still in meta")
 	}
-	if _, has := meta["repeats"]; has {
+	if _, has := meta["when"]; has {
 		t.Error("repeats still in meta")
 	}
 	if meta["mood"] != "calm" || meta["title"] != "x" {
@@ -154,7 +154,7 @@ func TestLiftWhenRemovesKeys(t *testing.T) {
 // in Los Angeles), and skipped dates are honored.
 func TestOccurrencesAcrossDST(t *testing.T) {
 	loc := la(t)
-	ev, _, _ := ParseWhen(map[string]any{"when": "2026-10-20 19:00 to 20:30", "repeats": "weekly", "except": []any{"2026-11-10"}}, loc)
+	ev, _, _ := ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-20 19:00 to 20:30", "repeats": "weekly", "except": []any{"2026-11-10"}}}, loc)
 	from := time.Date(2026, 10, 19, 0, 0, 0, 0, loc)
 	to := time.Date(2026, 11, 20, 0, 0, 0, 0, loc)
 	occs := ev.Occurrences(from, to, 0)
@@ -176,16 +176,16 @@ func TestOccurrencesAcrossDST(t *testing.T) {
 func TestOccurrencesUntilCountAndOneOff(t *testing.T) {
 	loc := la(t)
 	far := time.Date(2030, 1, 1, 0, 0, 0, 0, loc)
-	ev, _, _ := ParseWhen(map[string]any{"when": "2026-10-06 19:00", "repeats": map[string]any{"every": "week", "count": 3}}, loc)
+	ev, _, _ := ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-06 19:00", "repeats": map[string]any{"every": "week", "count": 3}}}, loc)
 	if n := len(ev.Occurrences(time.Date(2026, 1, 1, 0, 0, 0, 0, loc), far, 0)); n != 3 {
 		t.Errorf("count: %d occurrences, want 3", n)
 	}
-	ev, _, _ = ParseWhen(map[string]any{"when": "2026-10-06 19:00", "repeats": map[string]any{"every": "week", "until": "2026-10-27"}}, loc)
+	ev, _, _ = ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-06 19:00", "repeats": map[string]any{"every": "week", "until": "2026-10-27"}}}, loc)
 	if n := len(ev.Occurrences(time.Date(2026, 1, 1, 0, 0, 0, 0, loc), far, 0)); n != 4 {
 		t.Errorf("until: %d occurrences, want 4 (Oct 6, 13, 20, 27)", n)
 	}
 	// Monthly on the last Friday.
-	ev, _, _ = ParseWhen(map[string]any{"when": "2026-10-30 18:00", "repeats": map[string]any{"every": "month", "on": "last friday"}}, loc)
+	ev, _, _ = ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-30 18:00", "repeats": map[string]any{"every": "month", "on": "last friday"}}}, loc)
 	occs := ev.Occurrences(time.Date(2026, 10, 1, 0, 0, 0, 0, loc), time.Date(2027, 1, 1, 0, 0, 0, 0, loc), 0)
 	var days []string
 	for _, o := range occs {
@@ -210,7 +210,7 @@ func TestOccurrencesUntilCountAndOneOff(t *testing.T) {
 		t.Errorf("next after the end = %v, want nil", n)
 	}
 	// Window cap.
-	ev, _, _ = ParseWhen(map[string]any{"when": "2026-01-01 09:00", "repeats": "daily"}, loc)
+	ev, _, _ = ParseWhen(map[string]any{"when": map[string]any{"start": "2026-01-01 09:00", "repeats": "daily"}}, loc)
 	if n := len(ev.Occurrences(time.Date(2026, 1, 1, 0, 0, 0, 0, loc), time.Date(2036, 1, 1, 0, 0, 0, 0, loc), 0)); n != MaxOccurrences {
 		t.Errorf("cap: %d, want %d", n, MaxOccurrences)
 	}
@@ -218,7 +218,7 @@ func TestOccurrencesUntilCountAndOneOff(t *testing.T) {
 
 func TestAllDayOccurrenceEnds(t *testing.T) {
 	loc := la(t)
-	ev, _, _ := ParseWhen(map[string]any{"when": "2026-10-04 to 2026-10-06", "repeats": "monthly"}, loc)
+	ev, _, _ := ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-04 to 2026-10-06", "repeats": "monthly"}}, loc)
 	occs := ev.Occurrences(time.Date(2026, 11, 1, 0, 0, 0, 0, loc), time.Date(2026, 12, 1, 0, 0, 0, 0, loc), 0)
 	if len(occs) != 1 || occs[0].Starts.Day() != 4 || occs[0].Ends.Day() != 6 || !occs[0].AllDay {
 		t.Errorf("all-day monthly: %+v", occs)
@@ -290,7 +290,7 @@ func TestEventStorageRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, _, _ := ParseWhen(map[string]any{"when": "2026-10-04 10:00 to 16:00", "repeats": "weekly", "except": []any{"2026-10-11"}}, db.Location)
+	ev, _, _ := ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-04 10:00 to 16:00", "repeats": "weekly", "except": []any{"2026-10-11"}}}, db.Location)
 	if err := db.ReconcileWhen(id, ev); err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 // SDK browser check for members-only pages: boots the Go runtime over a throwaway
 // site whose /members page carries {% members only %} and no login.html, then
 // drives Chromium through the built-in sign-in page — email → echoed code →
-// verify — and confirms <friendo-auth reload> brings the real page back with the
+// verify — and confirms <friendo-signin reload> brings the real page back with the
 // viewer rendered server-side, and that signing out gates it again.
 //
 // No CDN needed. Run with `npm run test:sdk`. Usage: node tests/sdk-gate.mjs
@@ -25,7 +25,7 @@ writeFileSync(
   "{% members only %}" +
     '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Members</title></head><body>' +
     "<h1>Welcome, {{ user.name }} ({{ user.role }})</h1>" +
-    "<friendo-auth reload></friendo-auth>" +
+    "<friendo-signin reload></friendo-signin>" +
     '<script src="/friendo.js" defer></script></body></html>'
 );
 
@@ -66,8 +66,8 @@ try {
     throw new Error("built-in sign-in page not shown");
   }
 
-  // Sign in through <friendo-auth reload>: email → code (echoed + prefilled) → verify.
-  const auth = page.locator("friendo-auth");
+  // Sign in through <friendo-signin reload>: email → code (echoed + prefilled) → verify.
+  const auth = page.locator("friendo-signin");
   await auth.locator("[part=email]").fill("pat@test.com");
   await auth.locator("[part=button]").click();
   const codeInput = auth.locator("[part=code]");
@@ -85,7 +85,7 @@ try {
 
   // Sign out reloads too, and the gate is back.
   const gatedAgain = page.waitForEvent("load", { timeout: 10000 });
-  await auth.locator("[part=logout]").click();
+  await auth.locator("[part=signout]").click();
   await gatedAgain;
   if (!(await page.locator("body").innerText()).includes("Sign in to see this page")) {
     throw new Error("page did not gate again after sign-out");

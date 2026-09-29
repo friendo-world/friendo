@@ -42,8 +42,8 @@ export function CollectionsArea({ collection, id }: { collection?: string; id?: 
     setError("");
     api
       .records(name)
-      .then((r) => setRecords(r.records.map((x) => ({ ...x, collection: x.collection || name }))))
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load records."));
+      .then((r) => setRecords(r.posts.map((x) => ({ ...x, collection: x.collection || name }))))
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load posts."));
   }
   useEffect(() => load(), [name]);
 
@@ -90,7 +90,7 @@ export function CollectionsArea({ collection, id }: { collection?: string; id?: 
           done[recordId] = null;
         } else {
           const r = await api.setRecordStatus(recordId, action === "publish" ? "published" : "draft");
-          done[recordId] = { ...r.record, collection: r.record.collection || name };
+          done[recordId] = { ...r.post, collection: r.post.collection || name };
         }
       } catch (e) {
         failures.push(e instanceof Error ? e.message : "failed");
@@ -106,7 +106,7 @@ export function CollectionsArea({ collection, id }: { collection?: string; id?: 
     if (action === "delete") bumpCount(-Object.values(done).filter((v) => v === null).length);
     const verb = action === "delete" ? "deleted" : action === "publish" ? "published" : "unpublished";
     if (failures.length) setError(`${ok} ${verb}, ${failures.length} failed: ${failures[0]}`);
-    else toast(`${ok} record${ok === 1 ? "" : "s"} ${verb}`);
+    else toast(`${ok} post${ok === 1 ? "" : "s"} ${verb}`);
     load(true);
   }
 
@@ -122,7 +122,7 @@ export function CollectionsArea({ collection, id }: { collection?: string; id?: 
           <Card>
             <h1 class="mb-2 text-xl font-bold">Content</h1>
             <p class="text-sm text-dim">
-              Pick a collection on the left to see its records, or start writing:
+              Pick a collection on the left to see its posts, or start writing:
             </p>
             <div class="mt-4 flex flex-wrap gap-2">
               {(collections || []).slice(0, 3).map((c) => (
@@ -148,7 +148,7 @@ export function CollectionsArea({ collection, id }: { collection?: string; id?: 
                 )}
               </div>
               <LinkButton href={`/_/collections/${encodeURIComponent(name)}/new`} variant="primary">
-                New record
+                New post
               </LinkButton>
             </div>
             {error && <ErrorBox class="mb-4">{error}</ErrorBox>}
@@ -168,7 +168,7 @@ export function CollectionsArea({ collection, id }: { collection?: string; id?: 
               records && (
                 <Card class="text-center">
                   <p class="text-sm text-dim">
-                    No records yet.{" "}
+                    No posts yet.{" "}
                     <a href={`/_/collections/${encodeURIComponent(name)}/new`} class="text-link hover:underline">
                       Create one
                     </a>

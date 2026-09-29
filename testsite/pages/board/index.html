@@ -1,0 +1,7 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<h1>The board room</h1>
+<p>This whole folder is kept for members of the <a href="/groups/board">board</a> group by
+<code>[access] groups</code> in friendo.toml. You're in, {{ user.name }}.</p>
+<p>A single page can do the same with <code>{% raw %}{% members only if "board" in user.groups %}{% endraw %}</code>.</p>
+{% endblock %}

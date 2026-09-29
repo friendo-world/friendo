@@ -93,7 +93,7 @@ func TestTomlContentTypes(t *testing.T) {
 name = "testsite"
 
 [content]
-types = ["recipes", "blog"]
+collections = ["recipes", "blog"]
 
 [content.recipes.fields]
 serves = "number"
@@ -123,7 +123,7 @@ weird = "colour"
 	// The suggested block: declared types first, ad-hoc after; declared fields as
 	// written, then the ones the records carry with a guessed kind.
 	want := `[content]
-types = ["recipes", "blog", "notes"]
+collections = ["recipes", "blog", "notes"]
 
 [content.recipes.fields]
 serves = "number"
@@ -172,7 +172,7 @@ func TestTomlContentTypesAbsent(t *testing.T) {
 	if got := join(names); got != "blog pages posts notes recipes" {
 		t.Fatalf("collections = %q, want the defaults then what has records", got)
 	}
-	if !strings.HasPrefix(suggested, "[content]\ntypes = [\"notes\", \"recipes\"]\n") {
+	if !strings.HasPrefix(suggested, "[content]\ncollections = [\"notes\", \"recipes\"]\n") {
 		t.Fatalf("suggested toml without declarations =\n%s", suggested)
 	}
 }

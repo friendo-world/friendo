@@ -51,6 +51,7 @@ func (e *GateError) Error() string {
 var gateRoles = map[string]string{
 	"members":      "member",
 	"contributors": "contributor",
+	"moderators":   "moderator",
 	"editors":      "editor",
 	"admins":       "admin",
 	"owners":       "owner",
@@ -59,7 +60,7 @@ var gateRoles = map[string]string{
 // gateTagRe finds a gate tag in raw template text. It is deliberately simple: it
 // also matches a tag inside a {# comment #}, so the bias is toward over-gating —
 // the safe direction. Keep the spelling in one place: this regexp and gateRoles.
-var gateTagRe = regexp.MustCompile(`{%-?\s*(members|contributors|editors|admins|owners)\s+only\b[^%]*%}`)
+var gateTagRe = regexp.MustCompile(`{%-?\s*(members|contributors|moderators|editors|admins|owners)\s+only\b[^%]*%}`)
 
 // FindGate returns the first gate tag in a page's source, verbatim, or "" if the
 // page is public. The route table and static export call it so a page's gate is
@@ -181,12 +182,45 @@ func RegisterGateTags() {
 //
 // A pattern ending in "/*" covers the path itself and everything under it; any
 // other pattern is matched whole (shell-style "*" and "?" allowed within a segment).
+//
+// A path can also be kept for one group's members:
+//
+//	[access]
+//	groups = { "/board/*" = "board" }
 type AccessRules struct {
 	MembersOnly      []string `toml:"members_only"`
 	ContributorsOnly []string `toml:"contributors_only"`
+	ModeratorsOnly   []string `toml:"moderators_only"`
 	EditorsOnly      []string `toml:"editors_only"`
 	AdminsOnly       []string `toml:"admins_only"`
 	OwnersOnly       []string `toml:"owners_only"`
+	// Groups maps a path pattern to the slug of the group whose members may see it.
+	Groups map[string]string `toml:"groups"`
+}
+
+// RequiresGroup returns the group slug a matching [access] groups rule names, or "".
+func (r AccessRules) RequiresGroup(urlPath string) string {
+	if len(urlPath) > 1 {
+		urlPath = strings.TrimSuffix(urlPath, "/")
+	}
+	for pattern, slug := range r.Groups {
+		if slug != "" && matchPath(pattern, urlPath) {
+			return slug
+		}
+	}
+	return ""
+}
+
+// InGroup reports whether the template-context user belongs to a group:
+// user.groups is the list of slugs the page context carries.
+func InGroup(user map[string]any, slug string) bool {
+	groups, _ := user["groups"].([]string)
+	for _, g := range groups {
+		if g == slug {
+			return true
+		}
+	}
+	return false
 }
 
 // Requires returns the highest role any matching rule names, or "" for a public path.
@@ -199,7 +233,7 @@ func (r AccessRules) Requires(urlPath string) string {
 		role  string
 		globs []string
 	}{
-		{"member", r.MembersOnly}, {"contributor", r.ContributorsOnly}, {"editor", r.EditorsOnly},
+		{"member", r.MembersOnly}, {"contributor", r.ContributorsOnly}, {"moderator", r.ModeratorsOnly}, {"editor", r.EditorsOnly},
 		{"admin", r.AdminsOnly}, {"owner", r.OwnersOnly},
 	} {
 		for _, g := range rule.globs {

@@ -1,4 +1,4 @@
-// SDK browser check for the aggregate <friendo-map target-type="post"> (no
+// SDK browser check for the aggregate <friendo-map> (no
 // target-id): the "every published post on one map" mode. This boots the Go
 // runtime over a throwaway site that has a real blog route (pages/blog/[slug]),
 // creates a published post, geo-tags it, then drives a real Chromium (via
@@ -28,13 +28,13 @@ const siteDir = mkdtempSync(join(tmpdir(), "friendo-sdk-mapagg-"));
 mkdirSync(join(siteDir, "pages", "blog"), { recursive: true });
 writeFileSync(
   join(siteDir, "pages", "blog", "[slug].html"),
-  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>{{ record.title }}</title></head>' +
-    "<body><h1>{{ record.title }}</h1></body></html>"
+  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>{{ post.title }}</title></head>' +
+    "<body><h1>{{ post.title }}</h1></body></html>"
 );
 writeFileSync(
   join(siteDir, "pages", "map.html"),
   '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Map</title></head><body>' +
-    '<friendo-map target-type="post"></friendo-map>' +
+    '<friendo-map></friendo-map>' +
     '<script src="/friendo.js" defer></script></body></html>'
 );
 
@@ -72,16 +72,16 @@ async function seed() {
   }
   const H = { "Content-Type": "application/json", Cookie: "friendo_session=" + cookie };
 
-  const postRes = await fetch(ORIGIN + "/_/api/collections/blog/records", {
+  const postRes = await fetch(ORIGIN + "/_/api/collections/blog/posts", {
     method: "POST", headers: H,
     body: JSON.stringify({ title: "Trip to Paris", slug: "paris", body: "hi", status: "published" }),
   });
   if (!postRes.ok) throw new Error(`creating post failed: ${postRes.status}`);
-  const postId = (await postRes.json()).record.id;
+  const postId = (await postRes.json()).post.id;
 
   const locRes = await fetch(ORIGIN + "/_/api/locations", {
     method: "POST", headers: H,
-    body: JSON.stringify({ target_type: "post", target_id: postId, lat: 48.8584, lng: 2.2945, label: "Eiffel Tower" }),
+    body: JSON.stringify({ post_id: postId, lat: 48.8584, lng: 2.2945, label: "Eiffel Tower" }),
   });
   if (!locRes.ok) throw new Error(`seeding location failed: ${locRes.status}`);
 }

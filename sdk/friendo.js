@@ -5,12 +5,12 @@
  * any Friendo site with no custom JavaScript:
  *
  *   <script src="/friendo.js" defer></script>
- *   <friendo-auth></friendo-auth>            (add `reload` to reload the page after sign-in/out —
+ *   <friendo-signin></friendo-signin>        (add `reload` to reload the page after sign-in/out —
  *                                             for pages that render {{ user }} or are members-only)
  *   <friendo-comments post-id="…"></friendo-comments>
- *   <friendo-reactions target-type="post" target-id="…"></friendo-reactions>
+ *   <friendo-reactions post-id="…"></friendo-reactions>   (or comment-id="…")
  *   <friendo-poll poll-id="…"></friendo-poll>
- *   <friendo-map target-type="post" target-id="…"></friendo-map>
+ *   <friendo-map post-id="…"></friendo-map>            (no post-id: every post)
  *   <friendo-form collection="posts">…author inputs…</friendo-form>
  *   <friendo-calendar collection="events"></friendo-calendar>   (month grid / list of the site's events)
  *   <friendo-rsvp post-id="…"></friendo-rsvp>                    (going / not going / maybe on an event)
@@ -111,7 +111,7 @@
   // A logged-in/out change should refresh every component on the page.
   function broadcastAuth(user) {
     mePromise = Promise.resolve(user);
-    document.dispatchEvent(new CustomEvent("friendo:auth", { detail: { user: user } }));
+    document.dispatchEvent(new CustomEvent("friendo:signin", { detail: { user: user } }));
   }
 
   // Base class: a shadow root, a tiny stylesheet, and a re-render on auth changes.
@@ -127,11 +127,11 @@
       this._onAuth = this._onAuth.bind(this);
     }
     connectedCallback() {
-      document.addEventListener("friendo:auth", this._onAuth);
+      document.addEventListener("friendo:signin", this._onAuth);
       this.render();
     }
     disconnectedCallback() {
-      document.removeEventListener("friendo:auth", this._onAuth);
+      document.removeEventListener("friendo:signin", this._onAuth);
     }
     _onAuth() {
       this.render();
@@ -158,8 +158,8 @@
     render() {}
   }
 
-  // --- <friendo-auth> ------------------------------------------------------
-  // Passwordless email + one-time-code login. Emits friendo:auth on state change.
+  // --- <friendo-signin> ----------------------------------------------------
+  // Passwordless email + one-time-code sign-in. Emits friendo:signin on state change.
   // With the `reload` attribute it also reloads the page after signing in or out,
   // so server-rendered {{ user }} content and members-only pages catch up.
   class FriendoAuth extends FriendoElement {
@@ -174,10 +174,15 @@
         ".status{opacity:.7;font-size:.9em}" +
         ".link{border:0;background:none;padding:0;color:inherit;text-decoration:underline;font:inherit;opacity:.8}" +
         ".panel{margin-top:.5em;font-size:.9em}" +
-        ".persona{display:block;width:100%;text-align:left;margin:.2em 0;padding:.35em .5em;border:1px solid #ddd;" +
+        ".profile-row{display:flex;gap:.5em;align-items:center;margin:.2em 0}" +
+        ".profile{flex:1;text-align:left;padding:.35em .5em;border:1px solid #ddd;" +
         "border-radius:8px;background:#fafafa}" +
-        '.persona[aria-pressed="true"]{font-weight:600;border-color:#4299e1;background:#e8f0ff}' +
-        ".panel form{margin-top:.4em}"
+        '.profile[aria-pressed="true"]{font-weight:600;border-color:#4299e1;background:#e8f0ff}' +
+        ".panel form{margin-top:.4em}" +
+        ".editor{margin:.3em 0 .6em .5em;padding:.5em;border-left:2px solid #ddd}" +
+        ".badge{display:inline-block;min-width:1.4em;margin-left:.4em;padding:0 .4em;border-radius:999px;background:#d33;color:#fff;" +
+        "font-size:.75em;text-align:center;line-height:1.6}" +
+        PERSONA_FORM_CSS
       );
     }
     async render() {
@@ -185,66 +190,94 @@
       if (user) return this._renderSignedIn(user);
       this._renderRequest();
     }
-    // Signed-in view: shows the persona attribution flows to, with a switcher to
-    // pick a different persona or add one. The chosen persona is the account's
+    // Signed-in view: shows the profile attribution flows to, with a switcher to
+    // pick a different profile or add one. The chosen profile is the account's
     // default (server-side), so comments/messages attribute to it everywhere.
     async _renderSignedIn(user) {
-      var personas = [];
+      var profiles = [];
       try {
-        var r = await api("/me/personas");
-        personas = (r && r.personas) || [];
-      } catch (e) { /* older runtime or no personas — degrade to the account name */ }
-      var current = personas.filter(function (p) { return p.is_default; })[0] || personas[0];
+        var r = await api("/me/profiles");
+        profiles = (r && r.profiles) || [];
+      } catch (e) { /* older runtime or no profiles — degrade to the account name */ }
+      var current = profiles.filter(function (p) { return p.is_default; })[0] || profiles[0];
       var name = current ? current.name : user.name || user.email;
-      var many = personas.length > 1;
+      var many = profiles.length > 1;
 
+      var unread = user.unread || 0;
       this.paint(
         '<div part="signed-in" class="status">Posting as <b part="name">' + esc(name) + "</b>" +
-          ' · <button part="personas-toggle" class="link">personas</button>' +
-          ' · <button part="logout">Sign out</button></div>' +
-          '<div part="personas" class="panel" hidden></div>'
+          '<span part="badge" class="badge"' + (unread ? "" : " hidden") + ' title="Unread notifications">' + unread + "</span>" +
+          ' · <button part="profiles-toggle" class="link">profiles</button>' +
+          ' · <button part="signout">Sign out</button></div>' +
+          '<div part="profiles" class="panel" hidden></div>'
       );
 
       var self = this;
-      this.shadowRoot.querySelector('[part="logout"]').onclick = async function () {
+      // The inbox tells the page when it marked things read; the badge follows.
+      if (!this._onNotifications) {
+        this._onNotifications = function (e) {
+          var b = self.shadowRoot.querySelector('[part="badge"]');
+          if (!b) return;
+          var n = (e.detail && e.detail.unread) || 0;
+          b.textContent = n;
+          b.hidden = !n;
+        };
+        document.addEventListener("friendo:notifications", this._onNotifications);
+      }
+      this.shadowRoot.querySelector('[part="signout"]').onclick = async function () {
         await api("/auth/logout", { method: "POST" }).catch(function () {});
         self._afterAuthChange(null);
       };
 
-      var panel = this.shadowRoot.querySelector('[part="personas"]');
-      this.shadowRoot.querySelector('[part="personas-toggle"]').onclick = function () {
+      var panel = this.shadowRoot.querySelector('[part="profiles"]');
+      this.shadowRoot.querySelector('[part="profiles-toggle"]').onclick = function () {
         panel.hidden = !panel.hidden;
-        if (!panel.hidden) self._paintPersonas(panel, personas);
+        if (!panel.hidden) self._paintProfiles(panel, profiles);
       };
-      // If the account already has several personas, open the switcher by default so
-      // it's discoverable; a single-persona account keeps it tucked away.
-      if (many) { panel.hidden = false; this._paintPersonas(panel, personas); }
+      // If the account already has several profiles, open the switcher by default so
+      // it's discoverable; a single-profile account keeps it tucked away.
+      if (many) { panel.hidden = false; this._paintProfiles(panel, profiles); }
     }
-    // _paintPersonas fills the switcher panel: a row per persona (click to make it
-    // the default) plus an inline "new persona" form.
-    _paintPersonas(panel, personas) {
+    // _paintProfiles fills the switcher panel: a row per profile (click to make it
+    // the default) plus an inline "new profile" form.
+    _paintProfiles(panel, profiles) {
       var self = this;
-      var rows = personas
+      var rows = profiles
         .map(function (p) {
           return (
-            '<button part="persona" class="persona" data-id="' + esc(p.id) + '" aria-pressed="' +
+            '<div class="profile-row"><button part="profile" class="profile" data-id="' + esc(p.id) + '" aria-pressed="' +
             (p.is_default ? "true" : "false") + '">' + esc(p.name) +
-            (p.is_default ? " ✓" : "") + "</button>"
+            (p.is_default ? " ✓" : "") + "</button>" +
+            '<button type="button" part="edit-profile" class="link" data-edit="' + esc(p.id) + '">edit</button></div>' +
+            '<div part="profile-editor" class="editor" data-editor="' + esc(p.id) + '" hidden></div>'
           );
         })
         .join("");
       panel.innerHTML =
         rows +
-        '<form part="new-persona"><input part="new-name" placeholder="New persona name" required />' +
+        '<form part="new-profile"><input part="new-name" placeholder="New profile name" required />' +
         '<button part="add" type="submit">Add</button></form>';
 
-      panel.querySelectorAll(".persona").forEach(function (btn) {
+      panel.querySelectorAll(".profile").forEach(function (btn) {
         btn.onclick = async function () {
           if (btn.getAttribute("aria-pressed") === "true") return;
           try {
-            await api("/me/personas/" + encodeURIComponent(btn.dataset.id) + "/default", { method: "POST" });
+            await api("/me/profiles/" + encodeURIComponent(btn.dataset.id) + "/default", { method: "POST" });
             self.render(); // refresh the "Posting as …" line + panel
           } catch (e) { /* leave as-is */ }
+        };
+      });
+      // "edit" opens the profile's profile form in place: name, address, bio and
+      // the site's declared profile fields.
+      panel.querySelectorAll("[data-edit]").forEach(function (btn) {
+        btn.onclick = async function () {
+          var box = panel.querySelector('[data-editor="' + btn.dataset.edit + '"]');
+          if (!box.hidden) { box.hidden = true; box.innerHTML = ""; return; }
+          var profile = profiles.filter(function (p) { return p.id === btn.dataset.edit; })[0];
+          var fields = [];
+          try { var r = await api("/profiles/" + encodeURIComponent(profile.slug)); fields = r.fields || []; } catch (e) { /* members-only + no fields: fine */ }
+          box.hidden = false;
+          paintProfileForm(box, profile, fields, function () { self.render(); });
         };
       });
 
@@ -255,7 +288,7 @@
         var name = input.value.trim();
         if (!name) return;
         try {
-          await api("/me/personas", jsonBody("POST", { name: name }));
+          await api("/me/profiles", jsonBody("POST", { name: name }));
           self.render();
         } catch (err) { /* ignore */ }
       };
@@ -303,6 +336,533 @@
           status.textContent = err.message;
         }
       };
+    }
+  }
+
+  // PERSONA_FORM_CSS styles the profile/profile form wherever it's painted.
+  var PERSONA_FORM_CSS =
+    ".pf{display:grid;gap:.5em;margin:.5em 0}" +
+    ".pf label{display:grid;gap:.2em;font-size:.9em}" +
+    ".pf input,.pf textarea,.pf select{font:inherit;padding:.4em .5em;border:1px solid #ccc;border-radius:6px;width:100%;box-sizing:border-box}" +
+    ".pf textarea{min-height:4em}" +
+    ".pf .row{display:flex;gap:.5em;align-items:center}" +
+    ".pf .status{font-size:.9em;opacity:.75}" +
+    ".pf .check{display:flex;gap:.5em;align-items:center}";
+
+  // fieldInput renders one declared profile field ([profiles] fields in
+  // friendo.toml) as a form control, from its kind: text, paragraph, number,
+  // checkbox, tags (comma separated), image (a URL), json (raw), or a choice list.
+  function fieldInput(f, value) {
+    var name = esc(f.name);
+    var label = '<span part="label">' + esc(f.name) + (f.required ? " *" : "") + "</span>";
+    var hint = f.hint ? '<small class="status">' + esc(f.hint) + "</small>" : "";
+    var req = f.required ? " required" : "";
+    if (f.choices && f.choices.length) {
+      return '<label part="field">' + label + '<select part="input" name="' + name + '"' + req + '><option value="">—</option>' +
+        f.choices.map(function (c) { return '<option' + (String(value) === c ? " selected" : "") + ">" + esc(c) + "</option>"; }).join("") +
+        "</select>" + hint + "</label>";
+    }
+    switch (f.kind) {
+      case "checkbox":
+        return '<label part="field" class="check"><input part="input" type="checkbox" name="' + name + '"' + (value ? " checked" : "") + " />" + label + hint + "</label>";
+      case "paragraph":
+        return '<label part="field">' + label + '<textarea part="input" name="' + name + '"' + req + ">" + esc(value == null ? "" : value) + "</textarea>" + hint + "</label>";
+      case "number":
+        return '<label part="field">' + label + '<input part="input" type="number" name="' + name + '" value="' + esc(value == null ? "" : value) + '"' + req + " />" + hint + "</label>";
+      case "tags":
+        return '<label part="field">' + label + '<input part="input" name="' + name + '" value="' + esc(Array.isArray(value) ? value.join(", ") : value || "") + '" placeholder="one, two"' + req + " />" + hint + "</label>";
+      case "json":
+        return '<label part="field">' + label + '<textarea part="input" name="' + name + '" data-json="1"' + req + ">" + esc(value == null ? "" : JSON.stringify(value)) + "</textarea>" + hint + "</label>";
+      default:
+        return '<label part="field">' + label + '<input part="input" name="' + name + '" value="' + esc(value == null ? "" : value) + '"' + req + " />" + hint + "</label>";
+    }
+  }
+  // fieldValue reads a declared field's control back into the value its kind stores.
+  function fieldValue(f, el) {
+    if (!el) return undefined;
+    if (f.kind === "checkbox") return !!el.checked;
+    var v = el.value;
+    if (f.kind === "number") return v === "" ? null : Number(v);
+    if (f.kind === "tags") return v.split(",").map(function (t) { return t.trim(); }).filter(Boolean);
+    if (f.kind === "json") { try { return v === "" ? null : JSON.parse(v); } catch (e) { return v; } }
+    return v;
+  }
+
+  // paintProfileForm fills `box` with a form editing one profile — name, address,
+  // avatar, bio and the declared fields — and PUTs /me/profiles/:id on save.
+  // onDone(profile) runs after a successful save; Cancel just empties the box.
+  function paintProfileForm(box, profile, fields, onDone) {
+    var d = profile.fields || {};
+    box.innerHTML =
+      '<form part="form" class="pf">' +
+      '<label part="field"><span part="label">Name</span><input part="input" name="name" required value="' + esc(profile.name) + '" /></label>' +
+      '<label part="field"><span part="label">Profile name</span><div class="row"><span class="status">/profiles/</span><input part="input" name="slug" value="' + esc(profile.slug || "") + '" placeholder="your-name" /></div></label>' +
+      '<label part="field"><span part="label">Avatar (image URL)</span><input part="input" name="avatar" value="' + esc(profile.avatar || "") + '" placeholder="https://…" /></label>' +
+      '<label part="field"><span part="label">Bio</span><textarea part="input" name="bio">' + esc(profile.bio || "") + "</textarea></label>" +
+      fields.map(function (f) { return fieldInput(f, d[f.name]); }).join("") +
+      '<div class="row"><button part="save" type="submit">Save</button> <button part="cancel" type="button">Cancel</button>' +
+      '<span part="status" class="status"></span></div></form>';
+    var form = box.querySelector("form");
+    var status = box.querySelector('[part="status"]');
+    box.querySelector('[part="cancel"]').onclick = function () { box.hidden = true; box.innerHTML = ""; };
+    form.onsubmit = async function (e) {
+      e.preventDefault();
+      var data = {};
+      fields.forEach(function (f) { data[f.name] = fieldValue(f, form.querySelector('[name="' + f.name + '"]')); });
+      var body = {
+        name: form.querySelector('[name="name"]').value.trim(),
+        slug: form.querySelector('[name="slug"]').value.trim(),
+        avatar: form.querySelector('[name="avatar"]').value.trim(),
+        bio: form.querySelector('[name="bio"]').value,
+        fields: data,
+      };
+      status.textContent = "Saving…";
+      try {
+        var r = await api("/me/profiles/" + encodeURIComponent(profile.id), jsonBody("PUT", body));
+        status.textContent = "";
+        box.hidden = true;
+        box.innerHTML = "";
+        document.dispatchEvent(new CustomEvent("friendo:profile", { detail: { profile: r.profile } }));
+        if (onDone) onDone(r.profile);
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    };
+  }
+
+  // --- <friendo-profile [slug] [edit-only]> ---------------------------------
+  // A member's profile: avatar, name, bio and the fields the site declares under
+  // [profiles] fields. With no slug it shows the signed-in viewer's own profile.
+  // The viewer's own profile gets an Edit button that turns it into a form
+  // (PUT /me/profiles/:id). With `edit-only` the tag paints nothing but that
+  // button — for a page that already renders the profile server-side
+  // ({{ record.name }}, {{ record.bio }}); after a save it reloads the page so the
+  // server-rendered text catches up. Parts: profile, avatar, name, address, bio,
+  // fields, field, label, value, edit, form, input, save, cancel, status,
+  // signed-out, error.
+  class FriendoProfile extends FriendoElement {
+    css() {
+      return (
+        ".card{display:grid;grid-template-columns:auto 1fr;gap:.75em 1em;align-items:start}" +
+        ".avatar{width:64px;height:64px;border-radius:50%;object-fit:cover;background:#eee}" +
+        ".name{margin:0;font-size:1.25em}.address{opacity:.6;font-size:.9em;margin:0 0 .4em}" +
+        ".bio{margin:.25em 0 .5em;white-space:pre-wrap}" +
+        "dl{margin:.5em 0;display:grid;grid-template-columns:auto 1fr;gap:.2em .8em}dt{opacity:.6}dd{margin:0}" +
+        ".edit{margin-top:.5em}.signed-out{opacity:.75}" +
+        PERSONA_FORM_CSS
+      );
+    }
+    async render() {
+      var slug = this.getAttribute("slug") || "";
+      var editOnly = this.hasAttribute("edit-only");
+      var user = await currentUser();
+      var data, mine = false;
+      try {
+        if (!slug) {
+          if (!user) {
+            this.paint(editOnly ? "" : '<div part="signed-out" class="signed-out">Sign in to see your profile.</div>');
+            return;
+          }
+          var r = await api("/me/profiles");
+          var cur = (r.profiles || []).filter(function (p) { return p.is_default; })[0] || (r.profiles || [])[0];
+          if (!cur) { this.paint(""); return; }
+          slug = cur.slug;
+        }
+        data = await api("/profiles/" + encodeURIComponent(slug));
+      } catch (e) {
+        if (e.status === 401 && !user) {
+          this.paint(editOnly ? "" : '<div part="signed-out" class="signed-out">Sign in to see profiles.</div>');
+          return;
+        }
+        this.fail(e);
+        return;
+      }
+      var p = data.profile || {};
+      var fields = data.fields || [];
+      mine = !!data.mine;
+      var self = this;
+
+      if (editOnly) {
+        if (!mine) { this.paint(""); return; }
+        this.paint('<div class="edit"><button part="edit">Edit profile</button></div><div part="editor" hidden></div>');
+        var box = this.shadowRoot.querySelector('[part="editor"]');
+        this.shadowRoot.querySelector('[part="edit"]').onclick = function () {
+          box.hidden = false;
+          paintProfileForm(box, p, fields, function () { location.reload(); });
+        };
+        return;
+      }
+
+      var d = p.fields || {};
+      var rows = fields
+        .filter(function (f) { var v = d[f.name]; return !(v == null || v === "" || (Array.isArray(v) && !v.length)); })
+        .map(function (f) {
+          var v = d[f.name];
+          var text = Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : v === true ? "yes" : v === false ? "no" : String(v);
+          return '<dt part="label">' + esc(f.name) + '</dt><dd part="value">' + esc(text) + "</dd>";
+        })
+        .join("");
+      this.paint(
+        '<div part="profile" class="card">' +
+          (p.avatar ? '<img part="avatar" class="avatar" src="' + esc(p.avatar) + '" alt="" />' : '<span part="avatar" class="avatar"></span>') +
+          "<div>" +
+          '<h2 part="name" class="name">' + esc(p.name) + "</h2>" +
+          '<p part="slug" class="address">' + esc(p.url || "/profiles/" + p.slug) + "</p>" +
+          '<friendo-follow part="follow" profile-id="' + esc(p.id) + '"></friendo-follow>' +
+          (p.bio ? '<p part="bio" class="bio">' + esc(p.bio) + "</p>" : "") +
+          (rows ? '<dl part="fields">' + rows + "</dl>" : "") +
+          (mine ? '<div class="edit"><button part="edit">Edit profile</button></div>' : "") +
+          '<div part="editor" hidden></div>' +
+          "</div></div>"
+      );
+      if (mine) {
+        var editor = this.shadowRoot.querySelector('[part="editor"]');
+        this.shadowRoot.querySelector('[part="edit"]').onclick = function () {
+          editor.hidden = false;
+          paintProfileForm(editor, p, fields, function () { self.render(); });
+        };
+      }
+    }
+  }
+
+  // --- <friendo-follow profile-id="…" | slug="…"> -------------------------------
+  // A follow button with the follower count. Pressed when the viewer follows
+  // this profile; a click toggles (POST /follows) and repaints. On the viewer's
+  // own profile it shows only the count. Signed out it fires friendo:needs-auth,
+  // like reactions. Renders nothing while the follows switch is off.
+  // Parts: button, count, status, error.
+  class FriendoFollow extends FriendoElement {
+    css() {
+      return (
+        ":host{display:inline-flex;gap:.5em;align-items:center}" +
+        "button{padding:.3em .8em;border:1px solid #ddd;border-radius:999px;background:#fafafa}" +
+        'button[aria-pressed="true"]{background:#e8f0ff;border-color:#9db8ff}' +
+        ".count{opacity:.75;font-size:.9em;font-variant-numeric:tabular-nums}.status{font-size:.85em;opacity:.75}"
+      );
+    }
+    async render() {
+      var id = this.getAttribute("profile-id") || "";
+      var slug = this.getAttribute("slug") || "";
+      var q = id ? "profile_id=" + encodeURIComponent(id) : "slug=" + encodeURIComponent(slug);
+      var st;
+      try {
+        st = await api("/follows?" + q);
+      } catch (e) {
+        this.fail(e);
+        return;
+      }
+      var user = await currentUser();
+      var mine = !!(user && user.profile_id && user.profile_id === st.profile_id);
+      var count = '<span part="count" class="count">' + st.followers + (st.followers === 1 ? " follower" : " followers") + "</span>";
+      if (mine) {
+        this.paint(count);
+        return;
+      }
+      this.paint(
+        '<button part="button" aria-pressed="' + (st.following ? "true" : "false") + '">' +
+          (st.following ? "Following" : "Follow") + "</button>" + count +
+          '<span part="status" class="status" hidden></span>'
+      );
+      var self = this;
+      var status = this.shadowRoot.querySelector('[part="status"]');
+      this.shadowRoot.querySelector("button").onclick = async function () {
+        if (!user) {
+          self.dispatchEvent(new CustomEvent("friendo:needs-auth", { bubbles: true }));
+          return;
+        }
+        try {
+          var r = await api("/follows", jsonBody("POST", { profile_id: st.profile_id }));
+          self.dispatchEvent(new CustomEvent("friendo:follow", { bubbles: true, detail: { profileId: st.profile_id, following: r.following } }));
+          self.render();
+        } catch (err) {
+          status.hidden = false;
+          status.textContent = err.message;
+        }
+      };
+    }
+  }
+
+  // --- <friendo-inbox [limit]> ----------------------------------------------
+  // What happened to the signed-in member: new followers, comments on their
+  // posts, group requests and invitations. Newest first; unread rows are bold
+  // with a "mark read" link, and "Mark all read" clears the badge. Renders a
+  // sign-in note when signed out and nothing while follows and groups are both
+  // off. Parts: list, item, unread, actor, text, target, time, mark, mark-all,
+  // empty, signed-out, error.
+  class FriendoInbox extends FriendoElement {
+    css() {
+      return (
+        ".top{display:flex;justify-content:space-between;align-items:center;margin:0 0 .5em}" +
+        "ul{list-style:none;margin:0;padding:0}li{padding:.5em 0;border-top:1px solid #eee}" +
+        "li.unread .text{font-weight:600}.time{opacity:.6;font-size:.85em;margin-left:.5em}" +
+        ".link{border:0;background:none;padding:0;color:inherit;text-decoration:underline;font:inherit;opacity:.8}" +
+        ".empty,.signed-out{opacity:.75}a{color:inherit}"
+      );
+    }
+    static text(n) {
+      var who = n.from && n.from.name ? n.from.name : "Someone";
+      var what = n.target && n.target.title ? n.target.title : "";
+      switch (n.kind) {
+        case "follow": return who + " started following you";
+        case "comment": return who + " commented on " + (what || "your post");
+        case "join_request": return who + " asked to join " + (what || "your group");
+        case "membership": return "You're now a member of " + (what || "a group");
+        case "event_invite": return who + " invited you to " + (what || "an event");
+        default: return who + " · " + n.kind;
+      }
+    }
+    async render() {
+      var user = await currentUser();
+      if (!user) {
+        this.paint('<div part="signed-out" class="signed-out">Sign in to see your inbox.</div>');
+        return;
+      }
+      var limit = this.getAttribute("limit") || "";
+      var data;
+      try {
+        data = await api("/me/notifications" + (limit ? "?limit=" + encodeURIComponent(limit) : ""));
+      } catch (e) {
+        this.fail(e);
+        return;
+      }
+      var list = data.notifications || [];
+      var self = this;
+      var rows = list.map(function (n) {
+        var url = n.target && n.target.url;
+        var text = esc(FriendoInbox.text(n));
+        return (
+          '<li part="item' + (n.read ? "" : " unread") + '" class="' + (n.read ? "" : "unread") + '" data-id="' + esc(n.id) + '">' +
+          (url ? '<a part="target" href="' + esc(url) + '">' : "") + '<span part="text" class="text">' + text + "</span>" + (url ? "</a>" : "") +
+          '<span part="time" class="time">' + esc(stampLabel(n.created)) + "</span>" +
+          (n.read ? "" : ' <button type="button" part="mark" class="link" data-mark="' + esc(n.id) + '">mark read</button>') +
+          "</li>"
+        );
+      }).join("");
+      this.paint(
+        '<div class="top"><span part="unread">' + (data.unread ? data.unread + " unread" : "All caught up") + "</span>" +
+          (data.unread ? '<button type="button" part="mark-all" class="link">Mark all read</button>' : "") + "</div>" +
+          (rows ? '<ul part="list">' + rows + "</ul>" : '<p part="empty" class="empty">Nothing yet. When someone follows you or comments on your posts, it shows up here.</p>')
+      );
+      var announce = function (unread) {
+        document.dispatchEvent(new CustomEvent("friendo:notifications", { detail: { unread: unread } }));
+      };
+      this.shadowRoot.querySelectorAll("[data-mark]").forEach(function (btn) {
+        btn.onclick = async function () {
+          try {
+            var r = await api("/me/notifications/" + encodeURIComponent(btn.dataset.mark) + "/read", { method: "PUT" });
+            announce(r.unread || 0);
+            self.render();
+          } catch (e) { /* leave */ }
+        };
+      });
+      var all = this.shadowRoot.querySelector('[part="mark-all"]');
+      if (all) {
+        all.onclick = async function () {
+          try {
+            await api("/me/notifications/read-all", { method: "PUT" });
+            announce(0);
+            self.render();
+          } catch (e) { /* leave */ }
+        };
+      }
+    }
+  }
+
+  // --- <friendo-group post-id="…" | slug="…"> ----------------------------------
+  // One group's live side: the member count, a Join / Ask to join / Leave button
+  // that follows the group's join rule and the viewer's standing, the member
+  // list, and — for its moderators and admins — pending requests (approve / decline), a
+  // promote / remove per member, an "add by address" box, and the settings
+  // (visibility, join). Signed out it shows "Sign in to join". Renders nothing
+  // while the groups switch is off. Parts: count, join, leave, pending, members,
+  // member, role, requests, request, approve, decline, add, settings, status,
+  // signed-out, error.
+  class FriendoGroup extends FriendoElement {
+    css() {
+      return (
+        ".row{display:flex;gap:.6em;align-items:center;flex-wrap:wrap;margin:0 0 .6em}" +
+        "button{padding:.3em .8em;border:1px solid #ddd;border-radius:999px;background:#fafafa}" +
+        ".link{border:0;background:none;padding:0;color:inherit;text-decoration:underline;font:inherit;opacity:.8;font-size:.9em}" +
+        ".count,.pending,.status,.signed-out{opacity:.75;font-size:.9em}" +
+        "ul{list-style:none;margin:.4em 0;padding:0}li{display:flex;gap:.5em;align-items:center;padding:.2em 0}" +
+        ".role{opacity:.6;font-size:.85em}h4{margin:.8em 0 .2em;font-size:.95em}" +
+        ".settings{display:flex;gap:.6em;align-items:center;flex-wrap:wrap;margin-top:.6em;font-size:.9em}" +
+        "select,input{font:inherit;padding:.3em .4em;border:1px solid #ccc;border-radius:6px}"
+      );
+    }
+    async render() {
+      var key = this.getAttribute("post-id") || this.getAttribute("slug") || "";
+      var user = await currentUser();
+      var data;
+      try {
+        data = await api("/groups/" + encodeURIComponent(key));
+      } catch (e) {
+        if (e.status === 401 && !user) {
+          this.paint('<div part="signed-out" class="signed-out">Sign in to see this group.</div>');
+          return;
+        }
+        this.fail(e);
+        return;
+      }
+      var g = data.group || {};
+      var mine = g.mine || null;
+      var isMember = mine && mine.status === "member";
+      var mods = g.moderates;
+      var admins = g.administers;
+      var join = (g.settings && g.settings.join) || "open";
+      var self = this;
+      var html = '<div part="row" class="row"><span part="count" class="count">' + g.member_count + (g.member_count === 1 ? " member" : " members") + "</span>";
+      if (!user) {
+        html += '<span part="signed-out" class="signed-out">Sign in to join.</span>';
+      } else if (isMember) {
+        html += '<button part="leave" data-act="leave">Leave</button>';
+      } else if (mine && mine.status === "requested") {
+        html += '<span part="pending" class="pending">Asked to join · </span><button part="leave" class="link" data-act="leave">withdraw</button>';
+      } else if (mine && mine.status === "invited") {
+        html += '<button part="join" data-act="join">Accept invitation</button>';
+      } else if (join === "open") {
+        html += '<button part="join" data-act="join">Join</button>';
+      } else if (join === "request") {
+        html += '<button part="join" data-act="join">Ask to join</button>';
+      } else {
+        html += '<span part="pending" class="pending">Invite only</span>';
+      }
+      html += '<span part="status" class="status" hidden></span></div>';
+
+      var members = g.members || [];
+      html += '<ul part="members">' + members.map(function (m) {
+        return '<li part="member" data-id="' + esc(m.id) + '"><a href="' + esc(m.url || "/profiles/" + m.slug) + '">' + esc(m.name) + "</a>" +
+          (m.role !== "member" ? '<span part="role" class="role">' + esc(m.role) + "</span>" : "") +
+          (admins ? (m.role !== "admin" ? ' <button type="button" class="link" data-role="admin" data-id="' + esc(m.id) + '">make admin</button>' : "") +
+            (m.role !== "moderator" ? ' <button type="button" class="link" data-role="moderator" data-id="' + esc(m.id) + '">make moderator</button>' : "") +
+            (m.role !== "member" ? ' <button type="button" class="link" data-role="member" data-id="' + esc(m.id) + '">demote</button>' : "") : "") +
+          (mods && (m.role !== "admin" || admins) ? ' <button type="button" class="link" data-remove="' + esc(m.id) + '">remove</button>' : "") +
+          "</li>";
+      }).join("") + "</ul>";
+
+      if (mods) {
+        var req = g.requested || [];
+        if (req.length) {
+          html += '<h4>Asked to join</h4><ul part="requests">' + req.map(function (m) {
+            return '<li part="request" data-id="' + esc(m.id) + '">' + esc(m.name) +
+              ' <button type="button" part="approve" class="link" data-approve="' + esc(m.id) + '">approve</button>' +
+              ' <button type="button" part="decline" class="link" data-remove="' + esc(m.id) + '">decline</button></li>';
+          }).join("") + "</ul>";
+        }
+      }
+      if (admins) {
+        html += '<form part="add" class="settings"><input name="slug" placeholder="add by profile name (pat)" /><button type="submit" class="link">add</button></form>';
+        var chats = g.chats || [];
+        html += '<h4>Chats</h4><ul part="chats">' + chats.map(function (c) {
+          return '<li part="chat-row" data-id="' + esc(c.id) + '">' + esc(c.name || c.id) + ' <span class="role">' + esc(c.id) + "</span>" +
+            ' <button type="button" class="link" data-remove-chat="' + esc(c.id) + '">remove</button></li>';
+        }).join("") + (chats.length ? "" : '<li class="role">None yet — a page naming one makes it.</li>') + "</ul>" +
+          '<form part="add-chat" class="settings"><input name="chat" placeholder="new chat (announcements)" /><button type="submit" class="link">add chat</button></form>';
+        html += '<div part="settings" class="settings"><label>Who can see it <select name="visibility">' +
+          ["public", "members", "private"].map(function (v) { return '<option' + (g.settings.visibility === v ? " selected" : "") + ">" + v + "</option>"; }).join("") +
+          "</select></label><label>How people join <select name=\"join\">" +
+          ["open", "request", "invite"].map(function (v) { return '<option' + (join === v ? " selected" : "") + ">" + v + "</option>"; }).join("") +
+          "</select></label></div>";
+      }
+      this.paint(html);
+
+      var status = this.shadowRoot.querySelector('[part="status"]');
+      var fail = function (err) { status.hidden = false; status.textContent = err.message; };
+      var call = async function (path, opts) {
+        try { await api("/groups/" + encodeURIComponent(g.id) + path, opts); self.dispatchEvent(new CustomEvent("friendo:group", { bubbles: true, detail: { groupId: g.id } })); self.render(); } catch (err) { fail(err); }
+      };
+      var joinBtn = this.shadowRoot.querySelector("[data-act=join]");
+      if (joinBtn) joinBtn.onclick = function () { call("/join", { method: "POST" }); };
+      var leaveBtn = this.shadowRoot.querySelector("[data-act=leave]");
+      if (leaveBtn) leaveBtn.onclick = function () { call("/join", { method: "DELETE" }); };
+      this.shadowRoot.querySelectorAll("[data-approve]").forEach(function (b) {
+        b.onclick = function () { call("/members/" + encodeURIComponent(b.dataset.approve), jsonBody("PUT", { status: "member" })); };
+      });
+      this.shadowRoot.querySelectorAll("[data-remove]").forEach(function (b) {
+        b.onclick = function () { call("/members/" + encodeURIComponent(b.dataset.remove), { method: "DELETE" }); };
+      });
+      this.shadowRoot.querySelectorAll("[data-role]").forEach(function (b) {
+        b.onclick = function () { call("/members/" + encodeURIComponent(b.dataset.id), jsonBody("PUT", { role: b.dataset.role })); };
+      });
+      var add = this.shadowRoot.querySelector('form[part="add"]');
+      if (add) add.onsubmit = function (e) { e.preventDefault(); var v = add.querySelector("input").value.trim(); if (v) call("/members", jsonBody("POST", { slug: v })); };
+      var addChat = this.shadowRoot.querySelector('form[part="add-chat"]');
+      if (addChat) addChat.onsubmit = function (e) {
+        e.preventDefault();
+        var v = addChat.querySelector("input").value.trim();
+        if (!v) return;
+        call("/chats", jsonBody("POST", { name: v }));
+        status.hidden = false;
+        status.textContent = "Added. A page shows it with <friendo-chat chat-id=\"…\" group=\"" + (g.slug || "") + "\">.";
+      };
+      this.shadowRoot.querySelectorAll("[data-remove-chat]").forEach(function (b) {
+        b.onclick = function () { if (confirm("Remove this chat and its messages?")) call("/chats/" + encodeURIComponent(b.dataset.removeChat), { method: "DELETE" }); };
+      });
+      this.shadowRoot.querySelectorAll('[part="settings"] select').forEach(function (sel) {
+        sel.onchange = function () { var body = {}; body[sel.name] = sel.value; call("/settings", jsonBody("PUT", body)); };
+      });
+    }
+  }
+
+  // --- <friendo-groups> -----------------------------------------------------
+  // The groups the viewer may see, each linking to its page with its member count
+  // and the viewer's standing; and, when they may, a form to start a new one
+  // (title, who can see it, how people join). Parts: list, item, name, count,
+  // mine, create, input, select, submit, status, empty, error.
+  class FriendoGroups extends FriendoElement {
+    css() {
+      return (
+        "ul{list-style:none;margin:0;padding:0}li{padding:.4em 0;border-top:1px solid #eee;display:flex;gap:.6em;align-items:baseline;flex-wrap:wrap}" +
+        ".count,.mine,.status,.empty{opacity:.7;font-size:.9em}a{color:inherit}" +
+        "form{display:flex;gap:.5em;flex-wrap:wrap;align-items:center;margin-top:.8em}" +
+        "input,select{font:inherit;padding:.4em .5em;border:1px solid #ccc;border-radius:6px}button{font:inherit;padding:.4em .8em}"
+      );
+    }
+    async render() {
+      var data;
+      try {
+        data = await api("/groups");
+      } catch (e) {
+        this.fail(e);
+        return;
+      }
+      var list = data.groups || [];
+      var html = list.length
+        ? '<ul part="list">' + list.map(function (g) {
+            var standing = g.mine ? (g.mine.status === "member" ? (g.mine.role === "admin" ? "you run this group" : g.mine.role === "moderator" ? "you moderate" : "you're a member") : "you asked to join") : "";
+            return '<li part="item"><a part="name" href="' + esc(g.url) + '">' + esc(g.title) + '</a><span part="count" class="count">' + g.member_count + (g.member_count === 1 ? " member" : " members") + "</span>" +
+              (standing ? '<span part="mine" class="mine">' + standing + "</span>" : "") + "</li>";
+          }).join("") + "</ul>"
+        : '<p part="empty" class="empty">No groups yet.</p>';
+      if (data.can_create) {
+        html += '<form part="create"><input part="input" name="title" placeholder="Start a group…" required />' +
+          '<select part="select" name="visibility"><option value="public">everyone can see it</option><option value="members">members can see it</option><option value="private">only its members</option></select>' +
+          '<select part="select" name="join"><option value="open">anyone can join</option><option value="request">ask to join</option><option value="invite">invite only</option></select>' +
+          '<button part="submit" type="submit">Create</button><span part="status" class="status"></span></form>';
+      }
+      this.paint(html);
+      var self = this;
+      var form = this.shadowRoot.querySelector("form");
+      if (form) {
+        form.onsubmit = async function (e) {
+          e.preventDefault();
+          var title = form.querySelector('[name="title"]').value.trim();
+          if (!title) return;
+          var slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+          var status = form.querySelector('[part="status"]');
+          status.textContent = "Creating…";
+          try {
+            var r = await api("/collections/groups/posts", jsonBody("POST", {
+              title: title, slug: slug, body: "", status: "published",
+              fields: { visibility: form.querySelector('[name="visibility"]').value, join: form.querySelector('[name="join"]').value },
+            }));
+            self.dispatchEvent(new CustomEvent("friendo:group", { bubbles: true, detail: { groupId: r.post && r.post.id, created: true } }));
+            self.render();
+          } catch (err) {
+            status.textContent = err.message;
+          }
+        };
+      }
     }
   }
 
@@ -413,7 +973,7 @@
     }
   }
 
-  // --- <friendo-reactions target-type target-id [emojis]> ------------------
+  // --- <friendo-reactions post-id | comment-id [emojis]> --------------------
   class FriendoReactions extends FriendoElement {
     css() {
       return (
@@ -425,15 +985,16 @@
       );
     }
     async render() {
-      var type = this.getAttribute("target-type") || "";
-      var id = this.getAttribute("target-id") || "";
+      var postId = this.getAttribute("post-id") || "";
+      var commentId = this.getAttribute("comment-id") || "";
+      var target = postId ? "post_id=" + encodeURIComponent(postId) : "comment_id=" + encodeURIComponent(commentId);
       var choices = (this.getAttribute("emojis") || "👍,❤️,🎉").split(",").map(function (s) {
         return s.trim();
       });
 
       var data;
       try {
-        data = await api("/reactions?target_type=" + encodeURIComponent(type) + "&target_id=" + encodeURIComponent(id));
+        data = await api("/reactions?" + target);
       } catch (e) {
         this.fail(e);
         return;
@@ -476,7 +1037,7 @@
           try {
             await api(
               "/reactions",
-              jsonBody("POST", { target_type: type, target_id: id, emoji: btn.dataset.emoji })
+              jsonBody("POST", postId ? { post_id: postId, emoji: btn.dataset.emoji } : { comment_id: commentId, emoji: btn.dataset.emoji })
             );
             self.render();
           } catch (err) {
@@ -487,10 +1048,10 @@
     }
   }
 
-  // --- <friendo-rsvp post-id [occurrence] [names]> ---------------------------
+  // --- <friendo-rsvp post-id [date] [names]> ---------------------------------
   // "Are you coming?" on a post that has a `when`. Three answers, one per member
-  // per occurrence; the tally is public. On a repeating event the component asks
-  // about the next date unless `occurrence` (an RFC 3339 start) names another.
+  // per date; the tally is public. On a repeating event the component asks
+  // about the next date unless `date` (an RFC 3339 start) names another.
   // The signed-in viewer's answer is the pressed button. Organizers (the post's
   // author, or a moderator) also see who answered when `names` is present.
   // Parts: question, when, row, button, count, mine, names, name, status,
@@ -511,8 +1072,8 @@
     }
     async render() {
       var postId = this.getAttribute("post-id") || "";
-      var occ = this.getAttribute("occurrence") || "";
-      var q = "/posts/" + encodeURIComponent(postId) + "/rsvps" + (occ ? "?occurrence=" + encodeURIComponent(occ) : "");
+      var occ = this.getAttribute("date") || "";
+      var q = "/posts/" + encodeURIComponent(postId) + "/rsvps" + (occ ? "?date=" + encodeURIComponent(occ) : "");
       var data;
       try {
         data = await api(q);
@@ -529,7 +1090,7 @@
       var counts = data.counts || {};
       var html =
         '<p part="question" class="q">' + esc(this.getAttribute("question") || "Are you coming?") + "</p>" +
-        (data.occurrence_text ? '<p part="when" class="when">' + esc(data.occurrence_text) + "</p>" : "") +
+        (data.date_text ? '<p part="when" class="when">' + esc(data.date_text) + "</p>" : "") +
         '<div part="row" class="row">' +
         answers.map(function (a) {
           return '<button part="button" data-answer="' + a.key + '" aria-pressed="' + (data.mine === a.key ? "true" : "false") + '">' +
@@ -538,11 +1099,16 @@
         "</div>";
       if (!user) {
         html += '<div part="signed-out" class="signed-out">Sign in to answer.</div>';
+      } else if (data.mine === "invited") {
+        html += '<div part="invited" class="mine">You\'re invited — are you coming?</div>';
       } else if (data.mine) {
         html += '<div part="mine" class="mine">You said <b>' + esc(labelFor(answers, data.mine)) + '</b>. <button type="button" part="button" data-clear="1" style="padding:.1em .5em;font-size:.9em">Clear</button></div>';
       }
-      if (this.hasAttribute("names") && data.attendees && data.attendees.length) {
-        html += '<ul part="names" class="names">' + data.attendees.map(function (r) {
+      if (counts.invited) {
+        html += '<div part="invited-count" class="status">' + counts.invited + " invited, no answer yet</div>";
+      }
+      if (this.hasAttribute("names") && data.names && data.names.length) {
+        html += '<ul part="names" class="names">' + data.names.map(function (r) {
           return '<li part="name">' + esc(r.author_name || "Someone") + '<span class="a">' + esc(labelFor(answers, r.answer)) + "</span></li>";
         }).join("") + "</ul>";
       }
@@ -559,8 +1125,8 @@
           }
           try {
             await api("/posts/" + encodeURIComponent(postId) + "/rsvps",
-              jsonBody("POST", { occurrence: data.occurrence, answer: btn.dataset.answer }));
-            self.dispatchEvent(new CustomEvent("friendo:rsvp", { bubbles: true, detail: { postId: postId, occurrence: data.occurrence, answer: btn.dataset.answer } }));
+              jsonBody("POST", { date: data.date, answer: btn.dataset.answer }));
+            self.dispatchEvent(new CustomEvent("friendo:rsvp", { bubbles: true, detail: { postId: postId, date: data.date, answer: btn.dataset.answer } }));
             self.render();
           } catch (err) {
             status.hidden = false;
@@ -572,7 +1138,7 @@
       if (clear) {
         clear.onclick = async function () {
           try {
-            await api("/posts/" + encodeURIComponent(postId) + "/rsvps?occurrence=" + encodeURIComponent(data.occurrence), { method: "DELETE" });
+            await api("/posts/" + encodeURIComponent(postId) + "/rsvps?date=" + encodeURIComponent(data.date), { method: "DELETE" });
             self.render();
           } catch (err) {
             status.hidden = false;
@@ -587,10 +1153,71 @@
     return key;
   }
 
-  // --- <friendo-add-to-calendar [post-id] [occurrence] | [subscribe] [collection]> --
+  // --- <friendo-invite post-id [date]> ---------------------------------------
+  // The organizer's side of an RSVP: ask people to the event by profile address,
+  // by group, or all of your followers. Each gets an RSVP awaiting their answer
+  // and a note in their inbox. Paints nothing for anyone but the event's author
+  // or a moderator (the server decides). Parts: form, input, group, followers,
+  // send, result, error.
+  class FriendoInvite extends FriendoElement {
+    css() {
+      return (
+        "form{display:flex;gap:.5em;flex-wrap:wrap;align-items:center}" +
+        "input{font:inherit;padding:.4em .5em;border:1px solid #ccc;border-radius:6px}" +
+        "label{display:inline-flex;gap:.3em;align-items:center;font-size:.9em}" +
+        "button{padding:.35em .8em;border:1px solid #ddd;border-radius:999px;background:#fafafa}" +
+        ".result{font-size:.9em;opacity:.75;width:100%}"
+      );
+    }
+    async render() {
+      var postId = this.getAttribute("post-id") || "";
+      var occ = this.getAttribute("date") || "";
+      var user = await currentUser();
+      if (!user) { this.paint(""); return; }
+      var data;
+      try {
+        data = await api("/posts/" + encodeURIComponent(postId) + "/rsvps" + (occ ? "?date=" + encodeURIComponent(occ) : ""));
+      } catch (e) {
+        this.fail(e);
+        return;
+      }
+      // Only organizers get the attendee list back — that's the tell.
+      if (!data.names) { this.paint(""); return; }
+      this.paint(
+        '<form part="form"><input part="input" name="who" placeholder="Invite by address: pat, sam" />' +
+          '<input part="group" name="group" placeholder="or a group: board" />' +
+          '<label><input part="followers" type="checkbox" name="followers" /> my followers</label>' +
+          '<button part="send" type="submit">Invite</button>' +
+          '<span part="result" class="result"></span></form>'
+      );
+      var self = this;
+      var form = this.shadowRoot.querySelector("form");
+      var result = this.shadowRoot.querySelector('[part="result"]');
+      form.onsubmit = async function (e) {
+        e.preventDefault();
+        var who = form.querySelector('[name="who"]').value.split(/[\s,]+/).map(function (x) { return x.trim().replace(/^\/profiles\//, ""); }).filter(Boolean);
+        var group = form.querySelector('[name="group"]').value.trim();
+        var followers = form.querySelector('[name="followers"]').checked;
+        if (!who.length && !group && !followers) return;
+        result.textContent = "Inviting…";
+        try {
+          var r = await api("/posts/" + encodeURIComponent(postId) + "/invites",
+            jsonBody("POST", { slugs: who, group: group || undefined, followers: followers, date: data.date }));
+          result.textContent = "Invited " + r.invited + (r.skipped ? ", " + r.skipped + " had already answered" : "") +
+            (r.unknown && r.unknown.length ? "; no profile called " + r.unknown.join(", ") : "") + ".";
+          form.querySelector('[name="who"]').value = "";
+          self.dispatchEvent(new CustomEvent("friendo:invite", { bubbles: true, detail: { postId: postId, invited: r.invited } }));
+        } catch (err) {
+          result.textContent = err.message;
+        }
+      };
+    }
+  }
+
+  // --- <friendo-add-to-calendar [post-id] [date] | [subscribe] [collection]> --------
   // A small menu of calendar apps. With `post-id`, "add this event": Google
   // Calendar's pre-filled form, and an .ics file for Apple Calendar, Outlook and
-  // the rest (one date of a repeating event with `occurrence`). With `subscribe`,
+  // the rest (one date of a repeating event with `date`). With `subscribe`,
   // the whole feed: Google (add by URL), Apple/Outlook (webcal://), the plain URL.
   // Reads /calendar.json — public, and a plain file in a static export. Parts:
   // button, menu, item, copy, status, error.
@@ -614,23 +1241,44 @@
       var origin = location.origin;
       var items = [];
       if (subscribe) {
+        // Which feed: the site's, one collection's, one group's, or (with `mine`)
+        // just the viewer's own events. Signed in, the menu offers the member's
+        // private link — their token in the address — which carries members-only
+        // and group events a public feed can't; a visitor gets the public one.
+        var params = [];
         var coll = this.getAttribute("collection") || "";
-        var feed = origin + "/calendar.ics" + (coll ? "?collection=" + encodeURIComponent(coll) : "");
-        items = [
-          { text: "Google Calendar", href: "https://calendar.google.com/calendar/r?cid=" + encodeURIComponent(feed) },
-          { text: "Apple Calendar", href: feed.replace(/^https?:\/\//, "webcal://") },
-          { text: "Outlook", href: feed.replace(/^https?:\/\//, "webcal://") },
-          { text: "Copy the feed address", copy: feed },
-        ];
+        var group = this.getAttribute("group") || "";
+        if (coll) params.push("collection=" + encodeURIComponent(coll));
+        if (group) params.push("group=" + encodeURIComponent(group));
+        if (this.hasAttribute("mine")) params.push("mine=1");
+        var user = await currentUser();
+        var me = null;
+        if (user) {
+          try { me = await api("/me/calendar"); } catch (e) { /* no profile (no-login admin) → public */ }
+        }
+        var menuOf = function (feed) {
+          return [
+            { text: "Google Calendar", href: "https://calendar.google.com/calendar/r?cid=" + encodeURIComponent(feed) },
+            { text: "Apple Calendar", href: feed.replace(/^https?:\/\//, "webcal://") },
+            { text: "Outlook", href: feed.replace(/^https?:\/\//, "webcal://") },
+            { text: "Copy the feed address", copy: feed },
+          ];
+        };
+        if (me && me.token) {
+          var priv = origin + "/calendar.ics?token=" + encodeURIComponent(me.token) + (params.length ? "&" + params.join("&") : "");
+          items = [{ heading: "Your calendar" }].concat(menuOf(priv), [{ reset: true, text: "Reset link" }]);
+        } else {
+          items = menuOf(origin + "/calendar.ics" + (params.length ? "?" + params.join("&") : ""));
+        }
       } else {
-        var q = "/calendar.json?record=" + encodeURIComponent(postId);
-        var occ = this.getAttribute("occurrence") || "";
+        var q = "/calendar.json?post=" + encodeURIComponent(postId);
+        var occ = this.getAttribute("date") || "";
         var ev = null;
         try {
           var res = await fetch(q, { credentials: "same-origin" });
           var body = res.ok ? await res.json() : null;
           var list = (body && body.events) || [];
-          ev = occ ? list.filter(function (e) { return e.starts === occ; })[0] : list[0];
+          ev = occ ? list.filter(function (e) { return e.start === occ; })[0] : list[0];
         } catch (e) { /* fall through */ }
         if (!ev) {
           this.paint('<div part="error" class="status">No upcoming date to add.</div>');
@@ -639,7 +1287,7 @@
         // The Google link for a repeating event carries the rule, so Google repeats it too.
         var google = ev.google;
         if (!occ && ev.rule && google) google += "&recur=" + encodeURIComponent("RRULE:" + ev.rule);
-        var ics = occ || !ev.rule ? ev.ics : origin + "/calendar.ics?record=" + encodeURIComponent(postId);
+        var ics = occ || !ev.rule ? ev.ics : origin + "/calendar.ics?post=" + encodeURIComponent(postId);
         items = [
           { text: "Google Calendar", href: google },
           { text: "Apple Calendar", href: ics },
@@ -651,6 +1299,8 @@
         '<button part="button" class="btn" type="button" aria-haspopup="true" aria-expanded="false">' + esc(label) + " ▾</button>" +
         '<ul part="menu" class="menu" hidden>' +
         items.map(function (it) {
+          if (it.heading) return '<li part="heading" class="status"><b>' + esc(it.heading) + "</b> — includes what only you can see</li>";
+          if (it.reset) return '<li><button part="reset" type="button" data-reset="1">' + esc(it.text) + "</button></li>";
           if (it.copy) return '<li><button part="copy" type="button" data-copy="' + esc(it.copy) + '">' + esc(it.text) + "</button></li>";
           return '<li><a part="item" href="' + esc(it.href) + '"' + (it.download ? " download" : ' target="_blank" rel="noopener"') + ">" + esc(it.text) + "</a></li>";
         }).join("") +
@@ -672,6 +1322,20 @@
           try { await navigator.clipboard.writeText(copy.dataset.copy); status.textContent = "Copied. Paste it into your calendar app under “add by URL”."; }
           catch (e) { status.textContent = copy.dataset.copy; }
           status.hidden = false;
+        };
+      }
+      // The private link is a secret: if it got shared, reset it. Apps
+      // subscribed to the old address stop updating until re-added.
+      var reset = this.shadowRoot.querySelector("[data-reset]");
+      if (reset) {
+        reset.onclick = async function () {
+          if (!confirm("Reset your calendar link? Calendar apps using the old link will stop updating.")) return;
+          try {
+            await api("/me/calendar/reset", { method: "POST" });
+            await self.render();
+            var st = self.shadowRoot.querySelector('[part="status"]');
+            if (st) { st.hidden = false; st.textContent = "Done — the old link stopped working. Subscribe again with the new one."; }
+          } catch (e) { status.hidden = false; status.textContent = e.message; }
         };
       }
     }
@@ -859,24 +1523,43 @@
       });
       if (!this._ticker) this._ticker = setInterval(function () { self.tickTimes(); }, 60000);
     }
+    // base is the chat's API path: a site chat, or one of a group's
+    // (<friendo-chat chat-id="general" group="board">).
+    base() {
+      var chatId = this.getAttribute("chat-id") || "";
+      var group = this.getAttribute("group") || "";
+      return group
+        ? "/groups/" + encodeURIComponent(group) + "/chats/" + encodeURIComponent(chatId)
+        : "/chats/" + encodeURIComponent(chatId);
+    }
     async render() {
       var chatId = this.getAttribute("chat-id") || "";
+      var group = this.getAttribute("group") || "";
       var user = await currentUser();
-      // Editor+ can moderate (delete any); members can delete only their own.
-      this._canModerate = !!user && ["editor", "admin", "owner"].includes(user.role);
-      // Your author ids (personas), so a message arriving over the stream —
+      // Your author ids (profiles), so a message arriving over the stream —
       // which is the same frame for everyone — can be told apart as yours.
       this._myAuthors = [];
       if (user) {
-        try { this._myAuthors = ((await api("/me/personas")).personas || []).map(function (p) { return p.id; }); } catch (e) { /* visitor-like */ }
+        try { this._myAuthors = ((await api("/me/profiles")).profiles || []).map(function (p) { return p.id; }); } catch (e) { /* visitor-like */ }
       }
       var data;
       try {
-        data = await api("/chats/" + encodeURIComponent(chatId) + "/messages");
+        data = await api(this.base() + "/messages");
       } catch (e) {
+        // A group's chat is its members' only: say so instead of an error.
+        if (group && (e.status === 401 || e.status === 403)) {
+          this.paint('<div part="chat" class="chat"><p part="locked" class="empty">' +
+            (user ? "Join the group to chat." : "Sign in and join the group to chat.") + "</p></div>");
+          return;
+        }
         this.fail(e);
         return;
       }
+      // Who may delete what: the server says (a group's moderators count);
+      // an older runtime doesn't, so fall back to the role.
+      this._canModerate = data && typeof data.can_moderate === "boolean"
+        ? data.can_moderate
+        : !!user && ["moderator", "editor", "admin", "owner"].includes(user.role);
       var messages = (data && data.messages) || [];
       var self = this;
 
@@ -901,7 +1584,7 @@
       if (this._es) return; // one connection per element
       var self = this;
       try {
-        var es = new EventSource(API + "/chats/" + encodeURIComponent(chatId) + "/stream");
+        var es = new EventSource(API + this.base() + "/stream");
         this._es = es;
         es.onmessage = function (ev) {
           var m;
@@ -981,7 +1664,7 @@
           if (!body) return;
           status.textContent = "Sending…";
           try {
-            await api("/chats/" + encodeURIComponent(chatId) + "/messages", jsonBody("POST", { body: body }));
+            await api(self.base() + "/messages", jsonBody("POST", { body: body }));
             input.value = "";
             status.textContent = "";
             self._followNext = true;
@@ -1002,13 +1685,12 @@
     }
   }
 
-  // --- <friendo-map target-type [target-id] [post-url-pattern]> --------------
+  // --- <friendo-map [post-id] [post-url-pattern]> ----------------------------
   // Renders geo-tags (the locations API) as an interactive map with a marker per
   // location. Two modes:
-  //   • with target-id — one target's pins, e.g. <friendo-map target-type="post"
-  //     target-id="p1"> shows every location on post p1.
-  //   • without target-id — every published post's pin of that type on one map,
-  //     e.g. <friendo-map target-type="post">. Each marker links back to its post
+  //   • with post-id — one post's locations, e.g. <friendo-map post-id="p1">.
+  //   • without post-id — every published post's location on one map,
+  //     e.g. <friendo-map>. Each marker links back to its post
   //     using the URL the server resolves; post-url-pattern="/blog/{slug}" is an
   //     override for hosts whose routes the server can't see.
   // Public read — no sign-in needed. Uses Leaflet (open-source, BSD-2) with
@@ -1079,11 +1761,9 @@
       // Tear down any prior map instance (re-render on auth change) before repainting.
       if (this._map) { this._map.remove(); this._map = null; }
 
-      var targetType = this.getAttribute("target-type") || "";
-      var targetId = this.getAttribute("target-id") || "";
-      // No target-id → aggregate mode: every published post of this type.
-      var q = "/locations?target_type=" + encodeURIComponent(targetType);
-      if (targetId) q += "&target_id=" + encodeURIComponent(targetId);
+      var targetId = this.getAttribute("post-id") || "";
+      // No post-id → aggregate mode: every published post on one map.
+      var q = "/locations" + (targetId ? "?post_id=" + encodeURIComponent(targetId) : "");
       var data;
       try {
         data = await api(q);
@@ -1166,7 +1846,7 @@
   //   media    → a file/image picker with preview           (.value = pending File | null)
   //   tags     → a chip input                               (.value = string[])
   // Anything else falls back to a plain text input. The value shape lands in the
-  // created post's `data.<name>` (or a reserved column) per <friendo-form>'s rules.
+  // created post's `fields.<name>` (or a reserved column) per <friendo-form>'s rules.
   class FriendoInput extends FriendoElement {
     css() {
       return (
@@ -1269,14 +1949,14 @@
       this.paint('<input part="input" placeholder="' + esc(this.getAttribute("placeholder") || "") + '">');
     }
     // One control for an event's time: start, end, all-day, and how it repeats.
-    // Its value is the flat {when, ends, all_day, repeats} shape the server reads
-    // (the same keys as front matter), which <friendo-form> spreads into the post.
+    // Its value is the {start, end, all_day, repeats} map the server reads as
+    // `when` (the same shape as front matter), which <friendo-form> sends as such.
     _renderWhen() {
       var self = this;
       this.paint(
         '<div part="when" class="when">' +
-          '<label part="label" class="lbl"><span>Starts</span><input part="input" data-k="when" type="datetime-local"></label>' +
-          '<label part="label" class="lbl"><span>Ends</span><input part="input" data-k="ends" type="datetime-local"></label>' +
+          '<label part="label" class="lbl"><span>Start</span><input part="input" data-k="start" type="datetime-local"></label>' +
+          '<label part="label" class="lbl"><span>End</span><input part="input" data-k="end" type="datetime-local"></label>' +
           '<label part="label" class="lbl check"><input part="checkbox" data-k="all_day" type="checkbox"><span>All day</span></label>' +
           '<label part="label" class="lbl"><span>Repeats</span><select part="select" data-k="repeats">' +
             '<option value="">Never</option><option value="daily">Daily</option><option value="weekly">Weekly</option>' +
@@ -1292,7 +1972,7 @@
       function sync() {
         // All-day events take dates, timed ones take date-times.
         var t = allDay.checked ? "date" : "datetime-local";
-        ["when", "ends"].forEach(function (k) {
+        ["start", "end"].forEach(function (k) {
           var i = root.querySelector('[data-k="' + k + '"]');
           if (i.type !== t) { var v = i.value; i.type = t; i.value = allDay.checked ? v.slice(0, 10) : (v ? v + (v.length === 10 ? "T09:00" : "") : ""); }
         });
@@ -1302,8 +1982,8 @@
       repeats.onchange = sync;
       // Restore a prior value (a re-render on auth change keeps what was typed).
       var w = this._when || {};
-      root.querySelector('[data-k="when"]').value = w.when || "";
-      root.querySelector('[data-k="ends"]').value = w.ends || "";
+      root.querySelector('[data-k="start"]').value = w.start || "";
+      root.querySelector('[data-k="end"]').value = w.end || "";
       allDay.checked = !!w.all_day;
       repeats.value = w.repeats || "";
       root.querySelector('[data-k="until"]').value = w.until || "";
@@ -1316,13 +1996,13 @@
     _readWhen() {
       var root = this.shadowRoot;
       var get = function (k) { var i = root.querySelector('[data-k="' + k + '"]'); return i ? (i.type === "checkbox" ? i.checked : i.value) : ""; };
-      return { when: get("when"), ends: get("ends"), all_day: get("all_day"), repeats: get("repeats"), until: get("until") };
+      return { start: get("start"), end: get("end"), all_day: get("all_day"), repeats: get("repeats"), until: get("until") };
     }
     _whenValue() {
-      var w = this.shadowRoot.querySelector('[data-k="when"]') ? this._readWhen() : (this._when || {});
-      if (!w.when) return null;
-      var out = { when: w.when.replace("T", " ") };
-      if (w.ends) out.ends = w.ends.replace("T", " ");
+      var w = this.shadowRoot.querySelector('[data-k="start"]') ? this._readWhen() : (this._when || {});
+      if (!w.start) return null;
+      var out = { start: w.start.replace("T", " ") };
+      if (w.end) out.end = w.end.replace("T", " ");
       if (w.all_day) out.all_day = true;
       if (w.repeats) {
         if (w.until) {
@@ -1471,7 +2151,7 @@
       // First cut: media is a contributor+ affordance. Members see a note instead
       // of a picker, so a member submission simply carries no file.
       var user = await currentUser();
-      var canUpload = !!user && ["contributor", "editor", "admin", "owner"].indexOf(user.role) !== -1;
+      var canUpload = !!user && ["contributor", "moderator", "editor", "admin", "owner"].indexOf(user.role) !== -1;
       if (!canUpload) {
         this._file = null;
         this.paint('<div part="note" class="note">Sign in as a contributor to attach media.</div>');
@@ -1539,7 +2219,7 @@
   // <friendo-input>s are reachable, and a light-DOM `<button type="submit">` (or
   // Enter in a single-line input) drives it. Field names decide where each value
   // lands: `title`/`body`/`slug`/`status` become post columns; every other name
-  // becomes metadata under `data.<name>` (read server-side as {{ record.data.name }}).
+  // becomes a field under `fields.<name>` (read server-side as {{ post.fields.name }}).
   class FriendoForm extends HTMLElement {
     connectedCallback() {
       // A thin status/error line appended after the author's markup. It carries
@@ -1587,6 +2267,7 @@
       var reserved = { title: 1, body: 1, slug: 1, status: 1 };
       var columns = {};
       var data = {};
+      var whenParts = {};
       var media = [];
       this.querySelectorAll("[name]").forEach(function (el) {
         var name = el.getAttribute("name");
@@ -1599,13 +2280,13 @@
             return;
           }
           if (itype === "when") {
-            // The when control yields the reserved calendar keys themselves
-            // (when, ends, all_day, repeats); the server lifts them into the event.
+            // The when control yields {start, end, all_day, repeats}; the server
+            // lifts `when` into the event.
             var wv = el.value;
-            if (wv) Object.keys(wv).forEach(function (k) { data[k] = wv[k]; });
+            if (wv) data.when = wv;
             return;
           }
-          // A location lands in data.<name> as {lat,lng}; the server turns any such
+          // A location lands in fields.<name> as {lat,lng}; the server turns any such
           // field into a geo-tag on create, so <friendo-map> surfaces the pin.
           var rv = el.value;
           if (reserved[name]) columns[name] = typeof rv === "string" ? rv : String(rv == null ? "" : rv);
@@ -1614,8 +2295,15 @@
         }
         var val = tag === "input" && el.type === "checkbox" ? el.checked : el.value;
         if (reserved[name]) columns[name] = val;
+        else if (name.indexOf("when.") === 0) { if (val != null && val !== "") whenParts[name.slice(5)] = val; }
         else if (val != null && val !== "") data[name] = val;
       });
+      // Native inputs named when.end, when.repeats, … join the start under `when`.
+      if (Object.keys(whenParts).length) {
+        var w0 = typeof data.when === "string" ? { start: data.when } : (data.when || {});
+        Object.keys(whenParts).forEach(function (k) { w0[k] = whenParts[k]; });
+        data.when = w0;
+      }
       if (!columns.slug && columns.title) columns.slug = slugify(columns.title);
 
       var collection = this.getAttribute("collection") || "posts";
@@ -1624,15 +2312,15 @@
         body: columns.body || "",
         slug: columns.slug || "",
         status: columns.status || this.getAttribute("status") || "published",
-        data: data,
+        fields: data,
       };
 
       this._busy = true;
       this._status.textContent = "Submitting…";
       var record;
       try {
-        var res = await api("/collections/" + encodeURIComponent(collection) + "/records", jsonBody("POST", payload));
-        record = res.record;
+        var res = await api("/collections/" + encodeURIComponent(collection) + "/posts", jsonBody("POST", payload));
+        record = res.post;
       } catch (err) {
         this._busy = false;
         this._status.textContent = "";
@@ -1656,15 +2344,14 @@
         if (!file) continue;
         try {
           var fd = new FormData();
-          fd.append("record_type", "post");
-          fd.append("record_id", record.id);
+          fd.append("post_id", record.id);
           fd.append("field", media[i].name);
           fd.append("file", file);
           var up = await api("/files", { method: "POST", body: fd });
           // Write back what was submitted plus the asset — not only the server's
           // copy of `data`, which has the calendar keys (when, repeats…) lifted out.
-          record.data = Object.assign({}, data, record.data || {});
-          record.data[media[i].name] = up.file.url;
+          record.fields = Object.assign({}, data, record.fields || {});
+          record.fields[media[i].name] = up.file.url;
           patched = true;
         } catch (err) {
           /* the post exists; the asset just didn't attach */
@@ -1672,18 +2359,18 @@
       }
       if (patched) {
         try {
-          var saved = await api("/records/" + encodeURIComponent(record.id), jsonBody("PUT", {
-            title: record.title, body: record.body, slug: record.slug, status: record.status, data: record.data,
+          var saved = await api("/posts/" + encodeURIComponent(record.id), jsonBody("PUT", {
+            title: record.title, body: record.body, slug: record.slug, status: record.status, fields: record.fields,
           }));
           // Hand listeners the server's record (data with the calendar keys lifted
           // out, `when` filled in), not our working copy.
-          if (saved && saved.record) record = saved.record;
+          if (saved && saved.post) record = saved.post;
         } catch (err) { /* leave the record without the asset ref */ }
       }
 
       this._busy = false;
       this._status.textContent = "";
-      this.dispatchEvent(new CustomEvent("friendo:submitted", { bubbles: true, detail: { record: record } }));
+      this.dispatchEvent(new CustomEvent("friendo:submitted", { bubbles: true, detail: { post: record } }));
 
       var redirect = this.getAttribute("redirect");
       if (redirect) {
@@ -1744,10 +2431,10 @@
       // the month of its event so the new entry is in view.
       var self = this;
       this._onSubmitted = function (e) {
-        var rec = e.detail && e.detail.record;
+        var rec = e.detail && e.detail.post;
         self._events = null;
-        if (rec && rec.when && rec.when.starts && rec.status === "published") {
-          var d = new Date(rec.when.starts);
+        if (rec && rec.when && rec.when.start && rec.status === "published") {
+          var d = new Date(rec.when.start);
           if (!isNaN(d)) { self._year = d.getFullYear(); self._month = d.getMonth(); }
         }
         self.render();
@@ -1863,12 +2550,12 @@
   // An all-day event lives on its calendar date wherever the viewer is; a timed
   // one is bucketed by the viewer's local day.
   function dayKey(e) {
-    if (e.all_day) return String(e.starts).slice(0, 10);
-    return ymd(new Date(e.starts));
+    if (e.all_day) return String(e.start).slice(0, 10);
+    return ymd(new Date(e.start));
   }
   function timeOf(e) {
     if (e.all_day) return "All day";
-    var d = new Date(e.starts);
+    var d = new Date(e.start);
     return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   }
   function eventLink(e, short) {
@@ -2004,11 +2691,11 @@
       return (
         '<p part="account" class="status">Signed in as <b>' + esc(acct.email) + "</b>" +
         (acct.operator ? " · operator" : "") +
-        ' · <button part="logout">Sign out</button></p>'
+        ' · <button part="signout">Sign out</button></p>'
       );
     }
     wireLogout() {
-      var btn = this.shadowRoot.querySelector('[part="logout"]');
+      var btn = this.shadowRoot.querySelector('[part="signout"]');
       if (btn) btn.onclick = async function () {
         await napi("/auth/logout", { method: "POST" }).catch(function () {});
         broadcastAccount(null);
@@ -2453,7 +3140,12 @@
   }
 
   var defs = {
-    "friendo-auth": FriendoAuth,
+    "friendo-signin": FriendoAuth,
+    "friendo-profile": FriendoProfile,
+    "friendo-follow": FriendoFollow,
+    "friendo-inbox": FriendoInbox,
+    "friendo-group": FriendoGroup,
+    "friendo-groups": FriendoGroups,
     "friendo-comments": FriendoComments,
     "friendo-reactions": FriendoReactions,
     "friendo-poll": FriendoPoll,
@@ -2463,6 +3155,7 @@
     "friendo-form": FriendoForm,
     "friendo-calendar": FriendoCalendar,
     "friendo-rsvp": FriendoRSVP,
+    "friendo-invite": FriendoInvite,
     "friendo-add-to-calendar": FriendoAddToCalendar,
     "friendo-account": FriendoAccount,
     "friendo-console": FriendoConsole,

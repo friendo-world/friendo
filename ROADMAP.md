@@ -12,7 +12,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
 | **v0.4** | Open the network — quotas, account management, custom domains | ✅ Shipped |
 | **v0.5** | One obvious sign-in; the network as a friendo site (home site + `<friendo-account>` / `<friendo-console>`); members-only pages; a built-in calendar with RSVP; declared fields + feature switches + a rebuilt records admin; docs + landing | ✅ Shipped |
-| **v0.6** | Social graph — following, groups, event invitations, richer profiles (scoping) | Planned |
+| **v0.6** | Social graph, built the friendo way — profiles at `/profiles/<slug>` with declared fields, one-way follows (friends = mutual), an in-page inbox, groups as a built-in collection with memberships and visibility, event invitations | ✅ Built (tag pending) |
 
 ---
 
@@ -54,6 +54,29 @@ explanatory page at any domain that isn't live yet). Custom-domain TLS goes thro
 DNS TXT check. All of it was verified live on friendo.world before the tag: a real domain
 end to end through Cloudflare, Resend OTP delivery, a quota hit, and suspend/resume.
 Scope and decisions: [design/v0.4-roadmap.md](design/v0.4-roadmap.md).
+
+**v0.6 — built (2026-09-28), tag pending:** a social graph for a site's members, every
+piece a row in the site's own database that travels with the folder. **Profiles:** every
+persona has an address (`/profiles/<slug>`, `pages/profiles/[slug].html`), a bio and the
+fields a site declares under `[profiles.fields]`; `record.author` on every record;
+`collections.profiles`; `<friendo-profile>`; who may see them is `profile_visibility`
+(members by default). **Follows:** one-way, `<friendo-follow>`, `user.following` /
+`followers` / `friends`, the `by_following` feed filter; ride `push --users`.
+**Inbox:** `notifications` written by follows, comments, group requests and invitations;
+`<friendo-inbox>`, a badge in `<friendo-auth>`, `{{ user.unread }}`; no email in 0.6.
+**Groups:** a post in `groups` with `visibility` / `join` in its data and a `memberships`
+table; founders moderate; `<friendo-group>` / `<friendo-groups>`; `user.groups` makes
+`{% members only if "board" in user.groups %}` work; `[access] groups`; `in_group`;
+private groups and their posts vanish for outsiders (pages, `collections.*`, feeds);
+`/calendar.ics?group=`; members may create groups behind `member_groups`. **Invitations:**
+`POST /_/api/posts/:id/invites` (addresses, a group, followers) writes `invited` RSVPs and
+inbox notes; `<friendo-invite>`, the invited state in `<friendo-rsvp>`, the Attendees
+screen and CSV. Migrations `0016`–`0018`; switches `follows`, `groups`. **Follow-ups
+(2026-09-29):** group chats are the group's members' only (`<friendo-chat chat-id="general"
+group="…">`, migration `0019`), and members get a **private calendar link** — a token in
+the feed address — carrying members-only and group events, `?mine=1` for their own
+(migration `0020`). Decisions and the corrections found in code:
+[design/v0.6-roadmap.md](design/v0.6-roadmap.md).
 
 **v0.5 — shipped (2026-09):** sign-in became one obvious thing and the network became
 self-service end to end, built the friendo way. **Sign-in:** an emailed code for every role,

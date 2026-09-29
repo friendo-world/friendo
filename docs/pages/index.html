@@ -39,19 +39,19 @@
     {# Every page, grouped, straight from content/docs/*.md. #}
     <div class="group">
       <div class="rule-head label"><span>Getting started</span><span class="right">the path</span></div>
-      <ol>{% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Getting started" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+      <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Getting started" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
     </div>
     <div class="group">
       <div class="rule-head label"><span>Concepts</span><span class="right">how friendo thinks</span></div>
-      <ol>{% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Concepts" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+      <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Concepts" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
     </div>
     <div class="group">
       <div class="rule-head label"><span>Reference</span><span class="right">look it up</span></div>
-      <ol>{% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Reference" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+      <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Reference" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
     </div>
     <div class="group">
       <div class="rule-head label"><span>Hosting</span><span class="right">your server, or a network</span></div>
-      <ol>{% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Hosting" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
+      <ol>{% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Hosting" %}<li><a href="/docs/{{ d.slug }}"><span class="n">&#10047;</span>{{ d.title }}</a></li>{% endif %}{% endfor %}</ol>
     </div>
   </section>
 

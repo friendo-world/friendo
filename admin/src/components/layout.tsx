@@ -11,10 +11,10 @@ export function Layout({ children }: { children: ComponentChildren }) {
   const active =
     path === "/_" || path.startsWith("/_/collections")
       ? "content"
-      : path.startsWith("/_/moderation") || path.startsWith("/_/review")
-        ? "moderation"
-        : path.startsWith("/_/users")
-          ? "users"
+      : path.startsWith("/_/review")
+        ? "review"
+        : path.startsWith("/_/members")
+          ? "members"
           : path.startsWith("/_/settings")
             ? "settings"
             : "";

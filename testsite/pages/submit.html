@@ -6,13 +6,13 @@ hit Publish — the field <em>names</em> decide where each value lands. <code>ti
 and <code>body</code> become the post's own columns; everything else
 (<code>mood</code>, <code>tags</code>, <code>where</code>, <code>cover</code>) becomes
 metadata under the post's <code>data</code>, readable back in a template as
-<code>record.data.mood</code> and friends. No custom JavaScript, no schema edits.</p>
+<code>post.fields.mood</code> and friends. No custom JavaScript, no schema edits.</p>
 
 <div class="signin">
     <h2>Sign in first</h2>
-    <friendo-auth></friendo-auth>
+    <friendo-signin></friendo-signin>
     <p class="note">Contributors and above post directly. Members can submit (into the
-    review queue) only when an admin turns on <strong>Members can submit posts</strong>
+    review queue) only when an admin turns on <strong>Members can post</strong>
     in Settings.</p>
 </div>
 
@@ -46,7 +46,7 @@ metadata under the post's <code>data</code>, readable back in a template as
     var form = document.querySelector("friendo-form");
     var result = document.getElementById("result");
     form.addEventListener("friendo:submitted", function (e) {
-        var r = e.detail.record;
+        var r = e.detail.post;
         result.hidden = false;
         if (r.status === "published") {
             result.innerHTML = "Published! <a href=\"/blog/" + encodeURIComponent(r.slug) + "\">View your post &rarr;</a>";

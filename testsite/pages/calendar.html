@@ -13,7 +13,7 @@ events appear on every date they happen. Click an entry to open its post, or
 start, end, all-day and repeats in one control. Sign in first (contributors publish
 directly; members submit for review when submissions are on).</p>
 
-<div class="signin"><friendo-auth></friendo-auth></div>
+<div class="signin"><friendo-signin></friendo-signin></div>
 
 <friendo-form collection="events">
     <label class="field"><span>Title</span>
@@ -33,7 +33,7 @@ directly; members submit for review when submissions are on).</p>
     // The calendar above refreshes itself on friendo:submitted; this adds a line
     // with a link (published) or a note (a member submission, pending review).
     document.querySelector("friendo-form").addEventListener("friendo:submitted", function (e) {
-        var r = e.detail.record, out = document.getElementById("result");
+        var r = e.detail.post, out = document.getElementById("result");
         out.hidden = false;
         if (r.status === "published") {
             out.innerHTML = "Added! <a href=\"/events/" + encodeURIComponent(r.slug) + "\">View the event &rarr;</a>";

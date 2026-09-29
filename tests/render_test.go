@@ -20,7 +20,7 @@ import (
 type renderFixture struct {
 	Name     string           `json:"name"`
 	Template string           `json:"template"`
-	Records  []map[string]any `json:"records"`
+	Records  []map[string]any `json:"posts"`
 	Expect   string           `json:"expect"`
 }
 
@@ -89,7 +89,7 @@ func insertFixtureRecord(t *testing.T, db *data.DB, fixture string, rec map[stri
 	str := func(k string) string { v, _ := rec[k].(string); return v }
 
 	dataJSON := "{}"
-	if d, ok := rec["data"]; ok && d != nil {
+	if d, ok := rec["fields"]; ok && d != nil {
 		if b, err := json.Marshal(d); err == nil {
 			dataJSON = string(b)
 		}

@@ -23,7 +23,7 @@ writeFileSync(
   join(siteDir, "pages", "index.html"),
   '<!doctype html><html><body>' +
     '<friendo-comments post-id="p1"></friendo-comments>' +
-    '<friendo-reactions target-type="post" target-id="p1"></friendo-reactions>' +
+    '<friendo-reactions post-id="p1"></friendo-reactions>' +
     '<script src="/friendo.js" defer></script></body></html>'
 );
 

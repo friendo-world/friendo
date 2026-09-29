@@ -87,7 +87,7 @@ func TestFeatureSwitches(t *testing.T) {
 			t.Fatalf("%s %s while off = %d %v, want 403 with off:true", c.method, c.path, code, out)
 		}
 	}
-	if code, _ := call("GET", "/_/api/reactions?target_type=post&target_id=nope", ""); code != 200 {
+	if code, _ := call("GET", "/_/api/reactions?post_id=nope", ""); code != 200 {
 		t.Fatalf("reactions should stay on, got %d", code)
 	}
 
@@ -98,11 +98,11 @@ func TestFeatureSwitches(t *testing.T) {
 	}
 
 	// Narrow the built-in collections.
-	code, out = call("PUT", "/_/api/settings", `{"content":{"default_collections":["blog","nonsense"]}}`)
+	code, out = call("PUT", "/_/api/settings", `{"default_collections":["blog","nonsense"]}`)
 	if code != 200 {
 		t.Fatalf("PUT default_collections = %d", code)
 	}
-	if got := out["content"].(map[string]any)["default_collections"]; len(got.([]any)) != 1 || got.([]any)[0] != "blog" {
+	if got := out["default_collections"]; len(got.([]any)) != 1 || got.([]any)[0] != "blog" {
 		t.Fatalf("default_collections = %v, want [blog]", got)
 	}
 	_, out = call("GET", "/_/api/collections", "")
@@ -127,14 +127,14 @@ func TestFeatureSwitchFrozenByToml(t *testing.T) {
 		}
 		return false
 	}
-	if !has("features.comments") || !has("content.default_collections") {
-		t.Fatalf("managed = %v, want features.comments and content.default_collections", managed)
+	if !has("features.comments") || !has("default_collections") {
+		t.Fatalf("managed = %v, want features.comments and default_collections", managed)
 	}
-	code, out := call("PUT", "/_/api/settings", `{"features":{"comments":true},"content":{"default_collections":["blog"]}}`)
+	code, out := call("PUT", "/_/api/settings", `{"features":{"comments":true},"default_collections":["blog"]}`)
 	if code != 200 || out["features"].(map[string]any)["comments"] != false {
 		t.Fatalf("a frozen switch should not flip: %d %v", code, out)
 	}
-	if got := out["content"].(map[string]any)["default_collections"]; got.([]any)[0] != "pages" {
+	if got := out["default_collections"]; got.([]any)[0] != "pages" {
 		t.Fatalf("frozen default_collections = %v", got)
 	}
 	if code, _ := call("GET", "/_/api/posts/nope/comments", ""); code != 403 {

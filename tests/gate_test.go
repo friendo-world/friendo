@@ -224,10 +224,10 @@ func TestMembersOnlyPages(t *testing.T) {
 	expect(t, "member after logout", status, 401, body, "login member signin")
 
 	// With no login.html, the built-in sign-in page stands in — with
-	// <friendo-auth reload> so the page comes back once you're signed in.
+	// <friendo-signin reload> so the page comes back once you're signed in.
 	os.Remove(filepath.Join(siteDir, "pages", "login.html"))
 	status, body, _ = visitor.get("/members")
-	expect(t, "built-in login page", status, 401, body, "<friendo-auth reload>")
+	expect(t, "built-in login page", status, 401, body, "<friendo-signin reload>")
 	if !strings.Contains(body, "Sign in to see this page") {
 		t.Errorf("built-in page message missing: %q", body)
 	}

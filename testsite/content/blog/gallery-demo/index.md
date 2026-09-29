@@ -14,4 +14,4 @@ sitting right next to it. Friendo imports those sibling images into the post's
 gallery automatically, so the template can render them with no upload step and no
 custom JavaScript.
 
-Scroll down to see the two photos, rendered straight from `record.gallery`.
+Scroll down to see the two photos, rendered straight from `post.gallery`.

@@ -114,6 +114,12 @@ func Import(siteDir string, db *data.DB) (*Result, error) {
 	for _, path := range files {
 		rel, _ := filepath.Rel(contentDir, path)
 		collection, slug := routeFor(rel)
+		if collection == "profiles" {
+			// pages/profiles/[slug].html renders member profiles from the authors
+			// table, so a content/profiles/ folder would never route.
+			res.warn("%s: \"profiles\" is reserved for member profiles (see the docs on profiles); skipped", rel)
+			continue
+		}
 
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -140,9 +146,8 @@ func Import(siteDir string, db *data.DB) (*Result, error) {
 		// becomes a real location row, not opaque `data` JSON.
 		lat, lng, label, hasLocation := parseLocation(meta, title)
 
-		// A `when` (plus ends/timezone/repeats/except) makes the post an event: the
-		// reserved keys are lifted into a real events row the same way `location`
-		// becomes a pin — see data.ParseWhen for the spellings.
+		// A `when` makes the post an event: it is lifted into a real events row
+		// the same way `location` becomes one — see data.ParseWhen for the spellings.
 		ev, whenWarnings := data.LiftWhen(meta, db.Location)
 		for _, w := range whenWarnings {
 			res.warn("%s: %s", rel, w)

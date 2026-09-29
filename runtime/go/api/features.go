@@ -41,8 +41,8 @@ func featuresMap(db *data.DB) map[string]bool {
 // --- Default collections ---
 
 // settingDefaultCollections holds which of the built-in collections a site with
-// no declared [content] types shows, as a comma-separated list.
-const settingDefaultCollections = "content.default_collections"
+// no declared [content] collections shows, as a comma-separated list.
+const settingDefaultCollections = "default_collections"
 
 // defaultCollectionsFor reads the site's chosen defaults (all three unless set).
 func defaultCollectionsFor(db *data.DB) []string {

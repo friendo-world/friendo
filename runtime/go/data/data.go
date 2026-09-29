@@ -71,7 +71,13 @@ func Open(siteDir string) (*DB, error) {
 	if tzErr != nil {
 		fmt.Fprintln(os.Stderr, "Warning:", tzErr)
 	}
-	return &DB{Conn: conn, SiteID: "local", Location: loc}, nil
+	db := &DB{Conn: conn, SiteID: "local", Location: loc}
+	// Every profile has an address (/profiles/<slug>); a database from before
+	// 0016 gets them derived from names the first time the new binary opens it.
+	if err := db.EnsureAuthorSlugs(); err != nil {
+		fmt.Fprintln(os.Stderr, "Warning: profile addresses:", err)
+	}
+	return db, nil
 }
 
 type migrationDef struct {
@@ -206,7 +212,7 @@ func (db *DB) QueryCollection(collection string) ([]map[string]any, error) {
 			"published_at": publishedAt,
 			"created":      created,
 			"updated":      updated,
-			"data":         decodeData(data),
+			"fields":       decodeData(data),
 		})
 	}
 	return results, rows.Err()
@@ -225,7 +231,7 @@ func scanCollectionRows(rows *sql.Rows) ([]map[string]any, error) {
 		results = append(results, map[string]any{
 			"id": id, "slug": slug, "title": title, "body": body,
 			"author_id": authorID, "status": status, "published_at": publishedAt,
-			"created": created, "updated": updated, "data": decodeData(data),
+			"created": created, "updated": updated, "fields": decodeData(data),
 		})
 	}
 	return results, rows.Err()
@@ -340,7 +346,7 @@ func (db *DB) QueryCollectionByField(collection, fieldName, value string) (map[s
 		"published_at": publishedAt,
 		"created":      created,
 		"updated":      updated,
-		"data":         decodeData(data),
+		"fields":       decodeData(data),
 	}, nil
 }
 
@@ -419,7 +425,7 @@ func (db *DB) GetRecordByID(id string) (map[string]any, error) {
 		"published_at": publishedAt,
 		"created":      created,
 		"updated":      updated,
-		"data":         decodeData(data),
+		"fields":       decodeData(data),
 	}, nil
 }
 
@@ -632,7 +638,7 @@ func (db *DB) ListCommentsByStatus(status string) ([]map[string]any, error) {
 }
 
 // ListCommentsByStatusForOwner returns comments with the given status that sit
-// on posts the account authored — the moderation queue for comment.moderate.own.
+// on posts the account authored — the review queue for review.own.
 func (db *DB) ListCommentsByStatusForOwner(status, userID string) ([]map[string]any, error) {
 	q := commentSelect + `
 		JOIN posts p ON p.id = c.post_id
@@ -1436,9 +1442,9 @@ func (db *DB) createDefaultAuthor(userID, name, email string) (string, error) {
 	id := GenerateID()
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	_, err := db.Conn.Exec(
-		`INSERT INTO authors (id, site_id, user_id, name, email, role, created, updated)
-		 VALUES (?, ?, ?, ?, ?, 'member', ?, ?)`,
-		id, db.SiteID, userID, name, email, now, now,
+		`INSERT INTO authors (id, site_id, user_id, name, email, role, slug, created, updated)
+		 VALUES (?, ?, ?, ?, ?, 'member', ?, ?, ?)`,
+		id, db.SiteID, userID, name, email, db.uniqueSlug(Slugify(name), ""), now, now,
 	)
 	if err != nil {
 		return "", err
@@ -1449,7 +1455,7 @@ func (db *DB) createDefaultAuthor(userID, name, email string) (string, error) {
 // ListAuthors returns every author profile for the site (for sync with users).
 func (db *DB) ListAuthors() ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
-		`SELECT id, user_id, name, email, avatar, role, created, updated FROM authors WHERE site_id = ? ORDER BY created`,
+		`SELECT id, user_id, name, email, avatar, role, slug, bio, data, created, updated FROM authors WHERE site_id = ? ORDER BY created`,
 		db.SiteID,
 	)
 	if err != nil {
@@ -1458,20 +1464,25 @@ func (db *DB) ListAuthors() ([]map[string]any, error) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, userID, name, email, avatar, role, created, updated string
-		if err := rows.Scan(&id, &userID, &name, &email, &avatar, &role, &created, &updated); err != nil {
+		var id, userID, name, email, avatar, role, slug, bio, dataJSON, created, updated string
+		if err := rows.Scan(&id, &userID, &name, &email, &avatar, &role, &slug, &bio, &dataJSON, &created, &updated); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
 			"id": id, "user_id": userID, "name": name, "email": email,
-			"avatar": avatar, "role": role, "created": created, "updated": updated,
+			"avatar": avatar, "role": role, "slug": slug, "bio": bio, "fields": decodeData(dataJSON),
+			"created": created, "updated": updated,
 		})
 	}
 	return out, rows.Err()
 }
 
-// UpsertAuthor inserts or updates an author profile by id (for sync).
-func (db *DB) UpsertAuthor(id, userID, name, email, avatar, role, created string) error {
+// UpsertAuthor inserts or updates an author profile by id (for sync). The
+// incoming slug is kept when no other profile here holds it (or it's empty, or an
+// older CLI sent none — then one is derived from the name); a clash gets a
+// numbered variant, so a push never fails on an address. dataJSON is the
+// profile's declared fields as JSON ("" reads as {}).
+func (db *DB) UpsertAuthor(id, userID, name, email, avatar, role, slug, bio, dataJSON, created string) error {
 	if id == "" {
 		return nil
 	}
@@ -1482,21 +1493,29 @@ func (db *DB) UpsertAuthor(id, userID, name, email, avatar, role, created string
 	if role == "" {
 		role = "member"
 	}
+	if slug = Slugify(slug); slug == "" {
+		slug = Slugify(name)
+	}
+	slug = db.uniqueSlug(slug, id)
+	if strings.TrimSpace(dataJSON) == "" {
+		dataJSON = "{}"
+	}
 	_, err := db.Conn.Exec(
-		`INSERT INTO authors (id, site_id, user_id, name, email, avatar, role, created, updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO authors (id, site_id, user_id, name, email, avatar, role, slug, bio, data, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   user_id=excluded.user_id, name=excluded.name, email=excluded.email,
-		   avatar=excluded.avatar, role=excluded.role, updated=excluded.updated`,
-		id, db.SiteID, userID, name, email, avatar, role, created, now,
+		   avatar=excluded.avatar, role=excluded.role, slug=excluded.slug, bio=excluded.bio,
+		   data=excluded.data, updated=excluded.updated`,
+		id, db.SiteID, userID, name, email, avatar, role, slug, bio, dataJSON, created, now,
 	)
 	return err
 }
 
-// DefaultAuthorID returns the account's default persona id, or "". It honors the
+// DefaultAuthorID returns the account's default profile id, or "". It honors the
 // account's chosen default (users.default_author_id) when that still points at one
 // of its profiles, and otherwise falls back to the earliest profile — so a member
-// who has picked a persona has all their comments/messages attributed to it.
+// who has picked a profile has all their comments/messages attributed to it.
 func (db *DB) DefaultAuthorID(userID string) string {
 	var chosen string
 	db.Conn.QueryRow(
@@ -1523,12 +1542,12 @@ func (db *DB) authorBelongsTo(authorID, userID string) bool {
 	return err == nil
 }
 
-// ListPersonas returns an account's author profiles (personas), earliest first,
+// ListProfilesFor returns an account's author profiles (profiles), earliest first,
 // each flagged with whether it's the current default (the one attribution uses).
-func (db *DB) ListPersonas(userID string) ([]map[string]any, error) {
+func (db *DB) ListProfilesFor(userID string) ([]map[string]any, error) {
 	def := db.DefaultAuthorID(userID)
 	rows, err := db.Conn.Query(
-		`SELECT id, name, avatar FROM authors WHERE site_id = ? AND user_id = ? ORDER BY created`,
+		`SELECT id, name, avatar, slug, bio, data FROM authors WHERE site_id = ? AND user_id = ? ORDER BY created`,
 		db.SiteID, userID,
 	)
 	if err != nil {
@@ -1537,33 +1556,37 @@ func (db *DB) ListPersonas(userID string) ([]map[string]any, error) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, name, avatar string
-		if err := rows.Scan(&id, &name, &avatar); err != nil {
+		var id, name, avatar, slug, bio, dataJSON string
+		if err := rows.Scan(&id, &name, &avatar, &slug, &bio, &dataJSON); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{"id": id, "name": name, "avatar": avatar, "is_default": id == def})
+		out = append(out, map[string]any{
+			"id": id, "name": name, "avatar": avatar, "slug": slug, "bio": bio, "fields": decodeData(dataJSON),
+			"url": "/profiles/" + slug, "is_default": id == def,
+		})
 	}
 	return out, rows.Err()
 }
 
-// CreatePersona adds a new author profile (persona) to an account and returns it.
-func (db *DB) CreatePersona(userID, name, avatar string) (map[string]any, error) {
+// CreateProfile adds a new author profile (profile) to an account and returns it.
+func (db *DB) CreateProfile(userID, name, avatar string) (map[string]any, error) {
 	id := GenerateID()
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	slug := db.uniqueSlug(Slugify(name), "")
 	_, err := db.Conn.Exec(
-		`INSERT INTO authors (id, site_id, user_id, name, avatar, email, role, created, updated)
-		 VALUES (?, ?, ?, ?, ?, '', 'member', ?, ?)`,
-		id, db.SiteID, userID, name, avatar, now, now,
+		`INSERT INTO authors (id, site_id, user_id, name, avatar, email, role, slug, created, updated)
+		 VALUES (?, ?, ?, ?, ?, '', 'member', ?, ?, ?)`,
+		id, db.SiteID, userID, name, avatar, slug, now, now,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"id": id, "name": name, "avatar": avatar, "is_default": false}, nil
+	return map[string]any{"id": id, "name": name, "avatar": avatar, "slug": slug, "bio": "", "fields": map[string]any{}, "url": "/profiles/" + slug, "is_default": false}, nil
 }
 
-// SetDefaultPersona points an account's default at one of its own profiles. Returns
-// sql.ErrNoRows if the persona doesn't belong to the account.
-func (db *DB) SetDefaultPersona(userID, authorID string) error {
+// SetDefaultProfile points an account's default at one of its own profiles. Returns
+// sql.ErrNoRows if the profile doesn't belong to the account.
+func (db *DB) SetDefaultProfile(userID, authorID string) error {
 	if !db.authorBelongsTo(authorID, userID) {
 		return sql.ErrNoRows
 	}
@@ -1590,7 +1613,8 @@ func (db *DB) GetUserByEmail(email string) (*User, error) {
 }
 
 // CreateMember creates a passwordless OTP account with the given role (the
-// site's access.default_role for self-serve signups) plus a default profile.
+// site's signups_are_contributors setting decides it for self-serve signups)
+// plus a default profile.
 func (db *DB) CreateMember(email, name, role string) (*User, error) {
 	if role == "" {
 		role = "member"
@@ -1956,28 +1980,37 @@ func (db *DB) RateLimitClear(bucket string) {
 type Capability string
 
 const (
-	CapContentCreate      Capability = "content.create"
-	CapContentEditOwn     Capability = "content.edit.own"
-	CapContentEditAny     Capability = "content.edit.any"
-	CapContentPublish     Capability = "content.publish"
-	CapCommentModerateOwn Capability = "comment.moderate.own"
-	CapCommentModerateAny Capability = "comment.moderate.any"
-	CapUserManage         Capability = "user.manage"
-	CapSiteConfigure      Capability = "site.configure"
-	CapSiteOwn            Capability = "site.own"
+	CapContentCreate  Capability = "content.create"
+	CapContentEditOwn Capability = "content.edit.own"
+	CapContentEditAny Capability = "content.edit.any"
+	CapContentPublish Capability = "content.publish"
+	// review.own: approve or reject comments on the posts you wrote.
+	// review.any: approve or reject any comment (and moderate every group).
+	// review.posts: approve or reject a post waiting for review, without editing it.
+	CapReviewOwn     Capability = "review.own"
+	CapReviewAny     Capability = "review.any"
+	CapReviewPosts   Capability = "review.posts"
+	CapUserManage    Capability = "user.manage"
+	CapSiteConfigure Capability = "site.configure"
+	CapSiteOwn       Capability = "site.own"
 )
 
 // roleCapabilities maps each built-in role to the capabilities it holds. Built as
-// supersets: each role adds to the one below it.
+// supersets: each role adds to the one below it. A site is one big group: admins
+// run it, moderators keep it tidy (they approve and reject but don't edit what
+// others wrote), editors write anywhere, contributors write their own. "member"
+// is everyone with an account and no extra role.
 var roleCapabilities = func() map[string]map[Capability]bool {
 	member := map[Capability]bool{}
-	contributor := merge(member, CapContentCreate, CapContentEditOwn, CapCommentModerateOwn)
-	editor := merge(contributor, CapContentEditAny, CapContentPublish, CapCommentModerateAny)
+	contributor := merge(member, CapContentCreate, CapContentEditOwn, CapReviewOwn)
+	moderator := merge(contributor, CapReviewAny, CapReviewPosts)
+	editor := merge(moderator, CapContentEditAny, CapContentPublish)
 	admin := merge(editor, CapUserManage, CapSiteConfigure)
 	owner := merge(admin, CapSiteOwn)
 	return map[string]map[Capability]bool{
 		"member":      member,
 		"contributor": contributor,
+		"moderator":   moderator,
 		"editor":      editor,
 		"admin":       admin,
 		"owner":       owner,
@@ -2016,10 +2049,12 @@ func ValidRole(role string) bool {
 func RoleRank(role string) int {
 	switch role {
 	case "owner":
-		return 5
+		return 6
 	case "admin":
-		return 4
+		return 5
 	case "editor":
+		return 4
+	case "moderator":
 		return 3
 	case "contributor":
 		return 2
@@ -2065,7 +2100,7 @@ func (db *DB) UserOwnsPost(userID, postID string) bool {
 }
 
 // UserOwnsCommentPost reports whether the comment sits on a post the account
-// authored — the predicate behind comment.moderate.own.
+// authored — the predicate behind review.own.
 func (db *DB) UserOwnsCommentPost(userID, commentID string) bool {
 	var one int
 	err := db.Conn.QueryRow(
@@ -2101,7 +2136,7 @@ func (db *DB) UserOwnsComment(userID, commentID string) bool {
 // empty. Existing data stays; turning a feature back on shows it again. Stored
 // as site settings ("features.comments"), so friendo.toml's [settings] can
 // freeze them like any other setting.
-var Features = []string{"comments", "reactions", "polls", "rsvp", "locations", "chats"}
+var Features = []string{"comments", "reactions", "polls", "rsvp", "locations", "chats", "follows", "groups"}
 
 // FeatureLabel is how a feature is named to people.
 var FeatureLabel = map[string]string{
@@ -2111,6 +2146,8 @@ var FeatureLabel = map[string]string{
 	"rsvp":      "RSVPs",
 	"locations": "Map pins",
 	"chats":     "Chats",
+	"follows":   "Follows",
+	"groups":    "Groups",
 }
 
 // FeatureSetting is the settings key that holds a feature's switch.

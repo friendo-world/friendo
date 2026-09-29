@@ -6,8 +6,9 @@
     <title>{{ site.name }}</title>
 
     <!-- The Friendo community SDK. Served by the runtime at /friendo.js — it
-         defines the <friendo-auth>, <friendo-comments>, <friendo-reactions>,
-         and <friendo-poll> Web Components used below. -->
+         defines the <friendo-*> Web Components used below: auth, comments,
+         reactions, poll, chat, map, calendar, rsvp, and the social ones —
+         profile, follow, inbox, group, groups, invite. -->
     <script src="/friendo.js" defer></script>
 
     <style>
@@ -22,6 +23,8 @@
             border-bottom: 1px solid #eee; padding-bottom: 1rem; margin-bottom: 2rem; }
         header.site .brand { font-weight: 700; text-decoration: none; color: var(--ink); }
         header.site .admin { font-size: .85rem; }
+        header.site nav { display: flex; gap: .9rem; font-size: .9rem; flex-wrap: wrap; }
+        header.site nav .badge { background: #d33; color: #fff; border-radius: 999px; padding: 0 .45em; font-size: .75rem; }
         article h1, article h2 { line-height: 1.2; }
         article .cover { width: 100%; border-radius: 12px; margin: 1rem 0; display: block; }
         .post-meta { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .5rem 0 1.25rem; }
@@ -39,7 +42,7 @@
         friendo-comments::part(author) { color: var(--accent); font-weight: 600; }
         friendo-comments::part(input) { border-radius: 10px; border: 1px solid #d7d7e2; }
         friendo-comments::part(submit),
-        friendo-auth::part(button) {
+        friendo-signin::part(button) {
             background: var(--accent); color: #fff; border: 0;
             border-radius: 999px; padding: .5em 1.1em;
         }
@@ -51,7 +54,13 @@
 <body>
     <header class="site">
         <a class="brand" href="/">{{ site.name }}</a>
-        <a class="admin" href="/_/">Admin &rarr;</a>
+        <nav>
+            <a href="/events/">Events</a>
+            <a href="/groups/">Groups</a>
+            <a href="/profiles/">People</a>
+            {% if user %}<a href="/inbox">Inbox{% if user.unread %} <span class="badge">{{ user.unread }}</span>{% endif %}</a>{% endif %}
+            <a class="admin" href="/_/">Admin &rarr;</a>
+        </nav>
     </header>
 
     {% block content %}{% endblock %}

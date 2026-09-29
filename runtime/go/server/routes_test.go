@@ -26,7 +26,7 @@ func TestRouteTableReload(t *testing.T) {
 		t.Fatal("initial table wrong")
 	}
 	os.MkdirAll(filepath.Join(siteDir, "pages", "docs"), 0o755)
-	os.WriteFile(filepath.Join(siteDir, "pages", "docs", "[slug].html"), []byte("{{ record.title }}"), 0o644)
+	os.WriteFile(filepath.Join(siteDir, "pages", "docs", "[slug].html"), []byte("{{ post.title }}"), 0o644)
 	if site.HasPage("/docs/anything") {
 		t.Fatal("a new dynamic page should not be routed until Reload")
 	}

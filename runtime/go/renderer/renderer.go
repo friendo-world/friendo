@@ -3,6 +3,7 @@ package renderer
 import (
 	"bytes"
 	"fmt"
+	"github.com/friendo-world/friendo/runtime/go/data"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,32 @@ func RegisterFilters() {
 	pongo2.RegisterFilter("resize", filterResize)
 	pongo2.RegisterFilter("markdown", filterMarkdown)
 	pongo2.RegisterFilter("sort_by", filterSortBy)
+	pongo2.RegisterFilter("by_author", filterByAuthor)
+	pongo2.RegisterFilter("by_following", filterByFollowing)
+	pongo2.RegisterFilter("in_group", filterInGroup)
+}
+
+// by_author: keeps the records one profile wrote, by its address (slug) or id.
+// Records carry record.author (attached in the page context), so this needs no
+// lookup. Usage: {% for p in collections.blog|by_author:"pat" %}
+func filterByAuthor(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
+	list, ok := in.Interface().([]map[string]any)
+	if !ok {
+		return in, nil
+	}
+	who := strings.TrimSpace(param.String())
+	out := []map[string]any{}
+	if who == "" {
+		return pongo2.AsValue(out), nil
+	}
+	for _, r := range list {
+		slug, _ := nestedValue(r, "author.slug").(string)
+		id, _ := r["author_id"].(string)
+		if slug == who || id == who {
+			out = append(out, r)
+		}
+	}
+	return pongo2.AsValue(out), nil
 }
 
 // sort_by: stably sorts a list of records by a (possibly dotted) key, numerically
@@ -53,15 +80,19 @@ func filterSortBy(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2
 	return pongo2.AsValue(sorted), nil
 }
 
-// nestedValue walks a dotted key path (e.g. "data.weight") through nested maps.
+// nestedValue walks a dotted key path (e.g. "fields.weight", "when.start")
+// through nested maps.
 func nestedValue(m map[string]any, key string) any {
 	var cur any = m
 	for _, part := range strings.Split(key, ".") {
-		mm, ok := cur.(map[string]any)
-		if !ok {
+		switch mm := cur.(type) {
+		case map[string]any:
+			cur = mm[part]
+		case data.When:
+			cur = mm[part]
+		default:
 			return nil
 		}
-		cur = mm[part]
 	}
 	return cur
 }

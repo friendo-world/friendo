@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { api, type AccessSettings, type Features, type Settings, type SettingsPatch } from "../api";
+import { api, type Features, type ProfileVisibility, type Settings, type SettingValues, type SettingsPatch } from "../api";
 import { useAuth } from "../auth";
 import { RoleBadge } from "../components/role-badge";
 import { Toggle } from "../components/ui";
@@ -14,35 +14,40 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-// Presets set the access policy in one click. They're just bundles of the same
-// three settings a site owner can also flip individually below.
-type AccessPreset = Pick<AccessSettings, "default_role" | "signups_enabled" | "require_approval">;
-const PRESETS: { key: string; label: string; hint: string; access: AccessPreset }[] = [
+// Presets set the membership policy in one click. They're just bundles of the
+// same three settings a site owner can also flip individually below — plus who
+// sees profiles (a personal site keeps them to members; a community or blog shows
+// its people to everyone).
+type Preset = Pick<SettingValues, "signups_are_contributors" | "open_signups" | "posts_need_review">;
+const PRESETS: { key: string; label: string; hint: string; values: Preset; profiles: ProfileVisibility }[] = [
   {
     key: "personal",
     label: "Personal",
-    hint: "Just you (and invited editors). No public sign-ups.",
-    access: { default_role: "member", signups_enabled: false, require_approval: false },
+    hint: "Just you (and people you add). No public sign-ups.",
+    values: { signups_are_contributors: false, open_signups: false, posts_need_review: false },
+    profiles: "members",
   },
   {
     key: "community",
     label: "Community",
-    hint: "Anyone can join and post their own; admins moderate.",
-    access: { default_role: "contributor", signups_enabled: true, require_approval: false },
+    hint: "Anyone can join and post their own; moderators keep it tidy.",
+    values: { signups_are_contributors: true, open_signups: true, posts_need_review: false },
+    profiles: "public",
   },
   {
     key: "blog",
     label: "Blog",
     hint: "Readers can comment; contributors write; editors publish.",
-    access: { default_role: "member", signups_enabled: true, require_approval: true },
+    values: { signups_are_contributors: false, open_signups: true, posts_need_review: true },
+    profiles: "public",
   },
 ];
 
-function matchesPreset(a: AccessSettings, p: AccessPreset) {
+function matchesPreset(s: SettingValues, p: Preset) {
   return (
-    a.default_role === p.default_role &&
-    a.signups_enabled === p.signups_enabled &&
-    a.require_approval === p.require_approval
+    s.signups_are_contributors === p.signups_are_contributors &&
+    s.open_signups === p.open_signups &&
+    s.posts_need_review === p.posts_need_review
   );
 }
 
@@ -71,30 +76,21 @@ export function SettingsView() {
     }
   }
 
-  const activePreset = s ? PRESETS.find((p) => matchesPreset(s.access, p.access))?.key : undefined;
+  const activePreset = s ? PRESETS.find((p) => matchesPreset(s, p.values))?.key : undefined;
 
-  // DB keys that friendo.toml's [settings] block has frozen — their controls render
-  // read-only. (These are the internal setting keys the API reports in `managed`.)
-  const MK = {
-    autoApprove: "moderation.auto_approve",
-    defaultRole: "access.default_role",
-    signups: "access.signups_enabled",
-    approval: "content.require_approval",
-    submissions: "content.accept_submissions",
-    passwordLogin: "access.password_login",
-    defaultCollections: "content.default_collections",
-  };
   const FEATURES: { key: keyof Features; label: string; hint: string }[] = [
-    { key: "comments", label: "Comments", hint: "Members comment on posts: <friendo-comments>, record.comments, and the moderation queue." },
-    { key: "reactions", label: "Reactions", hint: "Emoji reactions on posts and comments: <friendo-reactions>, record.reactions." },
-    { key: "polls", label: "Polls", hint: "Polls in a post's front matter: <friendo-poll>, record.poll." },
-    { key: "rsvp", label: "RSVPs", hint: "Going / maybe / can't go on events: <friendo-rsvp>, record.rsvps, and the Attendees list." },
-    { key: "locations", label: "Map pins", hint: "Pins on posts: <friendo-map>, record.location, and the editor's Where section." },
+    { key: "comments", label: "Comments", hint: "Members comment on posts: <friendo-comments>, post.comments, and the review queue." },
+    { key: "reactions", label: "Reactions", hint: "Emoji reactions on posts and comments: <friendo-reactions>, post.reactions." },
+    { key: "polls", label: "Polls", hint: "Polls in a post's front matter: <friendo-poll>, post.poll." },
+    { key: "rsvp", label: "RSVPs", hint: "Going / maybe / can't go on events: <friendo-rsvp>, event.rsvps, and the RSVPs list." },
+    { key: "locations", label: "Locations", hint: "A place on a post: <friendo-map>, post.location, and the editor's Location section." },
     { key: "chats", label: "Chats", hint: "Realtime chat and feeds: <friendo-chat>." },
+    { key: "follows", label: "Follows", hint: "Members follow each other: <friendo-follow>, user.following, profile.followers, and the by_following filter." },
+    { key: "groups", label: "Groups", hint: "Groups with members, as posts in the groups collection: <friendo-group>, <friendo-groups>, user.groups, group.members, and the in_group filter." },
   ];
-  const DEFAULTS = ["blog", "pages", "posts"];
+  const DEFAULTS = ["blog", "pages"];
   const isManaged = (k: string) => s?.managed?.includes(k) ?? false;
-  const accessManaged = isManaged(MK.defaultRole) || isManaged(MK.signups) || isManaged(MK.approval);
+  const presetsManaged = isManaged("signups_are_contributors") || isManaged("open_signups") || isManaged("posts_need_review");
   const managedHint = (base: string, k: string) => (isManaged(k) ? base + " · Set in friendo.toml." : base);
 
   return (
@@ -113,22 +109,22 @@ export function SettingsView() {
         <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Stat label="Name" value={s ? s.site.name : "…"} />
           <Stat label="Collections" value={s ? s.collections : "…"} />
-          <Stat label="Users" value={s ? s.users : "…"} />
+          <Stat label="Members" value={s ? s.users : "…"} />
         </dl>
         <p class="mt-4 text-xs text-dim">
-          Site name and content types are configured in <code class="bg-tint px-1.5 py-0.5">friendo.toml</code>.
+          Site name and collections are configured in <code class="bg-tint px-1.5 py-0.5">friendo.toml</code>.
         </p>
       </div>
 
       <h2 class="mb-3 text-sm font-bold text-dim">Content</h2>
       <div class="mb-8 bg-white p-6 border border-ink">
-        {s && !s.content.types_declared && (
+        {s && !s.collections_declared && (
           <div class="mb-6 border-b border-ink pb-6" data-default-collections>
             <p class="text-sm font-bold">Built-in collections</p>
             <p class="mb-2 text-xs text-dim">
               {managedHint(
-                "Shown in the content sidebar while friendo.toml lists no [content] types. A collection you start yourself appears regardless.",
-                MK.defaultCollections
+                "Shown in the content sidebar while friendo.toml lists no [content] collections. A collection you start yourself appears regardless.",
+                "default_collections"
               )}
             </p>
             <div class="flex flex-wrap gap-4">
@@ -137,12 +133,12 @@ export function SettingsView() {
                   <input
                     type="checkbox"
                     name={`default-${name}`}
-                    checked={s.content.default_collections.includes(name)}
-                    disabled={saving || isManaged(MK.defaultCollections)}
+                    checked={s.default_collections.includes(name)}
+                    disabled={saving || isManaged("default_collections")}
                     onChange={(e) => {
                       const on = (e.target as HTMLInputElement).checked;
-                      const next = DEFAULTS.filter((n) => (n === name ? on : s.content.default_collections.includes(n)));
-                      patch({ content: { default_collections: next } });
+                      const next = DEFAULTS.filter((n) => (n === name ? on : s.default_collections.includes(n)));
+                      patch({ default_collections: next });
                     }}
                   />
                   {name}
@@ -158,7 +154,7 @@ export function SettingsView() {
       <div class="mb-8 bg-white p-6 border border-ink">
         <p class="mb-4 text-xs text-dim">
           Turn a community feature off and the site refuses it: its API says no, its <code>&lt;friendo-*&gt;</code> tag
-          shows nothing, and a page's <code>record.…</code> for it is empty. What people already wrote is kept for when
+          shows nothing, and a page's <code>post.…</code> for it is empty. What people already wrote is kept for when
           it comes back.
         </p>
         <div class="space-y-4" data-features>
@@ -176,16 +172,16 @@ export function SettingsView() {
         </div>
       </div>
 
-      <h2 class="mb-3 text-sm font-bold text-dim">Access &amp; roles</h2>
+      <h2 class="mb-3 text-sm font-bold text-dim">Members &amp; roles</h2>
       <div class="mb-8 bg-white p-6 border border-ink">
-        <p class="mb-3 text-xs text-dim">Pick a preset, or fine-tune the settings below.</p>
+        <p class="mb-3 text-xs text-dim">Everyone with an account is a member; roles add powers. Pick a preset, or fine-tune the settings below.</p>
         <div class="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-3">
           {PRESETS.map((p) => (
             <button
               key={p.key}
               type="button"
-              disabled={!s || saving || accessManaged}
-              onClick={() => patch({ access: p.access })}
+              disabled={!s || saving || presetsManaged}
+              onClick={() => patch({ ...p.values, ...(isManaged("profile_visibility") ? {} : { profile_visibility: p.profiles }) })}
               class={
                 " border p-3 text-left " +
                 (activePreset === p.key ? "border-link bg-tint" : "border-ink hover:bg-tint")
@@ -198,51 +194,69 @@ export function SettingsView() {
         </div>
 
         <div class="space-y-4 border-t border-ink pt-4">
+          {s && (
+            <Toggle
+              label="Anyone can sign up"
+              hint={managedHint("When off, only people an admin adds have accounts.", "open_signups")}
+              on={s.open_signups}
+              disabled={saving || isManaged("open_signups")}
+              onToggle={() => patch({ open_signups: !s.open_signups })}
+            />
+          )}
+          {s && (
+            <Toggle
+              label="New members start as contributors"
+              hint={managedHint("A contributor writes their own posts. Off, a new member can comment, react, vote and RSVP.", "signups_are_contributors")}
+              on={s.signups_are_contributors}
+              disabled={saving || isManaged("signups_are_contributors")}
+              onToggle={() => patch({ signups_are_contributors: !s.signups_are_contributors })}
+            />
+          )}
+          {s && (
+            <Toggle
+              label="Contributors' posts wait for review"
+              hint={managedHint("When on, a contributor's post waits in the review queue until a moderator approves it.", "posts_need_review")}
+              on={s.posts_need_review}
+              disabled={saving || isManaged("posts_need_review")}
+              onToggle={() => patch({ posts_need_review: !s.posts_need_review })}
+            />
+          )}
+          {s && (
+            <Toggle
+              label="Members can post"
+              hint={managedHint("When on, any member can post from a page's <friendo-form>. Their posts always wait in the review queue.", "members_can_post")}
+              on={s.members_can_post}
+              disabled={saving || isManaged("members_can_post")}
+              onToggle={() => patch({ members_can_post: !s.members_can_post })}
+            />
+          )}
+          {s && s.features.groups && (
+            <Toggle
+              label="Members can start groups"
+              hint={managedHint("When on, any member can start a group and is its admin. Off, only contributors and up can — from the admin or a page's <friendo-groups>.", "members_can_start_groups")}
+              on={s.members_can_start_groups}
+              disabled={saving || isManaged("members_can_start_groups")}
+              onToggle={() => patch({ members_can_start_groups: !s.members_can_start_groups })}
+            />
+          )}
           <label class="flex items-center justify-between gap-4">
             <span>
-              <span class="text-sm font-bold">New members can post</span>
+              <span class="text-sm font-bold">Profiles are visible to</span>
               <span class="mt-1 block text-xs text-dim">
-                {managedHint("What a visitor becomes when they sign up.", MK.defaultRole)}
+                {managedHint("Every profile has a page at /profiles/<slug> (when your site has pages/profiles/[slug].html) and shows in the profiles API.", "profile_visibility")}
               </span>
             </span>
             <select
-              disabled={!s || saving || isManaged(MK.defaultRole)}
-              value={s?.access.default_role}
-              onChange={(e) => patch({ access: { default_role: (e.target as HTMLSelectElement).value as AccessSettings["default_role"] } })}
+              name="profile_visibility"
+              disabled={!s || saving || isManaged("profile_visibility")}
+              value={s?.profile_visibility ?? "members"}
+              onChange={(e) => patch({ profile_visibility: (e.target as HTMLSelectElement).value as ProfileVisibility })}
               class="border border-ink px-2 py-1 text-sm disabled:opacity-50"
             >
-              <option value="member">Member — comment &amp; react only</option>
-              <option value="contributor">Contributor — can post their own</option>
+              <option value="members">Members</option>
+              <option value="public">Everyone</option>
             </select>
           </label>
-
-          {s && (
-            <Toggle
-              label="Allow sign-ups"
-              hint={managedHint("When off, only invited accounts can join.", MK.signups)}
-              on={s.access.signups_enabled}
-              disabled={saving || isManaged(MK.signups)}
-              onToggle={() => patch({ access: { signups_enabled: !s.access.signups_enabled } })}
-            />
-          )}
-          {s && (
-            <Toggle
-              label="Posts need approval"
-              hint={managedHint("When on, posts by contributors wait as drafts until an editor publishes them.", MK.approval)}
-              on={s.access.require_approval}
-              disabled={saving || isManaged(MK.approval)}
-              onToggle={() => patch({ access: { require_approval: !s.access.require_approval } })}
-            />
-          )}
-          {s && (
-            <Toggle
-              label="Members can submit posts"
-              hint={managedHint("When on, signed-in members can submit posts from a page's <friendo-form>. Submissions always wait in the review queue until an editor publishes them.", MK.submissions)}
-              on={s.content.accept_submissions}
-              disabled={saving || isManaged(MK.submissions)}
-              onToggle={() => patch({ content: { accept_submissions: !s.content.accept_submissions } })}
-            />
-          )}
         </div>
       </div>
 
@@ -251,10 +265,10 @@ export function SettingsView() {
         {s && (
           <Toggle
             label="Allow signing in with a password"
-            hint={managedHint("Everyone can always sign in with a code emailed to them. Turn this on to also allow passwords — you'll be able to set one when adding or editing a user.", MK.passwordLogin)}
-            on={s.access.password_login}
-            disabled={saving || isManaged(MK.passwordLogin)}
-            onToggle={() => patch({ access: { password_login: !s.access.password_login } })}
+            hint={managedHint("Everyone can always sign in with a code emailed to them. Turn this on to also allow passwords — you'll be able to set one when adding or editing a member.", "password_login")}
+            on={s.password_login}
+            disabled={saving || isManaged("password_login")}
+            onToggle={() => patch({ password_login: !s.password_login })}
           />
         )}
       </div>
@@ -263,11 +277,11 @@ export function SettingsView() {
       <div class="mb-8 bg-white p-6 border border-ink">
         {s && (
           <Toggle
-            label="Auto-approve comments"
-            hint={managedHint("When on, new comments publish immediately. When off, they wait in the moderation queue.", MK.autoApprove)}
-            on={s.moderation.auto_approve}
-            disabled={saving || isManaged(MK.autoApprove)}
-            onToggle={() => patch({ moderation: { auto_approve: !s.moderation.auto_approve } })}
+            label="Comments wait for review"
+            hint={managedHint("When on, a new comment waits in the review queue until a moderator approves it. Off, comments show at once.", "comments_need_review")}
+            on={s.comments_need_review}
+            disabled={saving || isManaged("comments_need_review")}
+            onToggle={() => patch({ comments_need_review: !s.comments_need_review })}
           />
         )}
       </div>
@@ -285,7 +299,7 @@ export function SettingsView() {
         <div class="mt-6 border-t border-ink pt-4">
           <button onClick={logout}
             class="border border-ink px-4 py-2 text-sm font-bold text-dim hover:bg-tint">
-            Log out
+            Sign out
           </button>
         </div>
       </div>

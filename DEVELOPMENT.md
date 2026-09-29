@@ -95,8 +95,8 @@ Media offloads to R2/S3 when `FRIENDO_S3_*` is set (disk by default). See
 | Command | Description |
 |---|---|
 | `friendo init [name]` | Scaffold a new site |
-| `friendo serve` | Start the local dev server (compiles `content/`, hot reload; the admin opens without sign-in on localhost — `--require-login` to test signing in) |
-| `friendo build` | Compile the `content/` folder (markdown) into the site database |
+| `friendo serve` | Start the local dev server (reads `content/`, hot reload; the admin opens without sign-in on localhost — `--require-login` to test signing in, `--no-login` to skip it everywhere) |
+| `friendo import` | Read the `content/` folder (markdown) into the site database |
 | `friendo export` | Export as static HTML or bundle |
 | `friendo deploy [subdomain] [--network URL]` | Publish this folder to a friendo network (friendo.world by default): browser device-auth → claim the subdomain → push |
 | `friendo login [url]` | Sign in to a network in your browser (device auth; default friendo.world) |
@@ -104,10 +104,10 @@ Media offloads to R2/S3 when `FRIENDO_S3_*` is set (disk by default). See
 | `friendo logout` | Sign out — clear the cached token and site sessions |
 | `friendo open-admin [subdomain]` | Open a site's admin in the browser, signed in from your network account |
 | `friendo push` | Push templates + assets to deployed site |
-| `friendo push --data` | Also push records |
-| `friendo push --users` | Also push user accounts |
-| `friendo pull --data` | Pull records from deployed site |
-| `friendo pull --users` | Pull user accounts |
+| `friendo push --posts` | Also push posts (with events and memberships) |
+| `friendo push --users` | Also push accounts and profiles |
+| `friendo pull --posts` | Pull posts from deployed site |
+| `friendo pull --users` | Pull accounts and profiles |
 
 ### `friendo network *` — run or manage a network
 
@@ -162,8 +162,8 @@ the runtime, network mode, and API. A **CLI push/pull round-trip** lives in
 
 `npm run test:sdk` is a separate **browser check** (Playwright): it boots the Go
 runtime over a throwaway site and drives Chromium to confirm the `friendo.js` Web
-Components render — `<friendo-map>` paints its markers, the `<friendo-auth>`
-persona switcher works, `<friendo-form>` submits — and boots a throwaway
+Components render — `<friendo-map>` paints its markers, the `<friendo-signin>`
+profile switcher works, `<friendo-form>` submits — and boots a throwaway
 **network** to walk the whole self-service story (`tests/sdk-network.mjs`): sign
 in, create + home a site from `<friendo-console>`, override `/account` from the
 home site, and "Open admin" into the site. It needs network (the map loads
@@ -216,7 +216,7 @@ the runtime only serves the bundle and the REST API.
 ## Auth
 
 **Site sign-in** is a code sent to your email, for every role; passwords are
-opt-in per site (`access.password_login`, Settings → *Allow signing in with a
+opt-in per site (`password_login`, Settings → *Allow signing in with a
 password*). On localhost with no email provider, `friendo serve` opens the admin
 with no sign-in (`--require-login` to test the screens) — only for the admin UI's own calls
 (it sends `X-Friendo-Admin`); the site's `<friendo-*>` tags see a real visitor, and a
@@ -226,7 +226,7 @@ visitor to `/_/` confirms their email with a code and becomes the owner.
 
 **Network account:** the same email-code sign-in at `/account`, plus **device
 auth** for the CLI (`friendo login`, approved at `/activate`). Being an
-**operator** is a capability on an account, not a separate login. Bootstrapping:
+**operator** is a flag on an account, not a separate login. Bootstrapping:
 
 - `FRIENDO_OPERATOR_EMAIL` grants the first operator on boot; otherwise the first
   sign-in at `/account` claims it.
@@ -263,7 +263,7 @@ endpoint surface.
 - `{{ site.name }}` — from `friendo.toml`
 - `{{ request.path }}` — current URL path
 - `{{ collections.blog }}` — all posts in a collection
-- `{{ record }}` — matched record on dynamic routes (e.g. `pages/blog/[slug].html`)
+- `{{ post }}` — the post on a post's page (e.g. `pages/blog/[slug].html`); also `event` / `group` on those, `profile` on a profile page
 
 Custom filters:
 

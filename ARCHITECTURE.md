@@ -79,24 +79,24 @@ the actor's *own* rows unless they hold the `.any` variant.
 
 | Area | Endpoints | Capability |
 |---|---|---|
-| Bootstrap | `GET /me`, `POST /auth/request-code`, `POST /auth/verify-code` (the default sign-in, any role), `POST /auth/login` (password — only when `access.password_login` is on), `POST /auth/logout`, `GET /setup`, `POST /setup/request-code`, `POST /setup`, `POST /migrate` (gated on the legacy password) | public |
-| Personas | `GET/POST /me/personas`, `POST /me/personas/:id/default` — an account's author profiles + which one attribution uses | authenticated member (own personas) |
-| Content | `GET /collections`, CRUD under `/collections/:c/records` and `/records/:id`; `GET /records`, `PUT /records/:id/status` (review queue) | `content.create` (own); `content.edit.any` / `content.publish` for others' posts + publishing |
-| Community | `GET/POST /posts/:id/comments`, `PUT/DELETE /comments/:id` (moderation); `POST/DELETE /reactions`; `GET/POST /polls`, `POST /polls/:id/vote` | authenticated baseline (comment/react/vote); `comment.moderate.own/any` to moderate; `content.edit.any` to author a poll |
+| Bootstrap | `GET /me`, `POST /auth/request-code`, `POST /auth/verify-code` (the default sign-in, any role), `POST /auth/login` (password — only when `password_login` is on), `POST /auth/logout`, `GET /setup`, `POST /setup/request-code`, `POST /setup`, `POST /migrate` (gated on the legacy password) | public |
+| Profiles | `GET/POST /me/profiles`, `POST /me/profiles/:id/default` — an account's profiles + which one attribution uses | authenticated member (own profiles) |
+| Posts | `GET /collections`, CRUD under `/collections/:c/posts` and `/posts/:id`; `GET /posts?status=`, `PUT /posts/:id/status` (the review queue) | `content.create` (own); `content.edit.any` / `content.publish` for others' posts + publishing; `review.posts` to approve or reject a pending post |
+| Community | `GET/POST /posts/:id/comments`, `PUT/DELETE /comments/:id` (moderation); `POST/DELETE /reactions`; `GET/POST /polls`, `POST /polls/:id/vote` | authenticated baseline (comment/react/vote); `review.own/any` to moderate; `content.edit.any` to author a poll |
 | Chats (realtime) | `GET/POST /chats`, `DELETE /chats/:id`; `GET/POST /chats/:id/messages`, `DELETE /messages/:id`; `GET /chats/:id/stream` (SSE) | read public; post = authenticated member; chat mgmt = `site.configure` (pages also register the chats they name) |
 | Locations | `GET /locations` (public); `POST /locations`, `DELETE /locations/:id` | read public; write = `content.edit.any` |
-| Calendar | `GET /calendar.ics`, `GET /calendar.json` at the **site root** (not under `/_/api`): published events, `?collection=`, `?record=`, `?occurrence=`; a page at the same path wins | public |
-| RSVP | `GET/POST/DELETE /posts/:id/rsvps` (`occurrence`, `answer`); `GET /posts/:id/attendees` (`?format=csv`) | counts public; answer = authenticated member; attendees = post author or `comment.moderate.any` |
+| Calendar | `GET /calendar.ics`, `GET /calendar.json` at the **site root** (not under `/_/api`): published events, `?collection=`, `?group=`, `?post=`, `?date=`, `?token=`; a page at the same path wins | public |
+| RSVP | `GET/POST/DELETE /posts/:id/rsvps` (`date`, `answer`); `GET /posts/:id/rsvps/names` (`?format=csv`) | counts public; answer = authenticated member; names = post author or `review.any` |
 | Media | `GET /files` (public); `POST /files` (multipart image → `assets/`), `DELETE /files/:id` | read public; write = `content.create` |
 | Users | `GET/POST /users`, `PUT/DELETE /users/:id` (role rules + last-owner guard) | `user.manage`; granting admin/owner needs `site.own` |
-| Settings | `GET/PUT /settings` (site name + `access.*` / `content.require_approval` policy) | `site.configure` |
+| Settings | `GET/PUT /settings` (every setting by its one flat name, plus `features`) | `site.configure` |
 | Sync | `POST /push/{templates,assets,data,users,settings,files}`, `GET /pull/{data,users,settings,files}` | `site.configure` |
 
 **Community data renders two ways.** The `friendo.js` SDK components fetch these
 endpoints client-side (interactive, viewer-aware). For content that benefits from a
-no-JS read, the runtime *also* attaches the public relations to the focused record
-in the template context — `record.comments` (approved), `record.reactions`,
-`record.poll`, and `record.gallery` — so a post template can render them directly.
+no-JS read, the runtime *also* attaches the public relations to the focused post
+in the template context — `post.comments` (approved), `post.reactions`,
+`post.poll`, and `post.gallery` — so a post template can render them directly.
 Inherently interactive features (realtime chat, the `<friendo-map>` widget) stay
 client-side by design.
 
@@ -109,11 +109,11 @@ own network, or a single self-hosted site).
   a network (friendo.world by default). It signs you in in the browser (device-auth)
   if needed, claims a subdomain your account owns, exchanges an in-process SSO
   session for the site, and pushes. See *Managed hosting* below.
-- **`friendo push`** — upload templates + assets (`--data` / `--users` to include
-  records and accounts). Assets are base64-encoded so binary files (uploaded
-  images in `assets/uploads/`) round-trip intact, and `--data` also carries
+- **`friendo push`** — upload templates + assets (`--posts` / `--users` to include
+  posts and accounts). Assets are base64-encoded so binary files (uploaded
+  images in `assets/uploads/`) round-trip intact, and `--posts` also carries
   `files` rows so a deployed site's media metadata matches the source.
-- **`friendo pull`** — fetch remote records/accounts (and media rows) back into
+- **`friendo pull`** — fetch remote posts/accounts (and media rows) back into
   the local database.
 
 **Auth + first-run bootstrap.** `push`/`pull` authenticate via `authenticateSite()`:
@@ -130,36 +130,36 @@ Content normally lives in the DB (edited via the admin UI or API). A site can
 into that same DB, so the runtime is untouched: `content/` is just another way to
 fill the same tables.
 
-- `content/<collection>/<slug>.md` → a record in `<collection>` with that slug;
+- `content/<collection>/<slug>.md` → a post in `<collection>` with that slug;
   YAML front matter supplies `title`/`slug`/`status`/`date`, and **any other keys
   land in a `data` JSON column** (migration `0003`), readable in templates as
-  `record.data.<field>`. The markdown body is stored verbatim and rendered by the
+  `post.fields.<name>`. The markdown body is stored verbatim and rendered by the
   `markdown` filter at template time.
-- The importer (`runtime/go/content`) is a Go/CLI-side layer. `friendo build` runs
+- The importer (`runtime/go/content`) is a Go/CLI-side layer. `friendo import` runs
   it; `friendo serve` runs it on startup and re-imports on every `content/` edit
   (hot reload); `friendo push`/`deploy` run it before uploading. Upserts by
   `(collection, slug)`, so `content/` is the source of truth when present.
 
 This documentation site is authored this way (`docs/content/docs/*.md`), with its
-sidebar generated from the docs collection via `collections.docs|sort_by:"data.weight"`.
+sidebar generated from the docs collection via `collections.docs|sort_by:"fields.weight"`.
 
 ## Calendar: an event is a post with a `when`
 
 The calendar follows the one lifting pattern the runtime already had for
-`location`: a reserved front-matter/form key that the importer and the record API
-pull out of opaque `data` into a real, indexed row. `when` (plus `ends`,
-`timezone`, `repeats`, `except`, `rrule`) becomes one row in `events` (migration
+`location`: a reserved front-matter/form key that the importer and the posts API
+pull out of opaque `data` into a real, indexed row. `when` (a string, or a map
+with `start`, `end`, `timezone`, `repeats`, `except`, `rrule`) becomes one row in `events` (migration
 `0013`) — a **series**: first start/end in local wall-clock time with the zone
 name beside it, an RFC 5545 RRULE, and skipped dates. Occurrences are expanded on
 read (`teambition/rrule-go`, expansion in the series' zone so a weekly 7pm stays
 7pm across daylight-saving), never stored. One parser, `data.ParseWhen`, serves
-both the content importer and `POST/PUT /records`, so the file spelling and the
+both the content importer and `POST/PUT /posts`, so the file spelling and the
 `<friendo-form>` spelling can't drift. The row has a deterministic id per post, so
-re-import and edits upsert in place, and it rides `push/pull --data` beside records.
+re-import and edits upsert in place, and it rides `push/pull --posts` beside posts.
 
-Templates see `record.when` on every record (attached in one query per page), the
+Templates see `post.when` on every post (attached in one query per page), the
 `upcoming`/`past`/`in_month`/`on_day` filters expand series into occurrence
-entries, and `when` formats a range for people. `runtime/go/calendar` builds the
+entries, and `{{ post.when }}` prints itself for people (the `when` filter takes a layout). `runtime/go/calendar` builds the
 feeds — `/calendar.ics` (RRULE/EXDATE passed through, a generated `VTIMEZONE` per
 zone, ETag/304) and `/calendar.json` (expanded) — for the running site and for
 static export alike; a members-only collection is left out of both.
@@ -170,8 +170,8 @@ coming?" means this Tuesday; the server resolves and validates the occurrence
 against the expanded series, and a series edit re-keys answers to the same day.
 `<friendo-calendar>` (month grid / list over `/calendar.json`), `<friendo-rsvp>`,
 `<friendo-add-to-calendar>` (Google's add-by-URL and pre-filled-event links, `webcal://`,
-.ics — also as `{{ calendar.google }}` / `{{ record|google_calendar_url }}` for no-JS
-pages), `<friendo-input type="when">` and the admin's When / Where / Attendees screens
+.ics — also as `{{ calendar.google }}` / `{{ event|google_calendar_url }}` for no-JS
+pages), `<friendo-input type="when">` and the admin's When / Location / RSVPs screens
 are the front-of-house. Design: [design/calendar-plan.md](design/calendar-plan.md).
 
 ## Managed hosting: network mode
@@ -244,29 +244,30 @@ place.
 
 | Scope | What | Where |
 |---|---|---|
-| **Site** | Per-site **accounts** (`users`) with roles (owner > admin > editor > contributor > member). Sign-in is an emailed code for every role; a bcrypt password is optional and only usable when `access.password_login` is on. DB-stored sessions. On localhost with no email provider, `friendo serve` skips sign-in for same-machine requests. | site SQLite |
-| **Network** | **Network accounts** (`runtime/go/network`) for signing in to a friendo network and owning sites — the same email-code sign-in (cookie in a browser, Bearer token from the CLI via device-auth). `operator` is a capability (no operator password), separate from per-site roles. | network accounts DB |
+| **Site** | Per-site **accounts** (`users`); everyone is a member, and roles add powers (owner > admin > editor > moderator > contributor). Sign-in is an emailed code for every role; a bcrypt password is optional and only usable when `password_login` is on. DB-stored sessions. On localhost with no email provider, `friendo serve` skips sign-in for same-machine requests. | site SQLite |
+| **Network** | **Network accounts** (`runtime/go/network`) for signing in to a friendo network and owning sites — the same email-code sign-in (cookie in a browser, Bearer token from the CLI via device-auth). `operator` is a flag on the account (no operator password), separate from per-site roles. | network accounts DB |
 
 **Capabilities, not just ranks.** Authorization is capability-based: roles are
 named bundles of capabilities (`content.create`, `content.edit.own` vs
-`content.edit.any`, `comment.moderate.own` vs `comment.moderate.any`,
+`content.edit.any`, `review.own` vs `review.any`, `review.posts`,
 `user.manage`, `site.configure`, `site.own`). The **ownership axis** (own vs. any)
-lets a Contributor edit only what they authored while an Editor edits anything —
-something a pure rank ladder can't express. Per-site policy (`access.default_role`,
-`access.signups_enabled`, `content.require_approval`) is stored in `site_settings`
+lets a Contributor edit only what they authored while an Editor edits anything,
+and a Moderator approves or rejects without editing — something a pure rank
+ladder can't express. A site is one big group: groups have admins and moderators
+too, and site admins/moderators hold those roles in every group. Per-site policy
+(`open_signups`, `signups_are_contributors`, `posts_need_review`, …) is stored in `site_settings`
 and surfaced as one-click presets (Personal / Community / Blog) in the admin UI.
 The public render path shows only `published` posts. Full design in
 [design/auth-permissions.md](design/auth-permissions.md).
 
-**Accounts vs. profiles (personas).** A `users` row is an *account* (the auth
-identity). Display **profiles** live in `authors`, linked by `authors.user_id` — one
-account can have several. All content (`posts`, `comments`, …) references a profile
-via `author_id` → `authors.id`; every account gets a default profile on creation. A
-member manages their profiles as **personas** (`/_/api/me/personas`) and picks which
-one attribution uses; the choice is a pointer, `users.default_author_id` (migration
-`0010`), honored by `DefaultAuthorID` — so switching persona re-attributes all their
-comments/messages with no per-write plumbing. The `<friendo-auth>` component exposes
-the switcher.
+**Accounts vs. profiles.** A `users` row is an *account* (the auth identity).
+**Profiles** live in `authors`, linked by `authors.user_id` — one account can have
+several. All content (`posts`, `comments`, …) references a profile via `author_id`
+→ `authors.id`; every account gets a default profile on creation. A member manages
+their profiles at `/_/api/me/profiles` and picks which one attribution uses; the
+choice is a pointer, `users.default_author_id` (migration `0010`), honored by
+`DefaultAuthorID` — so switching profile re-attributes all their comments/messages
+with no per-write plumbing. The `<friendo-signin>` component exposes the switcher.
 
 **Members** are visitors who verify their email via a one-time code
 (`/auth/request-code` → `/auth/verify-code`, backed by `otp_codes`) to get a

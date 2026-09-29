@@ -1,0 +1,56 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<article class="group">
+    <h1>{{ group.title }}</h1>
+    {{ group.body|markdown }}
+    <p class="post-meta">
+        <span class="tag">{{ group.member_count }} members</span>
+        <span class="tag">{{ group.settings.visibility }}</span>
+        <span class="tag">join: {{ group.settings.join }}</span>
+    </p>
+    <p>Moderators: {% for m in group.moderators %}<a href="{{ m.url }}">{{ m.name }}</a>{% if not forloop.Last %}, {% endif %}{% endfor %}</p>
+
+    <h2>Posts</h2>
+    <ul>
+    {% for p in collections.blog|in_group:group.slug %}
+        <li><a href="/blog/{{ p.slug }}">{{ p.title }}</a> by {{ p.author.name }}</li>
+    {% empty %}
+        <li>Nothing filed here yet — add <code>group: {{ group.slug }}</code> to a post's front matter.</li>
+    {% endfor %}
+    </ul>
+
+    <h2>Events</h2>
+    <ul>
+    {% for e in collections.events|in_group:group.slug|upcoming:5 %}
+        <li><a href="/events/{{ e.slug }}">{{ e.title }}</a> · {{ e.when|when }}</li>
+    {% empty %}
+        <li>Nothing coming up.</li>
+    {% endfor %}
+    </ul>
+    <!-- Signed in, the menu offers your private link (a secret token in the address),
+         which carries this group's events even when the group isn't public. -->
+    <p><friendo-add-to-calendar subscribe group="{{ group.slug }}" label="Subscribe to this group's calendar"></friendo-add-to-calendar></p>
+</article>
+
+<section class="community">
+    <div class="signin">
+        <h2>Sign in to join</h2>
+        <friendo-signin reload></friendo-signin>
+    </div>
+    <!-- Join / ask / leave, the member list, and the moderators' levers
+         (requests, promote, remove, add by address, visibility + join rule). -->
+    <friendo-group post-id="{{ group.id }}"></friendo-group>
+
+    <div>
+        <h2>Chat</h2>
+        <!-- A group's chats are its members' only (join above to see them). "general"
+             is made the first time this page is served; moderators add more from
+             <friendo-group>, and each one shows up here. -->
+        <friendo-chat chat-id="general" group="{{ group.slug }}"></friendo-chat>
+        {% for c in group.chats %}{% if c.id != "general" %}
+        <h3>{{ c.name }}</h3>
+        <friendo-chat chat-id="{{ c.id }}" group="{{ group.slug }}"></friendo-chat>
+        {% endif %}{% endfor %}
+    </div>
+</section>
+{% endblock %}

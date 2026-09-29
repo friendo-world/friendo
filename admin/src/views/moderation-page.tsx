@@ -3,16 +3,16 @@ import { useAuth } from "../auth";
 import { ReviewQueue } from "./review";
 import { CommentsQueue } from "./moderation";
 
-// Everything waiting on a moderator, on one page: posts to review (editors and
-// up), then comments (anyone who may moderate — authors see their own posts').
+// Everything waiting on a moderator, on one page: posts to review (moderators
+// and up), then comments (anyone who may review — authors see their own posts').
 export function ModerationPage() {
   const { user, features } = useAuth();
   return (
     <div class="mx-auto max-w-[960px] px-4 py-8">
-      <h1 class="mb-6 text-xl font-bold">Moderation</h1>
+      <h1 class="mb-6 text-xl font-bold">Review</h1>
       <div class="space-y-10">
-        {can(user.role, "content.edit.any") && <ReviewQueue />}
-        {can(user.role, "comment.moderate.own") &&
+        {can(user.role, "review.posts") && <ReviewQueue />}
+        {can(user.role, "review.own") &&
           (features.comments ? (
             <CommentsQueue />
           ) : (

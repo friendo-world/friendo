@@ -67,11 +67,11 @@ The command-line tool. Init a site, serve it locally, push it to the internet, p
 ```bash
 friendo init my-site        # scaffold a new site
 friendo serve               # start the local dev server
-friendo build               # compile content/ markdown into the site database
+friendo import              # read content/ markdown into the site database
 friendo deploy [subdomain]  # publish this folder to a network (friendo.world by default)
 friendo open-admin          # open your deployed site's admin, signed in
 friendo push                # push updates to your deployed site
-friendo pull --data          # pull remote data into local
+friendo pull --posts        # pull remote posts into local
 friendo export              # export to static HTML
 ```
 
@@ -96,7 +96,7 @@ friendo.world runs **network mode**: the *same* Go binary in `friendo network se
 
 ```
 my-site/
-├── friendo.toml        # Site config (name, content types)
+├── friendo.toml        # Site config (name, collections)
 ├── layouts/            # Shared layouts and partials that wrap pages
 │   └── base.html
 ├── pages/              # Page templates — file path maps to URL path
@@ -105,7 +105,7 @@ my-site/
 │       └── [slug].html
 ├── content/            # Optional: author content as markdown files
 │   └── blog/
-│       └── hello.md    # → a record in the "blog" collection
+│       └── hello.md    # → a post in the "blog" collection
 ├── assets/             # Static files — CSS, JS, images (served at /assets/)
 │   └── style.css
 └── data/               # SQLite database
@@ -114,27 +114,29 @@ my-site/
 
 Content lives in the database, but you can author it as **markdown files** in
 `content/` (Hugo-style): the folder is the collection, YAML front matter sets the
-fields, and `friendo serve`/`build`/`push` compile it into the DB.
+fields, and `friendo serve`/`import`/`push` read it into the DB.
 
 ---
 
-## Content types
+## Posts and features
 
-Friendo ships with built-in content types — enable the ones your site needs.
+Everything you write is a **post** in a **collection** (`blog`, `events`, `groups`,
+`pages`). Community **features** are switches; each has a tag and, where a no-JS
+read helps, a spelling on the post itself.
 
-| Type | What it's for | Template access |
+| Feature | What it's for | In templates |
 |---|---|---|
-| **Posts** | Blog posts, pages, any authored content | `{{ collections.blog }}` |
-| **Comments** | Comments on any post | `{{ record.comments }}` or `<friendo-comments>` |
-| **Reactions** | Emoji reactions on posts or comments | `{{ record.reactions }}` or `<friendo-reactions>` |
-| **Chats** | Chat rooms, forums, feeds (realtime) | `<friendo-chat>` |
-| **Messages** | Messages within a chat | `<friendo-chat>` |
-| **Polls** | Polls attached to posts | `{{ record.poll }}` or `<friendo-poll>` |
-| **Authors** | People (personas) who create content | `{{ record.author_name }}` |
-| **Locations** | Geotag any record | `<friendo-map>` |
-| **Files** | Media, uploads, page-bundle galleries | `{{ record.gallery }}` |
+| **Comments** | Comments on any post | `{{ post.comments }}` or `<friendo-comments>` |
+| **Reactions** | Emoji reactions on posts or comments | `{{ post.reactions }}` or `<friendo-reactions>` |
+| **Chats** | Chat rooms, live threads (realtime) | `<friendo-chat>` |
+| **Polls** | Polls attached to posts | `{{ post.poll }}` or `<friendo-poll>` |
+| **Profiles** | A member's public face, at `/profiles/<slug>` | `{{ post.author.name }}`, `<friendo-profile>` |
+| **Locations** | A place on a post | `{{ post.location }}`, `<friendo-map>` |
+| **Calendar** | An event is a post with a `when` | `{{ event.when }}`, `<friendo-calendar>`, `<friendo-rsvp>` |
+| **Follows**, **Groups** | Who follows whom; groups with members | `<friendo-follow>`, `<friendo-group>` |
+| **Galleries** | Images beside a post's markdown file | `{{ post.gallery }}` |
 
-On a network's own domain, three more tags talk to the network rather than a site: `<friendo-account>` (your sites, domains, Open admin), `<friendo-console>` (the operator's levers) and `<friendo-activate>` (linking `friendo login`). The network serves each on a default page; a **home site** can wrap the same tag in its own design.
+On a network's own domain, three more tags talk to the network rather than a site: `<friendo-account>` (your sites, domains, Open admin), `<friendo-console>` (the operator's levers) and `<friendo-activate>` (linking `friendo login`). The network serves each on a built-in page; a **home site** can wrap the same tag in its own design.
 
 Enable what you need in `friendo.toml`:
 
@@ -155,12 +157,12 @@ Every Friendo site — local or deployed — has the same auth model:
 - **Sign-in is a code sent to your email** — for every role. Passwords are opt-in per site (Settings → *Allow signing in with a password*).
 - **On your laptop** `friendo serve` opens the admin with no sign-in at all (only for requests from the same machine, with no email provider configured). Use `--require-login` to see the sign-in screens.
 - **First run on a server:** the first person to open the admin confirms their email with a code and becomes the site **owner**. A site published with `friendo deploy` already has you as owner.
-- **Roles:** Capability-based — owner > admin > editor > contributor > member. Contributors edit only their own posts; editors edit any. Owners/admins add people via the admin UI (email only).
-- **Presets:** Pick a site type (Personal / Community / Blog) in Settings to set who can post and whether posts need approval.
-- **Members:** Visitors sign in with an email code through `<friendo-auth>` to comment, react, and vote.
+- **Members and roles:** everyone with an account is a member. Roles add powers: owner > admin > editor > moderator > contributor. Contributors edit only their own posts; moderators approve and reject without editing; editors edit any. A site is one big group: groups use the same words. Admins add people from the admin (email only).
+- **Presets:** Pick a site type (Personal / Community / Blog) in Settings to set who can sign up, who can post and what waits for review.
+- **Signing in on pages:** visitors sign in with an email code through `<friendo-signin>` to comment, react, vote and RSVP.
 - **Sync:** `friendo push --users` carries accounts (and any password hashes) to the deployed site.
 
-Publishing to a network (friendo.world or your own) uses a separate **network account** — the same email-code sign-in, with browser device-auth for the CLI (`friendo login`). Its account page (`/account`, a `<friendo-account>` tag) lists your sites with an **Open admin** button that signs you into each one. Hosting sites for others is just the **operator capability** on that account; the operator's page is `/network` (`<friendo-console>`).
+Publishing to a network (friendo.world or your own) uses a separate **network account** — the same email-code sign-in, with browser device-auth for the CLI (`friendo login`). Its account page (`/account`, a `<friendo-account>` tag) lists your sites with an **Open admin** button that signs you into each one. Hosting sites for others just makes that account an **operator**; the operator's page is `/network` (`<friendo-console>`).
 
 ---
 
@@ -181,15 +183,15 @@ Run your own network with `friendo network serve` (see [DEPLOY.md](DEPLOY.md)), 
 
 ```bash
 friendo push                # templates + assets
-friendo push --data         # also sync records
-friendo push --users        # also sync user accounts
+friendo push --posts        # also sync posts
+friendo push --users        # also sync accounts and profiles
 ```
 
 **`friendo pull`** — Pull remote data into your local database.
 
 ```bash
-friendo pull --data         # pull records
-friendo pull --users        # pull user accounts
+friendo pull --posts        # pull posts
+friendo pull --users        # pull accounts and profiles
 ```
 
 All sync goes through the site's own `/_/api/*` endpoints, authenticated with site admin credentials. The same API works whether your site is on friendo.world, on your own `friendo network`, or self-hosted with `friendo serve`.
@@ -224,10 +226,10 @@ All sync goes through the site's own `/_/api/*` endpoints, authenticated with si
 | **Phase 1** | CLI + Go runtime + friendo.world foundation | Complete |
 | **Phase 1.5** | Auth, shared admin SPA + REST API, codebase refactor, working deploy | Complete |
 | **Phase 3** | Community features — visitor comments/reactions/polls, realtime chats, locations, media, the `friendo.js` SDK | Complete |
-| **v0.2 / v0.3** | Public-safe hardening, then consolidation onto one Go runtime + network mode: server-side community rendering, page-bundle galleries, render/CLI/SDK test coverage, `<friendo-map>`, persona switcher | Complete |
+| **v0.2 / v0.3** | Public-safe hardening, then consolidation onto one Go runtime + network mode: server-side community rendering, page-bundle galleries, render/CLI/SDK test coverage, `<friendo-map>`, profile switcher | Complete |
 | **v0.4** | The network opens: quotas, account + site management, custom domains | Complete |
 | **v0.5** | One sign-in (an emailed code everywhere, passwords opt-in); the network as a friendo site; members-only pages; a built-in calendar with RSVP; declared fields + feature switches + a rebuilt records admin | Complete |
-| **v0.6** | Social graph — following, groups, event invitations, richer profiles | Planned |
+| **v0.6** | Social graph — profiles at `/profiles/<slug>`, one-way follows, an in-page inbox, groups as a built-in collection, event invitations | Complete |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
 
 See [ROADMAP.md](ROADMAP.md) for details and known gaps.

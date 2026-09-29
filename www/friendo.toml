@@ -2,7 +2,7 @@
 name = "friendo"
 
 [content]
-types = []
+collections = []
 
 # friendo.world's home site: the operator serves it at the bare domain with
 #   friendo network home www --network https://friendo.world

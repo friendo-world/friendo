@@ -25,8 +25,8 @@ func TestStaticExportSkipsMembersOnlyPages(t *testing.T) {
 	write("pages/index.html", "home of {{ site.name }}")
 	write("pages/members.html", "{% members only %}secret")
 	write("pages/private/index.html", "also secret")
-	write("pages/blog/[slug].html", "{% members only %}{{ record.title }}")
-	write("pages/notes/[slug].html", "{{ record.title }}")
+	write("pages/blog/[slug].html", "{% members only %}{{ post.title }}")
+	write("pages/notes/[slug].html", "{{ post.title }}")
 
 	db, err := data.Open(siteDir)
 	if err != nil {
@@ -71,8 +71,8 @@ func TestStaticExportWritesCalendarFeeds(t *testing.T) {
 	}
 	write("friendo.toml", "[site]\nname = \"Exported\"\ntimezone = \"Europe/Paris\"\n\n[deploy]\ndomain = \"village.example\"\n")
 	write("pages/index.html", "{% for e in collections.events|upcoming %}{{ e.title }}{% endfor %}")
-	write("pages/events/[slug].html", "{{ record.title }} {{ record.when|when }}")
-	write("pages/private/[slug].html", "{% members only %}{{ record.title }}")
+	write("pages/events/[slug].html", "{{ post.title }} {{ post.when|when }}")
+	write("pages/private/[slug].html", "{% members only %}{{ post.title }}")
 
 	db, err := data.Open(siteDir)
 	if err != nil {

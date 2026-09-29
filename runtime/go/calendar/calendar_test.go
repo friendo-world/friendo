@@ -46,7 +46,7 @@ func fixtureSite(t *testing.T) *data.DB {
 	db.UpsertLocation(data.DeterministicLocationID(fair), "post", fair, 47.6062, -122.3321, "Pike Place Market")
 	add("events", "retreat", "Retreat", "", "published", map[string]any{"when": "2026-11-06 to 2026-11-08"})
 	add("events", "book-club", "Book club", "Every Tuesday.", "published",
-		map[string]any{"when": "2026-10-06 19:00 to 20:30", "repeats": "weekly", "except": []any{"2026-11-24"}})
+		map[string]any{"when": map[string]any{"start": "2026-10-06 19:00 to 20:30", "repeats": "weekly", "except": []any{"2026-11-24"}}})
 	add("events", "draft-thing", "Draft", "", "draft", map[string]any{"when": "2026-10-10"})
 	add("private", "board-meeting", "Board meeting", "", "published", map[string]any{"when": "2026-10-12 18:00"})
 	add("blog", "no-time", "Just a post", "", "published", map[string]any{"title": "x"})
@@ -64,7 +64,7 @@ func permalink(collection string, f map[string]string) string {
 
 func TestCollect(t *testing.T) {
 	db := fixtureSite(t)
-	entries, err := Collect(db, visibleExceptPrivate, permalink, Filter{})
+	entries, err := Collect(db, StaticView(visibleExceptPrivate), permalink, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestCollect(t *testing.T) {
 	if entries[0].Path != "/events/harvest-fair" || !entries[0].HasPlace || entries[0].Place != "Pike Place Market" {
 		t.Errorf("first entry: %+v", entries[0])
 	}
-	only, _ := Collect(db, nil, permalink, Filter{Collection: "private"})
+	only, _ := Collect(db, View{}, permalink, Filter{Collection: "private"})
 	if len(only) != 1 || only[0].Slug != "board-meeting" {
 		t.Errorf("collection filter: %+v", only)
 	}
@@ -86,7 +86,7 @@ func TestCollect(t *testing.T) {
 
 func TestICSGolden(t *testing.T) {
 	db := fixtureSite(t)
-	entries, _ := Collect(db, visibleExceptPrivate, permalink, Filter{Collection: "events"})
+	entries, _ := Collect(db, StaticView(visibleExceptPrivate), permalink, Filter{Collection: "events"})
 	var b strings.Builder
 	if err := WriteICS(&b, entries, ICSOptions{SiteName: "Neighbourhood; Events, Inc.", SiteZone: db.Location, BaseURL: "https://example.test"}); err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestICSGolden(t *testing.T) {
 
 func TestICSSingleOccurrence(t *testing.T) {
 	db := fixtureSite(t)
-	entries, _ := Collect(db, nil, permalink, Filter{Collection: "events"})
+	entries, _ := Collect(db, View{}, permalink, Filter{Collection: "events"})
 	var series *Entry
 	for i := range entries {
 		if entries[i].Slug == "book-club" {
@@ -165,12 +165,12 @@ func TestICSSingleOccurrence(t *testing.T) {
 
 func TestOccurrencesJSON(t *testing.T) {
 	db := fixtureSite(t)
-	entries, _ := Collect(db, visibleExceptPrivate, permalink, Filter{})
+	entries, _ := Collect(db, StaticView(visibleExceptPrivate), permalink, Filter{})
 	from := time.Date(2026, 10, 1, 0, 0, 0, 0, db.Location)
-	occs := Occurrences(entries, from, from.AddDate(0, 1, 0), "https://example.test")
+	occs := Occurrences(entries, from, from.AddDate(0, 1, 0), "https://example.test", nil)
 	var titles []string
 	for _, o := range occs {
-		titles = append(titles, o["title"].(string)+"@"+o["starts"].(string)[:10])
+		titles = append(titles, o["title"].(string)+"@"+o["start"].(string)[:10])
 	}
 	want := "Harvest Fair@2026-10-04,Book club@2026-10-06,Book club@2026-10-13,Book club@2026-10-20,Book club@2026-10-27"
 	if strings.Join(titles, ",") != want {
@@ -183,7 +183,7 @@ func TestOccurrencesJSON(t *testing.T) {
 
 func TestFeedHTTP(t *testing.T) {
 	db := fixtureSite(t)
-	feed := Feed{DB: db, SiteName: "Test", Visible: visibleExceptPrivate, Permalink: permalink}
+	feed := Feed{DB: db, SiteName: "Test", Permalink: permalink, View: func(r *http.Request) (View, string, error) { return StaticView(visibleExceptPrivate), "", nil }}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/calendar.ics", feed.ServeICS)
 	mux.HandleFunc("/calendar.json", feed.ServeJSON)

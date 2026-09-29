@@ -1,4 +1,5 @@
 ---
+group: book-club
 title: Try the community features
 slug: community-features
 status: published
@@ -16,7 +17,7 @@ poll:
 Friendo ships **comments, reactions, polls, and maps** as drop-in Web Components —
 no custom JavaScript required. This post has all of them wired up below. The
 approved comments, reaction tallies, and poll also render **server-side** (straight
-from `record.comments` / `record.reactions` / `record.poll`), so they're readable
+from `post.comments` / `post.reactions` / `post.poll`), so they're readable
 with JavaScript off — the components add the interactive, signed-in layer on top.
 
 ## How it works
@@ -28,7 +29,7 @@ with JavaScript off — the components add the interactive, signed-in layer on t
    approves them (or turn on auto-approve in the admin **Settings**).
 
 Everything you write is tied to your **member** account — a passwordless identity
-scoped to this site. Have more than one? Use the **personas** switcher in the
+scoped to this site. Have more than one? Use the **profiles** switcher in the
 sign-in box to pick which profile your comments post as.
 
 ## Styling

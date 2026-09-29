@@ -5,10 +5,10 @@ import type { When } from "./api";
 // event's own wall clock (the RFC 3339 string carries its offset), not the
 // browser's, so an editor in another zone sees what the site says.
 export function formatWhen(w: When | null | undefined, opts: { next?: boolean } = {}): string {
-  if (!w || !w.starts) return "";
+  if (!w || !w.start) return "";
   const src = opts.next && w.next ? w.next : w;
-  const s = wall(src.starts);
-  const e = src.ends ? wall(src.ends) : null;
+  const s = wall(src.start);
+  const e = src.end ? wall(src.end) : null;
   const day = (d: Date) => d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
   const clock = (d: Date) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
   let out: string;

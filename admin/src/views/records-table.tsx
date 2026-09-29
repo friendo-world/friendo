@@ -128,9 +128,9 @@ export function RecordsTable({
   const th = "px-3 py-2 text-left text-xs font-bold text-dim";
   const count = selected.size;
   const bulkMessage = {
-    publish: `Publish ${count} record${count === 1 ? "" : "s"}?`,
-    unpublish: `Unpublish ${count} record${count === 1 ? "" : "s"}? They go back to drafts.`,
-    delete: `Delete ${count} record${count === 1 ? "" : "s"}? This can't be undone.`,
+    publish: `Publish ${count} post${count === 1 ? "" : "s"}?`,
+    unpublish: `Unpublish ${count} post${count === 1 ? "" : "s"}? They go back to drafts.`,
+    delete: `Delete ${count} post${count === 1 ? "" : "s"}? This can't be undone.`,
   };
 
   return (
@@ -139,8 +139,8 @@ export function RecordsTable({
         <Input
           type="search"
           name="q"
-          placeholder="Search records…"
-          aria-label="Search records"
+          placeholder="Search posts…"
+          aria-label="Search posts"
           value={q}
           onInput={(e) => {
             setQ((e.target as HTMLInputElement).value);
@@ -149,7 +149,7 @@ export function RecordsTable({
           class="mt-0 w-64 max-w-full"
         />
         <span class="text-xs text-dim">
-          {shown.length === records.length ? `${records.length} record${records.length === 1 ? "" : "s"}` : `${shown.length} of ${records.length}`}
+          {shown.length === records.length ? `${records.length} post${records.length === 1 ? "" : "s"}` : `${shown.length} of ${records.length}`}
         </span>
         <div class="relative ml-auto">
           <Button size="sm" onClick={() => setMenu((m) => !m)} aria-expanded={menu ? "true" : "false"}>
@@ -163,7 +163,7 @@ export function RecordsTable({
                   <span class={c.key.startsWith("data:") ? "font-mono text-xs" : ""}>{c.label}</span>
                 </label>
               ))}
-              {fields.length === 0 && <p class="px-1 py-1 text-xs text-dim">Fields appear here once records have some.</p>}
+              {fields.length === 0 && <p class="px-1 py-1 text-xs text-dim">Fields appear here once posts have some.</p>}
             </div>
           )}
         </div>
@@ -271,7 +271,7 @@ export function RecordsTable({
 
 function Cell({ record: r, colKey, kind }: { record: Rec; colKey: string; kind?: FieldDef["kind"] }) {
   if (colKey.startsWith("data:")) {
-    const v = r.data?.[colKey.slice(5)];
+    const v = r.fields?.[colKey.slice(5)];
     if (v === null || v === undefined || v === "") return null;
     if (kind === "image" && typeof v === "string" && isImageUrl(v)) return <img src={v} alt="" class="h-6 w-6 border border-ink object-cover" />;
     if (kind === "tags" && Array.isArray(v))

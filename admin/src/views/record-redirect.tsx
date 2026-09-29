@@ -11,7 +11,7 @@ export function RecordRedirect({ id }: { id?: string }) {
     if (!id) return;
     api
       .record(id)
-      .then((r) => route(`/_/collections/${encodeURIComponent(r.record.collection || "posts")}/${encodeURIComponent(id)}`, true))
+      .then((r) => route(`/_/collections/${encodeURIComponent(r.post.collection || "blog")}/${encodeURIComponent(id)}`, true))
       .catch((e) => setError(e instanceof Error ? e.message : "Record not found."));
   }, [id]);
   return <div class="mx-auto max-w-[960px] px-4 py-8 text-sm text-dim">{error || "Loading…"}</div>;

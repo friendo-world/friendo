@@ -35,7 +35,7 @@ export function ContentToml() {
       <p class="mb-3 text-xs text-dim">
         Collections can be started here, from a form, or from a <code>content/</code> folder, so the site can know
         about more than your <code>friendo.toml</code> says. This is the <code>[content]</code> block that matches the
-        site right now: every collection, and the fields their records carry. Paste it over the{" "}
+        site right now: every collection, and the fields their posts carry. Paste it over the{" "}
         <code>[content]</code> section of your file (<code>friendo pull</code> does this for you), then edit the kinds
         or add <code>choices</code>, <code>required</code> or a <code>hint</code> as you like.
       </p>

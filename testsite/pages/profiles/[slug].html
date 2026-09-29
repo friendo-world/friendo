@@ -1,0 +1,41 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<article class="profile">
+    <!-- The profile renders server-side: `profile` is the profile (name, slug,
+         avatar, bio, fields, posts, comments, followers). The tag below adds an
+         "Edit profile" button when it's the viewer's own page. -->
+    {% if profile.avatar %}<img class="avatar" src="{{ profile.avatar }}" alt="" width="96" height="96">{% endif %}
+    <h1>{{ profile.name }}</h1>
+    {% if profile.bio %}<p>{{ profile.bio }}</p>{% endif %}
+    <p class="post-meta">
+        {% if profile.fields.pronouns %}<span class="tag">{{ profile.fields.pronouns }}</span>{% endif %}
+        {% if profile.fields.website %}<a href="{{ profile.fields.website }}">{{ profile.fields.website }}</a>{% endif %}
+    </p>
+    <p class="post-meta">
+        <friendo-follow profile-id="{{ profile.id }}"></friendo-follow>
+        <span class="tag">{{ profile.follower_count }} followers · {{ profile.following_count }} following</span>
+    </p>
+    <friendo-profile slug="{{ profile.slug }}" edit-only></friendo-profile>
+
+    <h2>Posts</h2>
+    <ul>
+    {% for p in profile.posts %}
+        <li><a href="/{{ p.collection }}/{{ p.slug }}">{{ p.title }}</a></li>
+    {% empty %}
+        <li>Nothing yet.</li>
+    {% endfor %}
+    </ul>
+
+    {% if profile.followers %}
+    <h2>Followers</h2>
+    <p>{% for f in profile.followers %}<a href="{{ f.url }}">{{ f.name }}</a>{% if not forloop.Last %}, {% endif %}{% endfor %}</p>
+    {% endif %}
+</article>
+
+<section class="community">
+    <div class="signin">
+        <h2>Your account</h2>
+        <friendo-signin reload></friendo-signin>
+    </div>
+</section>
+{% endblock %}

@@ -16,11 +16,11 @@ import (
 	"github.com/friendo-world/friendo/runtime/go/data"
 )
 
-// friendo.toml's [content] block names the site's content types and, optionally,
-// the fields each one's records carry:
+// friendo.toml's [content] block names the site's collections and, optionally,
+// the fields each one's posts carry:
 //
 //	[content]
-//	types = ["blog", "events"]
+//	collections = ["blog", "events"]
 //
 //	[content.blog.fields]
 //	tags  = "tags"
@@ -41,7 +41,7 @@ type FieldDecl struct {
 	Hint     string   `json:"hint,omitempty"`
 }
 
-// ContentType is one entry of [content] types with its declared fields.
+// ContentType is one entry of [content] collections with its declared fields.
 type ContentType struct {
 	Name   string
 	Fields []FieldDecl
@@ -86,13 +86,13 @@ func loadContentTypes(siteDir string) ([]ContentType, bool) {
 		log.Printf("friendo.toml: could not read [content]: %v", err)
 		return nil, false
 	}
-	typesPrim, ok := raw.Content["types"]
+	typesPrim, ok := raw.Content["collections"]
 	if !ok {
 		return nil, false
 	}
 	var names []string
 	if err := md.PrimitiveDecode(typesPrim, &names); err != nil {
-		log.Printf("friendo.toml: [content] types should be a list of names: %v", err)
+		log.Printf("friendo.toml: [content] collections should be a list of names: %v", err)
 		return nil, false
 	}
 	if len(names) == 0 {
@@ -137,14 +137,34 @@ func loadContentTypes(siteDir string) ([]ContentType, bool) {
 	}
 	for name := range raw.Content {
 		if name != "types" && !seen[name] {
-			log.Printf("friendo.toml: [content.%s] is declared but %q is not in [content] types", name, name)
+			log.Printf("friendo.toml: [content.%s] is declared but %q is not in [content] collections", name, name)
 		}
 	}
 	return out, true
 }
 
-// decodeField reads one field, written as a kind ("tags") or a table.
+// decodeField reads one content-type field, written as a kind ("tags") or a
+// table, and refuses names a record already owns.
 func decodeField(md toml.MetaData, typeName, fname string, prim toml.Primitive) (FieldDecl, bool) {
+	f, ok := parseField(md, "content."+typeName, fname, prim)
+	if !ok {
+		return f, false
+	}
+	switch {
+	case isWhenKey(fname):
+		log.Printf("friendo.toml: [content.%s.fields] %s: that name is used by an event's time (the When section)", typeName, fname)
+		return f, false
+	case columnNames[fname]:
+		log.Printf("friendo.toml: [content.%s.fields] %s: that name is one of a record's own fields", typeName, fname)
+		return f, false
+	}
+	return f, true
+}
+
+// parseField reads one declared field — a bare kind or a table — and checks the
+// kind is one the admin's widgets know. `where` names the toml section for the
+// log line ("content.blog", "profiles"). Shared by content types and [profiles].
+func parseField(md toml.MetaData, where, fname string, prim toml.Primitive) (FieldDecl, bool) {
 	f := FieldDecl{Name: fname}
 	var kind string
 	if err := md.PrimitiveDecode(prim, &kind); err == nil {
@@ -152,7 +172,7 @@ func decodeField(md toml.MetaData, typeName, fname string, prim toml.Primitive) 
 	} else {
 		var t fieldTable
 		if err := md.PrimitiveDecode(prim, &t); err != nil {
-			log.Printf("friendo.toml: [content.%s.fields] %s should be a kind like \"text\" or a table with kind = …: %v", typeName, fname, err)
+			log.Printf("friendo.toml: [%s.fields] %s should be a kind like \"text\" or a table with kind = …: %v", where, fname, err)
 			return f, false
 		}
 		f.Kind, f.Choices, f.Required, f.Hint = t.Kind, t.Choices, t.Required, t.Hint
@@ -161,15 +181,8 @@ func decodeField(md toml.MetaData, typeName, fname string, prim toml.Primitive) 
 	if f.Kind == "" {
 		f.Kind = "text"
 	}
-	switch {
-	case !fieldKinds[f.Kind]:
-		log.Printf("friendo.toml: [content.%s.fields] %s: unknown kind %q (use text, paragraph, number, checkbox, tags, image or json)", typeName, fname, f.Kind)
-		return f, false
-	case isWhenKey(fname):
-		log.Printf("friendo.toml: [content.%s.fields] %s: that name is used by an event's time (the When section)", typeName, fname)
-		return f, false
-	case columnNames[fname]:
-		log.Printf("friendo.toml: [content.%s.fields] %s: that name is one of a record's own fields", typeName, fname)
+	if !fieldKinds[f.Kind] {
+		log.Printf("friendo.toml: [%s.fields] %s: unknown kind %q (use text, paragraph, number, checkbox, tags, image or json)", where, fname, f.Kind)
 		return f, false
 	}
 	return f, true
@@ -189,7 +202,7 @@ func isWhenKey(name string) bool {
 type collectionInfo struct {
 	Name     string      `json:"name"`
 	Count    int         `json:"count"`
-	Declared bool        `json:"declared"` // named in friendo.toml's [content] types
+	Declared bool        `json:"declared"` // named in friendo.toml's [content] collections
 	Fields   []FieldDecl `json:"fields"`
 }
 
@@ -227,7 +240,7 @@ func SuggestedContentToml(db *data.DB, types []ContentType) (string, error) {
 	}
 
 	var b strings.Builder
-	b.WriteString("[content]\ntypes = [")
+	b.WriteString("[content]\ncollections = [")
 	for i, n := range names {
 		if i > 0 {
 			b.WriteString(", ")
@@ -324,7 +337,7 @@ func inferFieldsFromRecords(records []map[string]any) []FieldDecl {
 	}
 	stats := map[string]*stat{}
 	for _, r := range records {
-		d, ok := r["data"].(map[string]any)
+		d, ok := r["fields"].(map[string]any)
 		if !ok {
 			continue
 		}

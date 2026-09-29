@@ -31,18 +31,18 @@
     <label for="navtoggle" class="navtoggle-btn label" aria-label="Toggle navigation">&#9776; Contents</label>
     <aside class="sidebar">
       <nav>
-        {# Nav generated from content/docs/*.md — group order editorial, links/order from data.group/data.weight. Active link is marked client-side (see script) to keep the template free of nested tags. #}
+        {# Nav generated from content/docs/*.md — group order editorial, links/order from fields.section/fields.weight. Active link is marked client-side (see script) to keep the template free of nested tags. #}
         <p class="nav-group label">Getting started</p>
-        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Getting started" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+        {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Getting started" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
 
         <p class="nav-group label">Concepts</p>
-        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Concepts" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+        {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Concepts" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
 
         <p class="nav-group label">Reference</p>
-        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Reference" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+        {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Reference" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
 
         <p class="nav-group label">Hosting</p>
-        {% for d in collections.docs|sort_by:"data.weight" %}{% if d.data.group == "Hosting" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
+        {% for d in collections.docs|sort_by:"fields.weight" %}{% if d.fields.section == "Hosting" %}<a href="/docs/{{ d.slug }}" data-slug="{{ d.slug }}">{{ d.title }}</a>{% endif %}{% endfor %}
       </nav>
       <script>
         (function () {

@@ -1,7 +1,7 @@
 import type { JSX } from "preact";
 import { can, type User } from "../api";
 
-type Tab = "content" | "moderation" | "users" | "settings";
+type Tab = "content" | "review" | "members" | "settings";
 
 // The bar across the top of every admin page: the wordmark, then the sections
 // this user can see, lowercase and separated by dots. The current one is blue.
@@ -30,8 +30,8 @@ export function Nav({
   );
   const links: (JSX.Element | false)[] = [
     link("/_/", "content", "content"),
-    can(user.role, "comment.moderate.own") && link("/_/moderation", "moderation", "moderation"),
-    can(user.role, "user.manage") && link("/_/users", "users", "users"),
+    can(user.role, "review.own") && link("/_/review", "review", "review"),
+    can(user.role, "user.manage") && link("/_/members", "members", "members"),
     can(user.role, "site.configure") && link("/_/settings", "settings", "settings"),
     link("/", "view site", "site"),
   ];
@@ -50,7 +50,7 @@ export function Nav({
           onClick={onLogout}
           class="border border-ink px-2 py-1 text-xs font-bold text-ink hover:bg-ink hover:text-white"
         >
-          Log out
+          Sign out
         </button>
       </div>
     </nav>

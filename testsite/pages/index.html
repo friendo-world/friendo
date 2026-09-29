@@ -4,12 +4,18 @@
 <p>A Friendo demo site. Open a post to try comments, reactions, polls, and a map —
 see the <a href="/blog/gallery-demo">page-bundle gallery</a>, view every post on
 the <a href="/map">post map</a>, the <a href="/events/">events list</a>, the <a href="/calendar">calendar</a>, the <a href="/chat">chat</a>, or <a href="/submit">write a new post</a> straight
-from the browser.</p>
+from the browser. The social graph: <a href="/profiles/">people</a> (profiles you can follow),
+<a href="/groups/">groups</a> (join the book club; ask to join the private board, whose
+<a href="/board/">room</a> is members-only), and your <a href="/inbox">inbox</a>.</p>
 
 {% for post in collections.blog %}
 <article>
     <h2><a href="/blog/{{ post.slug }}">{{ post.title }}</a></h2>
-    <friendo-reactions target-type="post" target-id="{{ post.id }}" emojis="👍,❤️"></friendo-reactions>
+    <p class="post-meta">
+        {% if post.author %}by <a href="{{ post.author.url }}">{{ post.author.name }}</a>{% endif %}
+        {% if post.group %}<span class="tag">in <a href="/groups/{{ post.group.slug }}">{{ post.group.title }}</a></span>{% endif %}
+    </p>
+    <friendo-reactions post-id="{{ post.id }}" emojis="👍,❤️"></friendo-reactions>
 </article>
 {% empty %}
 <p>No blog posts yet. Add one under <code>content/blog/</code> or in the

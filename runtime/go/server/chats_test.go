@@ -21,7 +21,7 @@ func TestPageNamingAChatRegistersIt(t *testing.T) {
 <friendo-chat chat-id='general'></friendo-chat>
 <friendo-chat chat-id="not a slug"></friendo-chat>`), 0o644)
 	os.WriteFile(filepath.Join(pages, "blog", "[slug].html"),
-		[]byte(`<h1>{{ record.title }}</h1><friendo-chat chat-id="post-{{ record.slug }}"></friendo-chat>`), 0o644)
+		[]byte(`<h1>{{ post.title }}</h1><friendo-chat chat-id="post-{{ post.slug }}"></friendo-chat>`), 0o644)
 	db, err := data.Open(siteDir)
 	if err != nil {
 		t.Fatalf("open: %v", err)

@@ -66,15 +66,15 @@ func TestMemberSubmissionRateLimit(t *testing.T) {
 	// First-run owner (the jar keeps the session cookie), open submissions, and a
 	// plain member to submit as.
 	want(do("POST", "/setup", map[string]any{"email": "owner@test.com", "name": "Owner", "password": "password12345"}), 201, "setup")
-	want(do("PUT", "/settings", map[string]any{"content": map[string]any{"accept_submissions": true}}), 200, "enable submissions")
+	want(do("PUT", "/settings", map[string]any{"members_can_post": true}), 200, "enable submissions")
 	want(do("POST", "/users", map[string]any{"email": "m@test.com", "name": "M", "password": "password12345", "role": "member"}), 201, "create member")
 	want(do("POST", "/auth/login", map[string]any{"email": "m@test.com", "password": "password12345"}), 200, "member login")
 
 	// The bucket allows 20 submissions per window; the 21st is rejected.
 	for i := 0; i < 20; i++ {
-		resp := do("POST", "/collections/blog/records", map[string]any{"title": "Post", "body": "hi"})
+		resp := do("POST", "/collections/blog/posts", map[string]any{"title": "Post", "body": "hi"})
 		want(resp, 201, "submission within limit")
 	}
-	resp := do("POST", "/collections/blog/records", map[string]any{"title": "One too many", "body": "hi"})
+	resp := do("POST", "/collections/blog/posts", map[string]any{"title": "One too many", "body": "hi"})
 	want(resp, http.StatusTooManyRequests, "submission over limit")
 }

@@ -42,9 +42,20 @@ func init() {
 // Now is the clock the calendar filters use; tests pin it.
 var Now = time.Now
 
+// whenOf reads a record's when map, whichever way it was stored.
+func whenOf(v any) data.When {
+	switch w := v.(type) {
+	case data.When:
+		return w
+	case map[string]any:
+		return data.When(w)
+	}
+	return nil
+}
+
 // seriesOf pulls the *data.Event out of a record's when map.
 func seriesOf(record map[string]any) *data.Event {
-	when, _ := record["when"].(map[string]any)
+	when := whenOf(record["when"])
 	if when == nil {
 		return nil
 	}
@@ -113,8 +124,8 @@ func filterPast(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.E
 	// Only what has already started, most recent first.
 	var out []map[string]any
 	for i := len(list) - 1; i >= 0; i-- {
-		when, _ := list[i]["when"].(map[string]any)
-		if s, _ := when["starts"].(string); s != "" {
+		when := whenOf(list[i]["when"])
+		if s, _ := when["start"].(string); s != "" {
 			if t, err := time.Parse(time.RFC3339, s); err == nil && !t.Before(now) {
 				continue
 			}
@@ -181,15 +192,16 @@ func firstLocation(records []map[string]any, fallback *time.Location) *time.Loca
 	return fallback
 }
 
-// filterWhen formats a when map (record.when, an occurrence, or record.when.next)
-// for people. An optional parameter is a Go date layout for the date part.
+// filterWhen formats a when map (post.when, one date of it, or post.when.next)
+// for people, with a Go date layout for the date part. {{ post.when }} alone
+// prints the same thing with the default layout.
 func filterWhen(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
-	when, ok := in.Interface().(map[string]any)
-	if !ok || when == nil {
+	when := whenOf(in.Interface())
+	if when == nil {
 		return pongo2.AsValue(""), nil
 	}
-	starts, _ := when["starts"].(string)
-	ends, _ := when["ends"].(string)
+	starts, _ := when["start"].(string)
+	ends, _ := when["end"].(string)
 	allDay, _ := when["all_day"].(bool)
 	st, err := time.Parse(time.RFC3339, starts)
 	if err != nil {
@@ -206,26 +218,26 @@ func filterWhen(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.E
 	return pongo2.AsValue(data.FormatWhen(st, en, allDay, Now().In(st.Location()), layout)), nil
 }
 
-// filterGoogleCalendarURL turns a record (with `when`, and `location` if pinned)
-// into Google Calendar's pre-filled "add event" link: {{ record|google_calendar_url }}.
-// An expanded occurrence (from upcoming/in_month/…) links that one date; a
-// series links with its rule so Google repeats it. "" for a post with no time.
+// filterGoogleCalendarURL turns a post (with `when`, and `location` if it has one)
+// into Google Calendar's pre-filled "add event" link: {{ post|google_calendar_url }}.
+// An expanded date (from upcoming/in_month/…) links that one date; a series
+// links with its rule so Google repeats it. "" for a post with no time.
 func filterGoogleCalendarURL(in *pongo2.Value, param *pongo2.Value) (*pongo2.Value, *pongo2.Error) {
 	record, ok := in.Interface().(map[string]any)
 	if !ok || record == nil {
 		return pongo2.AsValue(""), nil
 	}
-	when, _ := record["when"].(map[string]any)
+	when := whenOf(record["when"])
 	if when == nil {
 		return pongo2.AsValue(""), nil
 	}
-	startsStr, _ := when["starts"].(string)
+	startsStr, _ := when["start"].(string)
 	starts, err := time.Parse(time.RFC3339, startsStr)
 	if err != nil {
 		return pongo2.AsValue(""), nil
 	}
 	var ends time.Time
-	if e, _ := when["ends"].(string); e != "" {
+	if e, _ := when["end"].(string); e != "" {
 		ends, _ = time.Parse(time.RFC3339, e)
 	}
 	if ev := seriesOf(record); ev != nil {
@@ -237,7 +249,7 @@ func filterGoogleCalendarURL(in *pongo2.Value, param *pongo2.Value) (*pongo2.Val
 	}
 	allDay, _ := when["all_day"].(bool)
 	rule := ""
-	if occ, _ := when["occurrence"].(bool); !occ {
+	if occ, _ := when["date"].(bool); !occ {
 		rule, _ = when["rule"].(string)
 	}
 	title, _ := record["title"].(string)

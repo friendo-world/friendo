@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/friendo-world/friendo/runtime/go/admin"
+	"github.com/friendo-world/friendo/runtime/go/api"
 	"github.com/friendo-world/friendo/runtime/go/calendar"
 	"github.com/friendo-world/friendo/runtime/go/content"
 	"github.com/friendo-world/friendo/runtime/go/data"
@@ -251,7 +252,7 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 	feed := calendar.Feed{
 		DB:        db,
 		SiteName:  siteCfg.Site.Name,
-		Visible:   collectionVisibility(table.snapshot, siteCfg),
+		View:      feedView(db, table.snapshot, siteCfg),
 		Permalink: permalinkResolver(table.snapshot),
 	}
 	feedOrPage := func(serve http.HandlerFunc) http.HandlerFunc {
@@ -466,24 +467,29 @@ type route struct {
 	params         []string
 	collectionName string
 	urlTemplate    string // literal path with [param] segments, e.g. "/blog/[slug]"
+	// virtual names a built-in that isn't a posts collection: "profiles" means
+	// pages/profiles/[slug].html reads the authors table (see data.ProfileBySlug).
+	virtual string
 	// gate is the page's {% members only %} tag (if any), compiled on its own so it
 	// can run before the page renders; gateErr is a broken tag, reported like any
 	// other template error when the page is requested.
-	gate    *pongo2.Template
-	gateErr error
+	gate     *pongo2.Template
+	gateText string // the tag's source, so a feed can tell what its `if` looks at
+	gateErr  error
 }
 
 // pageGate reads a page file and compiles its gate tag, if it has one.
-func pageGate(filePath string) (*pongo2.Template, error) {
+func pageGate(filePath string) (*pongo2.Template, string, error) {
 	src, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tag := renderer.FindGate(src)
 	if tag == "" {
-		return nil, nil
+		return nil, "", nil
 	}
-	return renderer.CompileGate(tag)
+	tpl, err := renderer.CompileGate(tag)
+	return tpl, tag, err
 }
 
 // buildRoutes walks the pages directory and creates a route table.
@@ -539,9 +545,14 @@ func buildRoutes(pagesDir string) ([]route, error) {
 			return fmt.Errorf("compiling route pattern %q: %w", regexPath, err)
 		}
 
-		gate, gateErr := pageGate(path)
+		gate, gateText, gateErr := pageGate(path)
 		if gateErr != nil {
 			log.Printf("Members-only tag in %s: %v", path, gateErr)
+		}
+
+		virtual := ""
+		if collectionName == "profiles" {
+			virtual = "profiles"
 		}
 
 		routes = append(routes, route{
@@ -550,7 +561,9 @@ func buildRoutes(pagesDir string) ([]route, error) {
 			params:         params,
 			collectionName: collectionName,
 			urlTemplate:    urlPath,
+			virtual:        virtual,
 			gate:           gate,
+			gateText:       gateText,
 			gateErr:        gateErr,
 		})
 
@@ -569,11 +582,110 @@ func collectionVisibility(current func() []route, siteCfg siteConfig) func(strin
 			if r.collectionName != collection {
 				continue
 			}
-			if r.gate != nil || siteCfg.Access.Requires(r.urlTemplate) != "" {
+			if r.gate != nil || siteCfg.Access.Requires(r.urlTemplate) != "" || siteCfg.Access.RequiresGroup(r.urlTemplate) != "" {
 				return false
 			}
 		}
 		return true
+	}
+}
+
+// A gate's `if` may look at the post ({% members only if not post.fields.hidden %})
+// — then the feed must ask per event, with the record in hand — or at things a
+// feed has no stand-in for (the page's collections, request…), which hides it.
+var (
+	gateNeedsRecordRe = regexp.MustCompile(`\b(post|event|group|profile)\b`)
+	gateNeedsPageRe   = regexp.MustCompile(`\b(collections|site|request|calendar|gate)\b`)
+)
+
+// memberVisibility is the feed's view for a signed-in member: a collection's
+// records appear when the member would see the collection's page — its [access]
+// rules pass for them and its gate tag lets them through. A gate that reads the
+// record is run per record; a visitor keeps the static rule.
+func memberVisibility(current func() []route, siteCfg siteConfig, db *data.DB, userCtx map[string]any) func(collection string, record map[string]any) bool {
+	groupOf := map[string]map[string]any{} // slug → group record, resolved once per feed
+	return func(collection string, record map[string]any) bool {
+		for _, r := range current() {
+			if r.collectionName != collection {
+				continue
+			}
+			if role := siteCfg.Access.Requires(r.urlTemplate); role != "" && renderer.CheckRole(userCtx, role) != nil {
+				return false
+			}
+			if slug := siteCfg.Access.RequiresGroup(r.urlTemplate); slug != "" && !renderer.InGroup(userCtx, slug) {
+				return false
+			}
+			if r.gate == nil {
+				continue
+			}
+			if gateNeedsPageRe.MatchString(r.gateText) {
+				return false
+			}
+			ctx := pongo2.Context{"user": userCtx}
+			if gateNeedsRecordRe.MatchString(r.gateText) {
+				rec := map[string]any{}
+				for k, v := range record {
+					rec[k] = v
+				}
+				rec["collection"] = collection
+				rec["group"] = nil
+				if slug := data.GroupSlugOf(record); slug != "" {
+					if g, seen := groupOf[slug]; seen {
+						rec["group"] = g
+					} else if g, err := db.GroupBySlug(slug); err == nil {
+						groupOf[slug] = g
+						rec["group"] = g
+					} else {
+						groupOf[slug] = nil
+					}
+				}
+				nameInContext(ctx, rec, collection)
+			}
+			if ge, err := renderer.CheckGate(r.gate, ctx); err != nil || ge != nil {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// feedView says who a calendar request is for: the member whose private token
+// is in ?token= (a bad one is refused), else whoever the session cookie names,
+// else a visitor. A member's view carries their groups, the collections they
+// may see, and — with ?mine=1 — just the series they answered or were invited to.
+func feedView(db *data.DB, current func() []route, siteCfg siteConfig) func(*http.Request) (calendar.View, string, error) {
+	static := collectionVisibility(current, siteCfg)
+	return func(r *http.Request) (calendar.View, string, error) {
+		var user *data.User
+		token := strings.TrimSpace(r.URL.Query().Get("token"))
+		if token != "" {
+			u, err := db.UserByCalendarToken(token)
+			if err != nil {
+				return calendar.View{}, "", calendar.ErrBadToken
+			}
+			user = u
+		} else {
+			user = admin.GetSessionUser(r, db)
+		}
+		mine := r.URL.Query().Get("mine") != ""
+		if user == nil {
+			v := calendar.StaticView(static)
+			if mine {
+				v.Only = map[string]bool{}
+			}
+			return v, "", nil
+		}
+		userCtx := viewerContext(db, user)
+		v := calendar.View{
+			SignedIn: true,
+			MemberOf: viewerGroups(db, user).memberOf,
+			Visible:  memberVisibility(current, siteCfg, db, userCtx),
+			Token:    token,
+		}
+		if mine {
+			v.Only = db.RSVPEventIDsForUser(user.ID)
+		}
+		return v, user.ID, nil
 	}
 }
 
@@ -622,8 +734,20 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 	// members-only prefix shows the sign-in page too rather than revealing
 	// which pages exist.
 	if required := siteCfg.Access.Requires(urlPath); required != "" {
-		if ge := renderer.CheckRole(viewerContext(user), required); ge != nil {
+		if ge := renderer.CheckRole(viewerContext(db, user), required); ge != nil {
 			renderBlocked(w, req, pagesDir, tplSet, baseContext(req, db, siteCfg, user), ge)
+			return
+		}
+	}
+	// [access] groups = { "/board/*" = "board" }: the path is for that group's members.
+	if slug := siteCfg.Access.RequiresGroup(urlPath); slug != "" {
+		viewer := viewerContext(db, user)
+		if ge := renderer.CheckRole(viewer, "member"); ge != nil {
+			renderBlocked(w, req, pagesDir, tplSet, baseContext(req, db, siteCfg, user), ge)
+			return
+		}
+		if !renderer.InGroup(viewer, slug) {
+			renderBlocked(w, req, pagesDir, tplSet, baseContext(req, db, siteCfg, user), &renderer.GateError{Role: "member", Reason: "condition"})
 			return
 		}
 	}
@@ -653,7 +777,7 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 		directPath := filepath.Join(pagesDir, filepath.Clean(urlPath)+".html")
 		if _, err := os.Stat(directPath); err == nil {
 			matched = &route{filePath: directPath}
-			matched.gate, matched.gateErr = pageGate(directPath)
+			matched.gate, matched.gateText, matched.gateErr = pageGate(directPath)
 		} else {
 			renderNotFound(w, req, db, pagesDir, tplSet, siteCfg, user)
 			return
@@ -675,7 +799,28 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 
 	ctx := baseContext(req, db, siteCfg, user)
 
-	if matched.collectionName != "" && paramValues != nil {
+	if matched.virtual == "profiles" && paramValues != nil {
+		// A member's profile page. Who may see it follows the site's
+		// profile_visibility setting: members-only shows the sign-in page in
+		// place, exactly like a gated page; public renders for everyone.
+		if !db.ProfilesVisibleTo(user != nil) {
+			renderBlocked(w, req, pagesDir, tplSet, ctx, &renderer.GateError{Role: "member", Reason: "signin"})
+			return
+		}
+		slug := paramValues["slug"]
+		if slug == "" {
+			for _, v := range paramValues {
+				slug = v
+			}
+		}
+		profile, err := db.ProfileBySlug(slug)
+		if err != nil {
+			renderNotFound(w, req, db, pagesDir, tplSet, siteCfg, user)
+			return
+		}
+		api.AttachProfileRelations(db, profile, time.Now(), false)
+		ctx["profile"] = profile
+	} else if matched.collectionName != "" && paramValues != nil {
 		for paramName, paramValue := range paramValues {
 			record, err := db.QueryCollectionByField(matched.collectionName, paramName, paramValue)
 			if err != nil {
@@ -688,13 +833,35 @@ func handleTemplate(w http.ResponseWriter, req *http.Request, db *data.DB, pages
 				renderNotFound(w, req, db, pagesDir, tplSet, siteCfg, user)
 				return
 			}
+			record["collection"] = matched.collectionName
+			// A group the viewer can't see, or a post filed under one: the sign-in
+			// page for a visitor, a 404 for a member who isn't in it.
+			viewer := viewerGroups(db, user)
+			cols, _ := ctx["collections"].(map[string]any)
+			visibleGroups, _ := cols[data.GroupsCollection].([]map[string]any)
+			if blocked, signIn := groupBlock(db, record, matched.collectionName, viewer, visibleGroups); blocked {
+				if signIn {
+					renderBlocked(w, req, pagesDir, tplSet, ctx, &renderer.GateError{Role: "member", Reason: "signin"})
+				} else {
+					renderNotFound(w, req, db, pagesDir, tplSet, siteCfg, user)
+				}
+				return
+			}
 			attachRecordRelations(db, record)
-			ctx["record"] = record
+			if matched.collectionName == data.GroupsCollection && db.FeatureOn("groups") {
+				attachGroupRelations(db, record)
+			}
+			if db.FeatureOn("groups") {
+				data.AttachGroups([]map[string]any{record}, visibleGroups)
+			} else {
+				record["group"] = nil
+			}
+			nameInContext(ctx, record, matched.collectionName)
 		}
 	}
 
 	// The page's own {% members only %} tag, run against the full context (after
-	// the record lookup, so an `if` can look at the record too).
+	// the post lookup, so an `if` can look at the post too).
 	if matched.gate != nil {
 		ge, err := renderer.CheckGate(matched.gate, ctx)
 		if err != nil {
@@ -744,11 +911,29 @@ func registerChats(db *data.DB, html string) {
 	if !strings.Contains(html, "<friendo-chat") || !db.FeatureOn("chats") {
 		return
 	}
-	for _, id := range data.ChatIDsInHTML(html) {
-		if made, err := db.EnsureChat(id); err != nil {
-			log.Printf("Registering chat %q: %v", id, err)
+	for _, ref := range data.ChatRefsInHTML(html) {
+		if ref.Group == "" {
+			if made, err := db.EnsureChat(ref.Key); err != nil {
+				log.Printf("Registering chat %q: %v", ref.Key, err)
+			} else if made {
+				log.Printf("New chat %q (named on a page)", ref.Key)
+			}
+			continue
+		}
+		// A group's chat: <friendo-chat chat-id="general" group="board">. The
+		// group must exist (and groups be on); the room is its members' only.
+		if !db.FeatureOn("groups") {
+			continue
+		}
+		group, err := db.GroupBySlug(ref.Group)
+		if err != nil {
+			log.Printf("Chat %q names group %q, which doesn't exist", ref.Key, ref.Group)
+			continue
+		}
+		if made, err := db.EnsureGroupChat(group["id"].(string), ref.Key); err != nil {
+			log.Printf("Registering chat %q for group %q: %v", ref.Key, ref.Group, err)
 		} else if made {
-			log.Printf("New chat %q (named on a page)", id)
+			log.Printf("New chat %q in group %q (named on a page)", ref.Key, ref.Group)
 		}
 	}
 }
@@ -757,11 +942,22 @@ func registerChats(db *data.DB, html string) {
 // collections, and who's viewing (user is nil for a visitor).
 func baseContext(req *http.Request, db *data.DB, siteCfg siteConfig, user *data.User) pongo2.Context {
 	origin := requestOrigin(req)
+	collections := buildCollectionsContext(db)
+	// Groups the viewer can't see — and the posts filed under them — drop out here.
+	applyGroupVisibility(db, collections, viewerGroups(db, user))
+	// collections.profiles is every profile on the site — when the viewer may see
+	// profiles at all (members-only sites give a visitor an empty list).
+	collections["profiles"] = []map[string]any{}
+	if db.ProfilesVisibleTo(user != nil) {
+		if profiles, err := db.ListProfiles(); err == nil {
+			collections["profiles"] = profiles
+		}
+	}
 	return pongo2.Context{
 		"site":        map[string]string{"name": siteCfg.Site.Name, "url": origin},
 		"request":     map[string]string{"path": req.URL.Path},
-		"collections": buildCollectionsContext(db),
-		"user":        viewerContext(user),
+		"collections": collections,
+		"user":        viewerContext(db, user),
 		// {{ calendar.google }} / .webcal / .ics — ways to subscribe to the site's events.
 		"calendar": calendar.Links(origin),
 	}
@@ -782,17 +978,40 @@ func requestOrigin(req *http.Request) string {
 
 // viewerContext is the signed-in account as templates see it: {{ user.name }},
 // {{ user.role }} and so on — never the password hash. nil when nobody is signed
-// in, so {% if user %} reads naturally.
-func viewerContext(u *data.User) map[string]any {
+// in, so {% if user %} reads naturally. author_id is the profile the viewer's
+// comments and posts attribute to, so a page can tell "this is my profile"
+// ({% if record.id == user.author_id %}).
+func viewerContext(db *data.DB, u *data.User) map[string]any {
 	if u == nil {
 		return nil
 	}
-	return map[string]any{
-		"id":    u.ID,
-		"name":  u.Name,
-		"email": u.Email,
-		"role":  u.Role,
+	authorID := db.DefaultAuthorID(u.ID)
+	m := map[string]any{
+		"id":         u.ID,
+		"name":       u.Name,
+		"email":      u.Email,
+		"role":       u.Role,
+		"profile_id": authorID,
 	}
+	// The viewer's side of the graph, as author ids: who they follow, who follows
+	// them, and the overlap. Always lists (never nil), so `in` and |length work;
+	// empty while the follows switch is off.
+	following, followers, friends := []string{}, []string{}, []string{}
+	if db.FeatureOn("follows") && authorID != "" {
+		following, followers, friends = db.Following(authorID), db.Followers(authorID), db.Friends(authorID)
+	}
+	m["following"], m["followers"], m["friends"] = following, followers, friends
+	// The groups they belong to, by slug — {% members only if "board" in user.groups %}.
+	m["groups"] = []string{}
+	if db.FeatureOn("groups") && authorID != "" {
+		m["groups"] = db.GroupsFor(authorID)
+	}
+	// Unread notifications ({{ user.unread }}), for a badge in a layout.
+	m["unread"] = 0
+	if db.NotificationsOn() {
+		m["unread"] = db.UnreadCount(u.ID)
+	}
+	return m
 }
 
 // renderBlocked answers a members-only page the viewer may not see: the same URL,
@@ -844,7 +1063,7 @@ func renderBlocked(w http.ResponseWriter, req *http.Request, pagesDir string, tp
 
 // builtinLoginPage is what a members-only page shows when the site has no
 // pages/login.html of its own: the site name, one line about why, and
-// <friendo-auth reload>, which reloads the page once you're signed in.
+// <friendo-signin reload>, which reloads the page once you're signed in.
 var builtinLoginPage = htmltpl.Must(htmltpl.New("login").Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -865,7 +1084,7 @@ a{color:inherit}
 {{else if eq .Reason "role"}}<p>This page is for {{.Required}}s and up. You're signed in as {{with .User}}{{.name}} ({{.role}}){{end}}.</p>
 {{else}}<p>This page isn't available to your account{{with .User}} ({{.email}}){{end}}.</p>
 {{end}}
-<friendo-auth reload></friendo-auth>
+<friendo-signin reload></friendo-signin>
 <p><a href="/">← Home</a></p>
 <script src="/friendo.js" defer></script>
 </body>
@@ -923,9 +1142,11 @@ func buildCollectionsContext(db *data.DB) map[string]any {
 		}
 		// Every record carries its calendar series as record.when (nil for a post
 		// with no time), so a listing can print dates and the upcoming/in_month
-		// filters can expand without more lookups — and its pin as record.location.
+		// filters can expand without more lookups — its pin as record.location,
+		// and its profile as record.author ({{ post.author.name }}).
 		db.AttachWhen(records, time.Now(), false)
 		db.AttachLocations(records)
+		db.AttachAuthors(records)
 		result[name] = records
 	}
 
@@ -949,6 +1170,9 @@ func attachRecordRelations(db *data.DB, record map[string]any) {
 
 	// A feature that's switched off (Settings → Features) renders as if the
 	// post had none of it, so a template's {% if record.comments %} stays quiet.
+
+	// The post's profile ({{ record.author.name }}, .slug, .avatar, .bio).
+	db.AttachAuthors([]map[string]any{record})
 
 	// Approved comments, oldest first (always present, possibly empty).
 	record["comments"] = []map[string]any{}
@@ -1004,9 +1228,23 @@ func attachRecordRelations(db *data.DB, record map[string]any) {
 	}
 }
 
-// recordPollSlug extracts data.poll.slug from a record, or "" if absent.
+// nameInContext puts a post into the page context under every name a template
+// may call it: `post` always, `group` on a group's page, `event` when it has a
+// time — so {{ event.when }} and {{ group.members }} read naturally while
+// {{ post.title }} always works.
+func nameInContext(ctx pongo2.Context, post map[string]any, collection string) {
+	ctx["post"] = post
+	if collection == data.GroupsCollection {
+		ctx["group"] = post
+	}
+	if w, _ := post["when"].(data.When); w != nil {
+		ctx["event"] = post
+	}
+}
+
+// recordPollSlug extracts fields.poll.slug from a post, or "" if absent.
 func recordPollSlug(record map[string]any) string {
-	data, _ := record["data"].(map[string]any)
+	data, _ := record["fields"].(map[string]any)
 	poll, _ := data["poll"].(map[string]any)
 	slug, _ := poll["slug"].(string)
 	return slug

@@ -1,8 +1,10 @@
 ---
 title: Book club
-when: 2026-10-06 19:00 to 20:30
-repeats: weekly
-except: [2026-11-24, 2026-12-29]
+when:
+  start: 2026-10-06 19:00 to 20:30
+  repeats: weekly
+  except: [2026-11-24, 2026-12-29]
+group: book-club
 ---
 
 Every Tuesday evening. This is one post; the `upcoming` filter expands it into

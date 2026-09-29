@@ -12,24 +12,47 @@ import (
 
 // Parsing a post's `when`.
 //
-// The reserved keys — in a content file's front matter and in a <friendo-form>'s
-// field names alike — are flat, so the two are spelled the same:
+// One key, `when`, in a content file's front matter, in a <friendo-form> and in
+// the records API alike. It is a string you'd type by hand, or a map when
+// there's more to say:
 //
 //	when: 2026-10-04 19:00 to 21:00      # or 2026-10-04 (all day), 2026-10-04 19:00,
 //	                                     #    2026-10-04 to 2026-10-06, mondays 19:00 to 20:30
-//	ends: 2026-10-04 21:00               # or a bare time: 21:00 / 9pm
-//	timezone: America/Los_Angeles        # default: the site's
-//	repeats: weekly                      # daily | weekly | monthly | yearly | every 2 weeks
-//	repeats: {every: month, on: first tuesday, until: 2027-06-30}   # or count: 12
-//	except: [2026-11-25]                 # skipped dates
-//	rrule: "FREQ=WEEKLY;BYDAY=TU,TH"     # escape hatch, stored verbatim
+//	when:
+//	  start: 2026-10-04 19:00            # the same shorthands work here
+//	  end: 21:00                         # or a full date-time
+//	  timezone: America/Los_Angeles      # default: the site's
+//	  repeats: weekly                    # daily | weekly | monthly | yearly | every 2 weeks
+//	  repeats: {every: month, on: first tuesday, until: 2027-06-30}   # or count: 12
+//	  except: [2026-11-25]               # skipped dates
+//	  rrule: "FREQ=WEEKLY;BYDAY=TU,TH"   # escape hatch, stored verbatim
 //
 // ParseWhen is the one parser both the content importer and the record API use,
 // so the two ways of writing an event can't drift apart.
 
 // WhenKeys are the reserved names ParseWhen consumes. Callers delete them from
-// the record's free-form data after lifting, as the importer does for `location`.
-var WhenKeys = []string{"when", "ends", "timezone", "repeats", "except", "rrule", "all_day"}
+// the record's free-form fields after lifting, as the importer does for `location`.
+var WhenKeys = []string{"when"}
+
+// When is a post's time as templates and the API see it: start, end, all_day,
+// timezone, repeats, except and next. Printed on its own ({{ post.when }}) it
+// reads the way a person would say it — "Sat Oct 4, 10 am – 4 pm".
+type When map[string]any
+
+// String formats the start and end for people (see FormatWhen).
+func (w When) String() string {
+	start, _ := w["start"].(string)
+	st, err := time.Parse(time.RFC3339, start)
+	if err != nil {
+		return ""
+	}
+	var en time.Time
+	if e, _ := w["end"].(string); e != "" {
+		en, _ = time.Parse(time.RFC3339, e)
+	}
+	allDay, _ := w["all_day"].(bool)
+	return FormatWhen(st, en, allDay, time.Now().In(st.Location()), "")
+}
 
 // HasWhen reports whether a field set declares a time.
 func HasWhen(meta map[string]any) bool {
@@ -37,10 +60,10 @@ func HasWhen(meta map[string]any) bool {
 	return ok
 }
 
-// ParseWhen reads the reserved keys into a series. present is false when there
-// is no `when` at all. A present but unusable `when` yields ev == nil and a
-// warning; lesser problems (a bad end, a bad zone) yield warnings and a best
-// effort. siteLoc is the zone a time without one is read in.
+// ParseWhen reads `when` into a series. present is false when there is no
+// `when` at all. A present but unusable `when` yields ev == nil and a warning;
+// lesser problems (a bad end, a bad zone) yield warnings and a best effort.
+// siteLoc is the zone a time without one is read in.
 func ParseWhen(meta map[string]any, siteLoc *time.Location) (ev *Event, warnings []string, present bool) {
 	raw, present := meta["when"]
 	if !present {
@@ -51,9 +74,25 @@ func ParseWhen(meta map[string]any, siteLoc *time.Location) (ev *Event, warnings
 	}
 	warn := func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
 
+	// The shorthand string is the start; the map form spells the parts out.
+	spec := map[string]any{}
+	switch t := raw.(type) {
+	case map[string]any:
+		spec = t
+	case When:
+		spec = map[string]any(t)
+	default:
+		spec["start"] = raw
+	}
+	raw = spec["start"]
+	if raw == nil {
+		warn("when: needs a start (when: 2026-10-04 19:00, or when: {start: …})")
+		return nil, warnings, true
+	}
+
 	loc := siteLoc
 	tzName := ""
-	if tz := strings.TrimSpace(stringOf(meta["timezone"])); tz != "" {
+	if tz := strings.TrimSpace(stringOf(spec["timezone"])); tz != "" {
 		if l, err := time.LoadLocation(tz); err == nil {
 			loc, tzName = l, tz
 		} else {
@@ -61,26 +100,26 @@ func ParseWhen(meta map[string]any, siteLoc *time.Location) (ev *Event, warnings
 		}
 	}
 
-	spec, err := parseWhenValue(raw, loc, time.Now().In(loc))
+	parsed, err := parseWhenValue(raw, loc, time.Now().In(loc))
 	if err != nil {
 		warn("when: %v", err)
 		return nil, warnings, true
 	}
-	ev = &Event{Starts: spec.starts, Ends: spec.ends, AllDay: spec.allDay, Timezone: tzName, loc: loc}
+	ev = &Event{Starts: parsed.starts, Ends: parsed.ends, AllDay: parsed.allDay, Timezone: tzName, loc: loc}
 
-	if v, ok := meta["ends"]; ok && v != nil && stringOf(v) != "" {
+	if v, ok := spec["end"]; ok && v != nil && stringOf(v) != "" {
 		end, err := parseEndValue(v, ev.Starts, loc)
 		if err != nil {
-			warn("ends: %v", err)
+			warn("end: %v", err)
 		} else {
 			ev.Ends = end
-			if end.Hour() != 0 || end.Minute() != 0 || !spec.allDay {
+			if end.Hour() != 0 || end.Minute() != 0 || !parsed.allDay {
 				// An explicit clock time on the end makes a timed event.
 				ev.AllDay = false
 			}
 		}
 	}
-	if v, ok := meta["all_day"]; ok {
+	if v, ok := spec["all_day"]; ok {
 		switch b := v.(type) {
 		case bool:
 			ev.AllDay = b
@@ -98,29 +137,29 @@ func ParseWhen(meta map[string]any, siteLoc *time.Location) (ev *Event, warnings
 		}
 	}
 	if !ev.Ends.IsZero() && ev.Ends.Before(ev.Starts) {
-		warn("ends (%s) is before when (%s); ignoring the end", ev.Ends.Format("2006-01-02 15:04"), ev.Starts.Format("2006-01-02 15:04"))
+		warn("end (%s) is before start (%s); ignoring the end", ev.Ends.Format("2006-01-02 15:04"), ev.Starts.Format("2006-01-02 15:04"))
 		ev.Ends = time.Time{}
 	}
 
 	// Recurrence: an explicit rrule wins; else `repeats`; else the weekday sugar.
-	if r := strings.TrimSpace(stringOf(meta["rrule"])); r != "" {
+	if r := strings.TrimSpace(stringOf(spec["rrule"])); r != "" {
 		if _, err := rrule.StrToROptionInLocation(strings.TrimPrefix(r, "RRULE:"), loc); err != nil {
 			warn("rrule %q: %v", r, err)
 		} else {
 			ev.RRule = strings.TrimPrefix(r, "RRULE:")
 		}
-	} else if v, ok := meta["repeats"]; ok && v != nil {
+	} else if v, ok := spec["repeats"]; ok && v != nil {
 		rule, err := ParseRepeats(v, ev.Starts, loc)
 		if err != nil {
 			warn("repeats: %v", err)
 		} else {
 			ev.RRule = rule
 		}
-	} else if spec.weekly {
+	} else if parsed.weekly {
 		ev.RRule = "FREQ=WEEKLY"
 	}
 
-	if v, ok := meta["except"]; ok && v != nil {
+	if v, ok := spec["except"]; ok && v != nil {
 		for _, item := range listOf(v) {
 			d, err := parseDateValue(item, loc)
 			if err != nil {
@@ -133,7 +172,7 @@ func ParseWhen(meta map[string]any, siteLoc *time.Location) (ev *Event, warnings
 	return ev, warnings, true
 }
 
-// LiftWhen parses the reserved keys out of a record's fields and removes them,
+// LiftWhen parses `when` out of a record's fields and removes it,
 // returning the series (nil if the record declares no usable time). Warnings are
 // for the caller to surface.
 func LiftWhen(meta map[string]any, siteLoc *time.Location) (*Event, []string) {
@@ -159,28 +198,15 @@ var (
 	rangeSplitRe   = regexp.MustCompile(`\s+(?:to|-|–|—|until)\s+`)
 )
 
-// parseWhenValue reads the `when` value: a string in one of the documented
-// shapes, or a time.Time (YAML decodes a bare 2026-10-04 to one).
+// parseWhenValue reads a start: a string in one of the documented shapes, or a
+// time.Time (YAML decodes a bare 2026-10-04 to one).
 func parseWhenValue(v any, loc *time.Location, now time.Time) (whenSpec, error) {
 	switch t := v.(type) {
 	case time.Time:
 		w := inLocation(t, loc)
 		return whenSpec{starts: w, allDay: isMidnight(w)}, nil
 	case map[string]any:
-		// Tolerate {starts, ends} from an API client.
-		if s, ok := t["starts"]; ok {
-			spec, err := parseWhenValue(s, loc, now)
-			if err != nil {
-				return spec, err
-			}
-			if e, ok := t["ends"]; ok && e != nil {
-				if end, err := parseEndValue(e, spec.starts, loc); err == nil {
-					spec.ends = end
-				}
-			}
-			return spec, nil
-		}
-		return whenSpec{}, fmt.Errorf("expected a date like 2026-10-04 19:00, got a map")
+		return whenSpec{}, fmt.Errorf("expected a date like 2026-10-04 19:00 for start, got a map")
 	}
 	s := strings.TrimSpace(stringOf(v))
 	if s == "" {

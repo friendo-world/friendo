@@ -251,16 +251,18 @@ func (c *SiteClient) PushAssets(files []map[string]string) error {
 	return c.post("/_/api/push/assets", body)
 }
 
-// PushData upserts records into the site's database.
-func (c *SiteClient) PushData(records, events []map[string]any) error {
-	body := map[string]any{"records": records, "events": events}
+// PushData upserts records (with their calendar series and group memberships)
+// into the site's database.
+func (c *SiteClient) PushData(records, events, memberships []map[string]any) error {
+	body := map[string]any{"posts": records, "events": events, "memberships": memberships}
 	return c.post("/_/api/push/data", body)
 }
 
-// PushUsers upserts user accounts (and their author profiles) into the site's
-// database. Authors travel with users so content's author_id stays valid.
-func (c *SiteClient) PushUsers(users, authors []map[string]any) error {
-	body := map[string]any{"users": users, "authors": authors}
+// PushUsers upserts user accounts (and their author profiles, and the follows
+// between them) into the site's database. Authors travel with users so content's
+// author_id stays valid; follows travel with authors for the same reason.
+func (c *SiteClient) PushUsers(users, authors, follows []map[string]any) error {
+	body := map[string]any{"users": users, "authors": authors, "follows": follows}
 	return c.post("/_/api/push/users", body)
 }
 
@@ -289,32 +291,34 @@ func (c *SiteClient) PullFiles() ([]map[string]any, error) {
 
 // PullData fetches all records from the site.
 func (c *SiteClient) PullData() ([]map[string]any, error) {
-	records, _, err := c.PullDataAndEvents()
+	records, _, _, err := c.PullDataAndEvents()
 	return records, err
 }
 
-// PullDataAndEvents fetches all records plus their calendar series.
-func (c *SiteClient) PullDataAndEvents() (records, events []map[string]any, err error) {
+// PullDataAndEvents fetches all records plus their calendar series and group memberships.
+func (c *SiteClient) PullDataAndEvents() (records, events, memberships []map[string]any, err error) {
 	var result struct {
-		Records []map[string]any `json:"records"`
-		Events  []map[string]any `json:"events"`
+		Records     []map[string]any `json:"posts"`
+		Events      []map[string]any `json:"events"`
+		Memberships []map[string]any `json:"memberships"`
 	}
 	if err := c.get("/_/api/pull/data", &result); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return result.Records, result.Events, nil
+	return result.Records, result.Events, result.Memberships, nil
 }
 
-// PullUsers fetches all user accounts (and author profiles) from the site.
-func (c *SiteClient) PullUsers() (users, authors []map[string]any, err error) {
+// PullUsers fetches all user accounts (author profiles and follows too) from the site.
+func (c *SiteClient) PullUsers() (users, authors, follows []map[string]any, err error) {
 	var result struct {
 		Users   []map[string]any `json:"users"`
 		Authors []map[string]any `json:"authors"`
+		Follows []map[string]any `json:"follows"`
 	}
 	if err := c.get("/_/api/pull/users", &result); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return result.Users, result.Authors, nil
+	return result.Users, result.Authors, result.Follows, nil
 }
 
 // PullSettings fetches all site settings.

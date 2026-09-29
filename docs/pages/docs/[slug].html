@@ -1,13 +1,13 @@
 {% extends "layouts/base.html" %}
 
-{% block title %}{{ record.title }} — {{ site.name }}{% endblock %}
+{% block title %}{{ post.title }} — {{ site.name }}{% endblock %}
 
 {% block content %}
 <article class="doc">
-  <span class="doc-kicker label">{{ record.data.group }}</span>
-  <h1 class="doc-title">{{ record.title }}</h1>
+  <span class="doc-kicker label">{{ post.fields.section }}</span>
+  <h1 class="doc-title">{{ post.title }}</h1>
   <div class="doc-body">
-    {{ record.body|markdown }}
+    {{ post.body|markdown }}
   </div>
 </article>
 {% endblock %}

@@ -14,6 +14,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/flosch/pongo2/v6"
 
+	"github.com/friendo-world/friendo/runtime/go/api"
 	"github.com/friendo-world/friendo/runtime/go/calendar"
 	"github.com/friendo-world/friendo/runtime/go/data"
 	"github.com/friendo-world/friendo/runtime/go/renderer" // also registers filters + gate tags
@@ -123,7 +124,19 @@ func exportStatic() error {
 		}
 		db.AttachWhen(records, time.Now(), false) // {{ e.when }} on listings
 		db.AttachLocations(records)
+		db.AttachAuthors(records) // {{ e.author.name }}
 		collections[name] = records
+	}
+	// A static site has no viewer: only public groups, and only the posts that
+	// aren't filed under a non-public one, go out.
+	exportGroupVisibility(db, collections)
+	// Member profiles are in the export only when the site made them public — a
+	// static host can't ask who's looking.
+	collections["profiles"] = []map[string]any{}
+	if db.ProfileVisibility() == "public" {
+		if profiles, err := db.ListProfiles(); err == nil {
+			collections["profiles"] = profiles
+		}
 	}
 
 	count := 0
@@ -150,7 +163,7 @@ func exportStatic() error {
 		if err != nil {
 			return err
 		}
-		if renderer.FindGate(src) != "" || cfg.Access.Requires(urlPath) != "" {
+		if renderer.FindGate(src) != "" || cfg.Access.Requires(urlPath) != "" || cfg.Access.RequiresGroup(urlPath) != "" {
 			fmt.Printf("Skipped %s (members only)\n", rel)
 			return nil
 		}
@@ -233,7 +246,7 @@ func writeFeeds(db *data.DB, pagesDir, distDir string, cfg exportConfig) (int, e
 		collection := parts[len(parts)-2]
 		urlPath := "/" + strings.TrimSuffix(rel, ".html")
 		src, _ := os.ReadFile(path)
-		if renderer.FindGate(src) != "" || cfg.Access.Requires(urlPath) != "" {
+		if renderer.FindGate(src) != "" || cfg.Access.Requires(urlPath) != "" || cfg.Access.RequiresGroup(urlPath) != "" {
 			gated[collection] = true
 		}
 		if _, seen := pagePath[collection]; !seen {
@@ -249,7 +262,7 @@ func writeFeeds(db *data.DB, pagesDir, distDir string, cfg exportConfig) (int, e
 		}
 		return strings.ReplaceAll(tpl, "[slug]", fields["slug"])
 	}
-	entries, err := calendar.Collect(db, visible, permalink, calendar.Filter{})
+	entries, err := calendar.Collect(db, calendar.StaticView(visible), permalink, calendar.Filter{})
 	if err != nil {
 		return 0, err
 	}
@@ -270,7 +283,7 @@ func writeFeeds(db *data.DB, pagesDir, distDir string, cfg exportConfig) (int, e
 	payload := map[string]any{
 		"site": cfg.Site.Name, "timezone": db.Location.String(),
 		"from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339),
-		"events": calendar.Occurrences(entries, from, to, cfg.baseURL()),
+		"events": calendar.Occurrences(entries, from, to, cfg.baseURL(), nil),
 	}
 	b, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -290,13 +303,40 @@ func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map
 	}
 	collectionName := parts[len(parts)-2]
 
-	// Only published posts get a generated page (no draft/pending leak).
-	records, err := db.QueryPublishedCollection(collectionName)
-	if err != nil || len(records) == 0 {
+	var records []map[string]any
+	if collectionName == "profiles" {
+		// pages/profiles/[slug].html renders profiles, not posts — and only when
+		// the site made profiles public.
+		if db.ProfileVisibility() != "public" {
+			fmt.Printf("Skipped %s (profiles are members only)\n", rel)
+			return nil
+		}
+		profiles, err := db.ListProfiles()
+		if err != nil {
+			return nil
+		}
+		for _, p := range profiles {
+			api.AttachProfileRelations(db, p, time.Now(), false)
+		}
+		records = profiles
+	} else {
+		// Only published posts get a generated page (no draft/pending leak).
+		var err error
+		records, err = db.QueryPublishedCollection(collectionName)
+		if err != nil {
+			return nil
+		}
+		db.AttachWhen(records, time.Now(), false) // {{ post.when }} on the page
+		db.AttachLocations(records)
+		db.AttachAuthors(records)
+		for _, r := range records {
+			r["collection"] = collectionName
+		}
+		records = exportVisibleRecords(db, collectionName, records, collections)
+	}
+	if len(records) == 0 {
 		return nil
 	}
-	db.AttachWhen(records, time.Now(), false) // {{ record.when }} on the page
-	db.AttachLocations(records)
 
 	tpl, err := tplSet.FromFile("pages/" + rel)
 	if err != nil {
@@ -315,8 +355,18 @@ func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map
 			"site":        site,
 			"request":     map[string]string{"path": urlPath},
 			"collections": collections,
-			"record":      record,
 			"calendar":    calendar.Links(site["url"]),
+		}
+		if collectionName == "profiles" {
+			ctx["profile"] = record
+		} else {
+			ctx["post"] = record
+			if collectionName == data.GroupsCollection {
+				ctx["group"] = record
+			}
+			if w, _ := record["when"].(data.When); w != nil {
+				ctx["event"] = record
+			}
 		}
 
 		out, err := tpl.Execute(ctx)
@@ -337,6 +387,86 @@ func renderDynamicPages(tplSet *pongo2.TemplateSet, db *data.DB, collections map
 	}
 
 	return nil
+}
+
+// exportGroupVisibility trims an export's collections the way the site does for
+// a visitor: non-public groups and the posts filed under them are left out, and
+// every record gets record.group.
+func exportGroupVisibility(db *data.DB, collections map[string]any) {
+	groups, _ := collections[data.GroupsCollection].([]map[string]any)
+	on := db.FeatureOn("groups")
+	visible := []map[string]any{}
+	hidden := map[string]bool{}
+	for _, g := range groups {
+		if !on || data.CanSeeGroup(g, false, nil) {
+			visible = append(visible, g)
+		} else if slug, _ := g["slug"].(string); slug != "" {
+			hidden[slug] = true
+		}
+	}
+	if groups != nil {
+		collections[data.GroupsCollection] = visible
+	}
+	for name, v := range collections {
+		records, ok := v.([]map[string]any)
+		if !ok || name == data.GroupsCollection || name == "profiles" {
+			continue
+		}
+		kept := []map[string]any{}
+		for _, r := range records {
+			if !hidden[data.GroupSlugOf(r)] {
+				kept = append(kept, r)
+			}
+		}
+		collections[name] = kept
+		if on {
+			data.AttachGroups(kept, visible)
+		}
+	}
+	if on {
+		for _, g := range visible {
+			visibility, join := data.GroupSettings(g)
+			g["settings"] = map[string]any{"visibility": visibility, "join": join}
+			members, err := db.ListMembers(g["id"].(string), "")
+			if err != nil {
+				members = []map[string]any{}
+			}
+			g["members"], g["member_count"] = members, len(members)
+		}
+	}
+}
+
+// exportVisibleRecords keeps the records of a dynamic page a visitor may see:
+// for groups, the public ones (already trimmed in collections); for anything
+// else, the posts not filed under a hidden group.
+func exportVisibleRecords(db *data.DB, collection string, records []map[string]any, collections map[string]any) []map[string]any {
+	visible, _ := collections[collection].([]map[string]any)
+	if !db.FeatureOn("groups") {
+		return records
+	}
+	keep := map[string]bool{}
+	for _, r := range visible {
+		if id, _ := r["id"].(string); id != "" {
+			keep[id] = true
+		}
+	}
+	out := []map[string]any{}
+	for _, r := range records {
+		if id, _ := r["id"].(string); keep[id] {
+			out = append(out, r)
+		}
+	}
+	// The trimmed records in `collections` carry group/settings/members; use those.
+	byID := map[string]map[string]any{}
+	for _, r := range visible {
+		byID[r["id"].(string)] = r
+	}
+	for i, r := range out {
+		if full := byID[r["id"].(string)]; full != nil {
+			out[i] = full
+		}
+	}
+	return out
 }
 
 // exportBundle packages the site directory and the friendo binary into a .tar.gz archive.

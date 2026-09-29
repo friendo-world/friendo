@@ -87,7 +87,7 @@ func main() {
 		},
 	}
 	serveCmd.Flags().IntVarP(&port, "port", "p", 3000, "Port to run the server on")
-	serveCmd.Flags().BoolVar(&openAdmin, "open-admin", false, "Skip admin UI authentication for every request")
+	serveCmd.Flags().BoolVar(&openAdmin, "no-login", false, "Skip the admin sign-in for every request (never on a public site)")
 	serveCmd.Flags().BoolVar(&requireLogin, "require-login", false, "Ask for a sign-in even on localhost (by default the admin opens without one when no email provider is configured)")
 
 	// --- export ---
@@ -96,7 +96,7 @@ func main() {
 		Use:   "export",
 		Short: "Export your site as static HTML or a self-contained bundle",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Compile content/ first (like serve/build/deploy do) so an export
+			// Compile content/ first (like serve/import/deploy do) so an export
 			// reflects the latest markdown, not stale database state.
 			if dir, err := os.Getwd(); err == nil && content.HasContent(dir) {
 				if _, err := content.Build(dir); err != nil {
@@ -112,10 +112,10 @@ func main() {
 	}
 	exportCmd.Flags().StringVar(&exportMode, "mode", "static", "Export mode: static or bundle")
 
-	// --- build ---
+	// --- import ---
 	var buildCmd = &cobra.Command{
-		Use:   "build",
-		Short: "Compile the content/ folder (markdown files) into the site database",
+		Use:   "import",
+		Short: "Read the content/ folder (markdown files) into the site database",
 		Run: func(cmd *cobra.Command, args []string) {
 			dir, err := os.Getwd()
 			if err != nil {
@@ -123,7 +123,7 @@ func main() {
 				os.Exit(1)
 			}
 			if !content.HasContent(dir) {
-				fmt.Println("No content/ directory — nothing to build.")
+				fmt.Println("No content/ directory — nothing to import.")
 				return
 			}
 			res, err := content.Build(dir)
@@ -131,7 +131,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("Build complete — %s\n", res.Summary())
+			fmt.Printf("Imported — %s\n", res.Summary())
 			for _, w := range res.Warnings {
 				fmt.Fprintf(os.Stderr, "  warning: %s\n", w)
 			}
@@ -172,7 +172,7 @@ claims the subdomain, and pushes your content.
 	var pushCmd = &cobra.Command{
 		Use:   "push",
 		Short: "Push local state to the deployed site",
-		Long:  "Push templates and static assets. Use --data to include records, --users to include user accounts.",
+		Long:  "Push templates and static assets. Use --posts to include posts (with their events and group memberships), --users to include accounts and profiles.",
 		Run: func(cmd *cobra.Command, args []string) {
 			opts := deploy.PushOptions{
 				DryRun: pushDryRun,
@@ -187,8 +187,8 @@ claims the subdomain, and pushes your content.
 		},
 	}
 	pushCmd.Flags().BoolVar(&pushDryRun, "dry-run", false, "Print what would be pushed without doing it")
-	pushCmd.Flags().BoolVar(&pushData, "data", false, "Also push records (posts, etc.)")
-	pushCmd.Flags().BoolVar(&pushUsers, "users", false, "Also push user accounts")
+	pushCmd.Flags().BoolVar(&pushData, "posts", false, "Also push posts (with their events and group memberships)")
+	pushCmd.Flags().BoolVar(&pushUsers, "users", false, "Also push accounts and profiles")
 	pushCmd.Flags().StringVar(&pushTarget, "target", "", "Override deploy target URL")
 
 	// --- pull ---
@@ -198,7 +198,7 @@ claims the subdomain, and pushes your content.
 	var pullCmd = &cobra.Command{
 		Use:   "pull",
 		Short: "Pull remote state into local",
-		Long:  "Use --data to pull records, --users to pull user accounts.",
+		Long:  "Use --posts to pull posts, --users to pull accounts and profiles.",
 		Run: func(cmd *cobra.Command, args []string) {
 			opts := deploy.PullOptions{
 				Data:   pullData,
@@ -211,8 +211,8 @@ claims the subdomain, and pushes your content.
 			}
 		},
 	}
-	pullCmd.Flags().BoolVar(&pullData, "data", false, "Pull records from the deployed site")
-	pullCmd.Flags().BoolVar(&pullUsers, "users", false, "Pull user accounts from the deployed site")
+	pullCmd.Flags().BoolVar(&pullData, "posts", false, "Pull posts from the deployed site")
+	pullCmd.Flags().BoolVar(&pullUsers, "users", false, "Pull accounts and profiles from the deployed site")
 	pullCmd.Flags().StringVar(&pullTarget, "target", "", "Override deploy target URL")
 
 	// --- login ---

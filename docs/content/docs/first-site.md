@@ -1,11 +1,11 @@
 ---
 title: Your first site
 slug: first-site
-group: Getting started
+section: Getting started
 weight: 2
 ---
 
-A Friendo site is a folder on your machine. Let's make one, run it, and edit it.
+A friendo site is a folder on your machine. Let's make one, run it, and edit it.
 
 ## Scaffold
 
@@ -14,7 +14,7 @@ friendo init my-site
 cd my-site
 ```
 
-This creates a small, complete site:
+This makes a small, complete site:
 
 ```
 my-site/
@@ -24,14 +24,21 @@ my-site/
 ├── pages/              # each file maps to a URL
 │   ├── index.html
 │   ├── 404.html
-│   └── blog/
-│       └── [slug].html # dynamic route for a single blog post
+│   ├── inbox.html      # members only: what happened to you
+│   ├── blog/
+│   │   └── [slug].html # one page per blog post
+│   ├── events/         # the calendar: a list and an event page
+│   ├── groups/         # groups: a list and a group page
+│   └── profiles/
+│       └── [slug].html # a member's profile page
 ├── content/            # optional: posts as markdown files
-│   └── blog/
-│       └── hello-world.md
+│   ├── blog/
+│   │   └── hello-world.md
+│   ├── events/
+│   └── groups/
 ├── assets/
 │   └── style.css
-└── data/               # created on first run (SQLite)
+└── data/               # made on first run (SQLite)
 ```
 
 ## Serve it
@@ -40,23 +47,23 @@ my-site/
 friendo serve
 ```
 
-Your site is now at **http://localhost:3000**, with hot reload — edit a template
+Your site is now at **http://localhost:3000**, with hot reload: edit a template
 and the browser refreshes.
 
 | URL | What |
 |---|---|
 | `http://localhost:3000` | Your site |
-| `http://localhost:3000/_/` | The admin UI (content + users) |
+| `http://localhost:3000/_/` | The admin: posts, review, members, settings |
 
 ## Open the admin
 
 Open `http://localhost:3000/_/`. On your own machine there's nothing to sign in
-to — the admin just opens, and you're the owner. From here you can write posts,
+to; the admin just opens, and you're the owner. From here you can write posts,
 manage collections, and add people.
 
 (Sign-in only appears once the site is somewhere other people can reach: on a
 server, you'll be asked to confirm your email with a code the first time. See
-[Auth & users](/docs/auth).)
+[Signing in & roles](/docs/signing-in).)
 
 ## Edit a page
 
@@ -77,4 +84,6 @@ Pages live in `pages/` and are plain templates. Open `pages/index.html`:
 ```
 
 That's the whole model: [templates](/docs/templates) render
-[content](/docs/content). When you're ready to share it, [deploy](/docs/deploy).
+[posts](/docs/posts). When you're ready to share it, [deploy](/docs/deploy). And
+if a word puzzles you along the way, every one friendo uses is on one page:
+[Words friendo uses](/docs/words).

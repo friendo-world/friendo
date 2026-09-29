@@ -38,7 +38,7 @@ func TestCalendarEndToEnd(t *testing.T) {
 	}
 	write("friendo.toml", "[site]\nname = \"Village\"\ntimezone = \"America/Los_Angeles\"\n\n[access]\nmembers_only = [\"/private/*\"]\n")
 	write("content/events/harvest-fair.md", "---\ntitle: Harvest Fair\nwhen: 2026-10-04 10:00 to 16:00\nlocation: 47.6062, -122.3321\nmood: festive\n---\nBring a dish.")
-	write("content/events/book-club.md", "---\ntitle: Book club\nwhen: 2026-10-06 19:00 to 20:30\nrepeats: weekly\nexcept: [2026-10-20]\n---\nEvery Tuesday.")
+	write("content/events/book-club.md", "---\ntitle: Book club\nwhen:\n  start: 2026-10-06 19:00 to 20:30\n  repeats: weekly\n  except: [2026-10-20]\n---\nEvery Tuesday.")
 	write("content/events/last-year.md", "---\ntitle: Last year\nwhen: 2025-10-04\n---\nGone.")
 	write("content/events/no-date.md", "---\ntitle: Not an event\n---\nJust a post in the events folder.")
 	write("content/events/broken.md", "---\ntitle: Broken\nwhen: next tuesday\n---\nBad date.")
@@ -49,8 +49,8 @@ func TestCalendarEndToEnd(t *testing.T) {
 			"|day:{% for e in collections.events|on_day:\"2026-10-13\" %}{{ e.title }};{% endfor %}"+
 			"|past:{% for e in collections.events|past %}{{ e.title }};{% endfor %}"+
 			"|limit:{% for e in collections.events|upcoming:2 %}{{ e.title }};{% endfor %}")
-	write("pages/events/[slug].html", "{{ record.title }}|{{ record.when|when }}|{{ record.when.repeats }}|next:{{ record.when.next|when }}|{{ record.data.mood }}|when-in-data:{{ record.data.when }}|going:{{ record.rsvps.going }}|place:{{ record.location.label }}|g:{{ record|google_calendar_url }}|sub:{{ calendar.google }}")
-	write("pages/private/[slug].html", "{{ record.title }}")
+	write("pages/events/[slug].html", "{{ post.title }}|{{ post.when|when }}|{{ post.when.repeats }}|next:{{ post.when.next|when }}|{{ post.fields.mood }}|when-in-data:{{ post.fields.when }}|going:{{ post.rsvps.going }}|place:{{ post.location.label }}|g:{{ post|google_calendar_url }}|sub:{{ calendar.google }}")
+	write("pages/private/[slug].html", "{{ post.title }}")
 
 	db, err := data.Open(siteDir)
 	if err != nil {
@@ -166,7 +166,7 @@ func TestCalendarEndToEnd(t *testing.T) {
 	}
 
 	// One post, one instance.
-	_, ics, _ = get("/calendar.ics?collection=events&record=" + recordID(t, db, "events", "book-club") + "&occurrence=2026-10-13T19:00:00-07:00")
+	_, ics, _ = get("/calendar.ics?collection=events&post=" + recordID(t, db, "events", "book-club") + "&date=2026-10-13T19:00:00-07:00")
 	if strings.Count(ics, "BEGIN:VEVENT") != 1 || strings.Contains(ics, "RRULE") || !strings.Contains(ics, "20261013T190000") {
 		t.Errorf("single instance:\n%s", ics)
 	}

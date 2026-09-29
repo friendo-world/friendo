@@ -43,12 +43,37 @@ type Entry struct {
 type Filter struct {
 	Collection string // one collection
 	RecordID   string // one post
+	Group      string // one group's events (posts with `group: <slug>`)
 }
 
-// Collect gathers the published posts that have a `when`, soonest first.
-// visible says whether a collection may appear (nil = all); permalink resolves a
-// post's public path (nil = none).
-func Collect(db *data.DB, visible func(collection string) bool, permalink data.PermalinkFunc, f Filter) ([]Entry, error) {
+// View is who the feed is for. A public feed (a visitor, a static export) has
+// SignedIn false and a Visible that applies the static rule — any collection
+// whose page is members-only is out. A member's feed (their session cookie, or
+// the token in their private feed URL) sees what they'd see on the site: the
+// collections whose gates they pass, and the groups they belong to.
+type View struct {
+	SignedIn bool
+	MemberOf map[string]bool // group ids the viewer belongs to
+	// Visible says whether a record of a collection may appear; nil = every one.
+	Visible func(collection string, record map[string]any) bool
+	// Only, when set, keeps just these series (event ids): the "my events" feed.
+	Only map[string]bool
+	// Token is the private feed token the request carried, so per-event links
+	// inside the feed keep working for private events.
+	Token string
+}
+
+// StaticView is a public feed's view, from a collection-level visibility rule.
+func StaticView(visible func(collection string) bool) View {
+	if visible == nil {
+		return View{}
+	}
+	return View{Visible: func(c string, _ map[string]any) bool { return visible(c) }}
+}
+
+// Collect gathers the published posts that have a `when`, soonest first, as
+// the view may see them; permalink resolves a post's public path (nil = none).
+func Collect(db *data.DB, view View, permalink data.PermalinkFunc, f Filter) ([]Entry, error) {
 	byTarget, err := db.EventsByTarget()
 	if err != nil {
 		return nil, err
@@ -57,12 +82,23 @@ func Collect(db *data.DB, visible func(collection string) bool, permalink data.P
 	if err != nil {
 		return nil, err
 	}
+	// The events of any group the viewer can't see stay out, whatever ?group=
+	// asks for (a public feed has no viewer: only public groups).
+	hiddenGroups := map[string]bool{}
+	if db.FeatureOn("groups") {
+		if groups, err := db.QueryPublishedCollection(data.GroupsCollection); err == nil {
+			for _, g := range groups {
+				if !data.CanSeeGroup(g, view.SignedIn, view.MemberOf) {
+					if slug, _ := g["slug"].(string); slug != "" {
+						hiddenGroups[slug] = true
+					}
+				}
+			}
+		}
+	}
 	var entries []Entry
 	for _, name := range names {
 		if f.Collection != "" && name != f.Collection {
-			continue
-		}
-		if visible != nil && !visible(name) {
 			continue
 		}
 		records, err := db.QueryPublishedCollection(name)
@@ -73,6 +109,17 @@ func Collect(db *data.DB, visible func(collection string) bool, permalink data.P
 			id, _ := r["id"].(string)
 			if f.RecordID != "" && id != f.RecordID {
 				continue
+			}
+			if group := data.GroupSlugOf(r); (f.Group != "" && group != f.Group) || hiddenGroups[group] {
+				continue
+			}
+			if view.Visible != nil && !view.Visible(name, r) {
+				continue
+			}
+			if view.Only != nil {
+				if ev := byTarget[id]; ev == nil || !view.Only[ev.ID] {
+					continue
+				}
 			}
 			ev := byTarget[id]
 			if ev == nil {
@@ -115,7 +162,9 @@ func ETag(entries []Entry, extra string) string {
 
 // Occurrences expands entries into [from, to), soonest first, as the /calendar.json
 // shape: one item per occurrence, each pointing back at its post.
-func Occurrences(entries []Entry, from, to time.Time, baseURL string) []map[string]any {
+// extra (may be nil) is added to each occurrence's own /calendar.ics link — the
+// private feed's token, so "add this one event" works for a private event too.
+func Occurrences(entries []Entry, from, to time.Time, baseURL string, extra url.Values) []map[string]any {
 	type hit struct {
 		occ data.Occurrence
 		e   *Entry
@@ -137,23 +186,49 @@ func Occurrences(entries []Entry, from, to time.Time, baseURL string) []map[stri
 		out = append(out, map[string]any{
 			"id":         h.e.Event.ID + "-" + h.occ.Starts.Format("20060102"),
 			"series_id":  h.e.Event.ID,
-			"record_id":  h.e.Event.TargetID,
+			"post_id":    h.e.Event.TargetID,
 			"collection": h.e.Collection,
 			"slug":       h.e.Slug,
 			"title":      h.e.Title,
 			"url":        absolute(baseURL, h.e.Path),
-			"starts":     h.occ.Starts.Format(time.RFC3339),
-			"ends":       ends,
+			"start":      h.occ.Starts.Format(time.RFC3339),
+			"end":        ends,
 			"all_day":    h.occ.AllDay,
 			"timezone":   h.e.Event.Location().String(),
 			"repeats":    h.e.Event.Repeats(),
 			"rule":       h.e.Event.RRule,
 			"place":      h.e.Place,
 			"google":     GoogleEventURL(h.e.Title, h.occ.Starts, h.occ.Ends, h.occ.AllDay, "", absolute(baseURL, h.e.Path), h.e.Place),
-			"ics":        absolute(baseURL, "/calendar.ics?record="+url.QueryEscape(h.e.Event.TargetID)+"&occurrence="+url.QueryEscape(h.occ.Starts.Format(time.RFC3339))),
+			"ics":        absolute(baseURL, "/calendar.ics?"+eventQuery(h.e.Event.TargetID, h.occ.Starts.Format(time.RFC3339), extra)),
 		})
 	}
 	return out
+}
+
+// eventQuery is the query string for one occurrence's .ics, plus any extra.
+func eventQuery(recordID, occurrence string, extra url.Values) string {
+	q := url.Values{}
+	for k, vs := range extra {
+		for _, v := range vs {
+			q.Add(k, v)
+		}
+	}
+	q.Set("post", recordID)
+	q.Set("date", occurrence)
+	return q.Encode()
+}
+
+// PrivateLinks are one member's ways to subscribe to their private feed — the
+// same shapes as Links, with the token in the address.
+func PrivateLinks(baseURL, token string) map[string]string {
+	base := strings.TrimSuffix(baseURL, "/")
+	ics := base + "/calendar.ics?token=" + url.QueryEscape(token)
+	return map[string]string{
+		"ics":    ics,
+		"json":   base + "/calendar.json?token=" + url.QueryEscape(token),
+		"webcal": "webcal://" + strings.TrimPrefix(strings.TrimPrefix(ics, "https://"), "http://"),
+		"google": "https://calendar.google.com/calendar/r?cid=" + url.QueryEscape(ics),
+	}
 }
 
 // Links are the ways to subscribe to a site's feed, for {{ calendar.* }} in

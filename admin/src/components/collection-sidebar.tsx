@@ -69,7 +69,7 @@ export function CollectionSidebar({
                 <span class="truncate">
                   {c.name}
                   {declared && !c.declared && (
-                    <span class="ml-1 text-xs font-normal text-dim" title="Not yet in friendo.toml's [content] types" data-adhoc>
+                    <span class="ml-1 text-xs font-normal text-dim" title="Not yet in friendo.toml's [content] collections" data-adhoc>
                       ✱
                     </span>
                   )}
@@ -91,7 +91,7 @@ export function CollectionSidebar({
                   onInput={(e) => setName((e.target as HTMLInputElement).value)}
                   class="mt-0 px-2 py-1 text-xs"
                 />
-                <p class="mt-1 text-xs text-dim">It appears once its first record is saved.</p>
+                <p class="mt-1 text-xs text-dim">It appears once its first post is saved.</p>
                 <div class="mt-2 flex gap-2">
                   <Button type="submit" variant="primary" size="sm">
                     Start

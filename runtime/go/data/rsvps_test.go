@@ -20,7 +20,7 @@ func rsvpSite(t *testing.T) (*DB, *Event, string) {
 		t.Fatal(err)
 	}
 	post, _ := db.CreateRecord("events", "club", "Club", "", "published", "")
-	ev, _, _ := ParseWhen(map[string]any{"when": "2026-10-06 19:00 to 20:30", "repeats": "weekly", "except": []any{"2026-10-20"}}, db.Location)
+	ev, _, _ := ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-06 19:00 to 20:30", "repeats": "weekly", "except": []any{"2026-10-20"}}}, db.Location)
 	if err := db.ReconcileWhen(post, ev); err != nil {
 		t.Fatal(err)
 	}
@@ -80,11 +80,11 @@ func TestRSVPLifecycle(t *testing.T) {
 		t.Errorf("organizer list: %+v", list)
 	}
 	rows, _ := db.AttendeeRows(ev)
-	if len(rows) != 1 || rows[0]["scheduled"] != true || rows[0]["occurrence_text"] == "" {
+	if len(rows) != 1 || rows[0]["scheduled"] != true || rows[0]["date_text"] == "" {
 		t.Errorf("attendee rows: %+v", rows)
 	}
 	sum := db.RSVPSummary(ev, time.Date(2026, 10, 10, 0, 0, 0, 0, ev.Location()))
-	if sum["maybe"] != 1 || sum["occurrence"] != key {
+	if sum["maybe"] != 1 || sum["date"] != key {
 		t.Errorf("summary: %+v", sum)
 	}
 	db.DeleteRSVP(ev.ID, key, author)
@@ -99,7 +99,7 @@ func TestRSVPLifecycle(t *testing.T) {
 func TestRekeyRSVPs(t *testing.T) {
 	db, ev, author := rsvpSite(t)
 	db.SetRSVP(ev.ID, "2026-10-13T19:00:00-07:00", author, "going")
-	moved, _, _ := ParseWhen(map[string]any{"when": "2026-10-06 20:00 to 21:00", "repeats": "weekly"}, db.Location)
+	moved, _, _ := ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-06 20:00 to 21:00", "repeats": "weekly"}}, db.Location)
 	if err := db.ReconcileWhen(ev.TargetID, moved); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestRekeyRSVPs(t *testing.T) {
 	if len(keys) != 1 || keys[0] != "2026-10-13T20:00:00-07:00" {
 		t.Errorf("re-keyed to the new time: %v", keys)
 	}
-	wed, _, _ := ParseWhen(map[string]any{"when": "2026-10-07 20:00", "repeats": "weekly"}, db.Location)
+	wed, _, _ := ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-07 20:00", "repeats": "weekly"}}, db.Location)
 	db.ReconcileWhen(ev.TargetID, wed)
 	rows, _ := db.AttendeeRows(db.EventFor(ev.TargetID))
 	if len(rows) != 1 || rows[0]["scheduled"] != false {

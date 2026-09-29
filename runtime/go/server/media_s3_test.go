@@ -184,8 +184,7 @@ func multipartImage(t *testing.T, field, filename string, content []byte) (*byte
 	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	_ = mw.WriteField("record_type", "post")
-	_ = mw.WriteField("record_id", "p1")
+	_ = mw.WriteField("post_id", "p1")
 	_ = mw.WriteField("field", field)
 	h := textproto.MIMEHeader{}
 	h.Set("Content-Disposition", `form-data; name="file"; filename="`+filename+`"`)

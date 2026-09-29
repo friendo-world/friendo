@@ -1,50 +1,54 @@
 {% extends "layouts/base.html" %}
 {% block content %}
 <article>
-    <h1>{{ record.title }}</h1>
-    {# A photo attached through the form's media input lands in data.photo as the uploaded file's URL, the same way the blog's cover image does. #}
-    {% if record.data.photo %}
-    <img class="cover" src="{{ record.data.photo }}" alt="">
+    <h1>{{ event.title }}</h1>
+    {# A photo attached through the form's media input lands in fields.photo as the uploaded file's URL, the same way the blog's cover image does. #}
+    {% if event.fields.photo %}
+    <img class="cover" src="{{ event.fields.photo }}" alt="">
     {% endif %}
     <p class="post-meta">
-        {{ record.when|when }}
-        {% if record.when.repeats %}&middot; {{ record.when.repeats }}{% endif %}
+        {{ event.when|when }}
+        {% if event.when.repeats %}&middot; {{ event.when.repeats }}{% endif %}
     </p>
-    {% if record.when.repeats and record.when.next %}
-    <p>Next: {{ record.when.next|when }}</p>
+    {% if event.when.repeats and event.when.next %}
+    <p>Next: {{ event.when.next|when }}</p>
     {% endif %}
-    {{ record.body|markdown }}
+    {{ event.body|markdown }}
     <p>
         <!-- One tag = a menu of calendar apps; the plain link beside it is the no-JS
              version (Google's pre-filled form, built by the google_calendar_url filter). -->
-        <friendo-add-to-calendar post-id="{{ record.id }}"></friendo-add-to-calendar>
-        <a href="{{ record|google_calendar_url }}" target="_blank" rel="noopener">Add to Google Calendar</a> &middot;
+        <friendo-add-to-calendar post-id="{{ event.id }}"></friendo-add-to-calendar>
+        <a href="{{ event|google_calendar_url }}" target="_blank" rel="noopener">Add to Google Calendar</a> &middot;
         <a href="/events/">All events</a>
     </p>
 </article>
 
-<!-- RSVP. The tally line renders server-side from record.rsvps (readable with
+<!-- RSVP. The tally line renders server-side from event.rsvps (readable with
      JS off); the component asks the question and lets a signed-in member answer
      for the next date. `names` shows who answered to the post's author and
      moderators. -->
 <section class="community">
     <div class="signin">
         <h2>Sign in to answer</h2>
-        <p class="post-meta">So far: {{ record.rsvps.going }} going &middot; {{ record.rsvps.maybe }} maybe &middot; {{ record.rsvps.not_going }} can't go</p>
-        <friendo-auth></friendo-auth>
+        <p class="post-meta">So far: {{ event.rsvps.going }} going &middot; {{ event.rsvps.maybe }} maybe &middot; {{ event.rsvps.not_going }} can't go &middot; {{ event.rsvps.invited }} invited</p>
+        {% if event.group %}<p class="post-meta">Part of <a href="/groups/{{ event.group.slug }}">{{ event.group.title }}</a></p>{% endif %}
+        <friendo-signin></friendo-signin>
     </div>
-    <friendo-rsvp post-id="{{ record.id }}" names></friendo-rsvp>
+    <friendo-rsvp post-id="{{ event.id }}" names></friendo-rsvp>
+    <!-- The organizer's side: invite people by address, group, or followers.
+         Paints only for the event's author or a moderator. -->
+    <friendo-invite post-id="{{ event.id }}"></friendo-invite>
 
     <div>
         <h2>Map</h2>
-        <friendo-map target-type="post" target-id="{{ record.id }}"></friendo-map>
+        <friendo-map post-id="{{ event.id }}"></friendo-map>
     </div>
 
-    <!-- A live thread under this event. The chat id is computed per record, and
+    <!-- A live thread under this event. The chat id is computed per event, and
          the site registers it the first time the page is served — no setup. -->
     <div>
         <h2>Chat</h2>
-        <friendo-chat chat-id="event-{{ record.slug }}"></friendo-chat>
+        <friendo-chat chat-id="event-{{ event.slug }}"></friendo-chat>
     </div>
 </section>
 

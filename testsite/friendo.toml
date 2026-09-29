@@ -3,9 +3,21 @@ timezone = "America/Los_Angeles"
 name = "testsite"
 
 [content]
-types = ["blog", "pages"]
+collections = ["blog", "events", "groups", "pages"]
+
+# What a member's profile carries beyond name, avatar and bio (see /profiles/).
+[profiles.fields]
+pronouns = "text"
+website  = { kind = "text", hint = "https://…" }
 
 # Declared here, so it's applied on startup and shown read-only in admin Settings.
-# This also lets the /submit demo accept member submissions (into the review queue).
+# This also lets the /submit demo take posts from members (into the review queue),
+# shows every member's profile page to visitors, and lets members start groups.
 [settings]
-accept_submissions = true
+members_can_post = true
+profile_visibility = "public"
+members_can_start_groups = true
+
+# /board/ is for members of the "board" group (content/groups/board.md).
+[access]
+groups = { "/board/*" = "board" }

@@ -198,11 +198,12 @@ func (e *Event) Repeats() string {
 	return DescribeRule(e.RRule, e.Location())
 }
 
-// Map is the event as templates and the API see it: {{ record.when }}.
-func (e *Event) Map(now time.Time) map[string]any {
-	m := map[string]any{
-		"starts":   e.Starts.Format(time.RFC3339),
-		"ends":     "",
+// Map is the event as templates see it: {{ post.when }}, with start, end,
+// all_day, timezone, repeats, except and next.
+func (e *Event) Map(now time.Time) When {
+	m := When{
+		"start":    e.Starts.Format(time.RFC3339),
+		"end":      "",
 		"all_day":  e.AllDay,
 		"timezone": e.Location().String(),
 		"repeats":  e.Repeats(),
@@ -212,7 +213,7 @@ func (e *Event) Map(now time.Time) map[string]any {
 		"_series":  e,
 	}
 	if !e.Ends.IsZero() {
-		m["ends"] = e.Ends.Format(time.RFC3339)
+		m["end"] = e.Ends.Format(time.RFC3339)
 	}
 	if n := e.Next(now); n != nil {
 		m["next"] = n.Map()
@@ -221,31 +222,33 @@ func (e *Event) Map(now time.Time) map[string]any {
 }
 
 // JSON is Map for the API: the same fields without the template-only series
-// pointer.
+// pointer, as a plain map.
 func (e *Event) JSON(now time.Time) map[string]any {
-	m := e.Map(now)
+	m := map[string]any(e.Map(now))
 	delete(m, "_series")
-	if next, ok := m["next"].(map[string]any); ok {
-		delete(next, "_series")
+	if next, ok := m["next"].(When); ok {
+		plain := map[string]any(next)
+		delete(plain, "_series")
+		m["next"] = plain
 	}
 	return m
 }
 
-// Map is the occurrence as templates see it (the shape of record.when after an
-// expanding filter, and of record.when.next).
-func (o Occurrence) Map() map[string]any {
-	m := map[string]any{
-		"starts":     o.Starts.Format(time.RFC3339),
-		"ends":       "",
-		"all_day":    o.AllDay,
-		"timezone":   o.Starts.Location().String(),
-		"occurrence": true,
-		"repeats":    "",
-		"rule":       "",
-		"_series":    o.Event,
+// Map is the occurrence as templates see it (the shape of post.when after an
+// expanding filter, and of post.when.next).
+func (o Occurrence) Map() When {
+	m := When{
+		"start":    o.Starts.Format(time.RFC3339),
+		"end":      "",
+		"all_day":  o.AllDay,
+		"timezone": o.Starts.Location().String(),
+		"date":     true,
+		"repeats":  "",
+		"rule":     "",
+		"_series":  o.Event,
 	}
 	if !o.Ends.IsZero() {
-		m["ends"] = o.Ends.Format(time.RFC3339)
+		m["end"] = o.Ends.Format(time.RFC3339)
 	}
 	if o.Event != nil {
 		m["repeats"] = o.Event.Repeats()

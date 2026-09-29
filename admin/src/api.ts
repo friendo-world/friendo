@@ -1,7 +1,7 @@
 // Thin REST client for the Friendo site API. Every Friendo runtime (Go, edge)
 // exposes the same endpoints under /_/api, so this client is runtime-agnostic.
 
-export type Role = "owner" | "admin" | "editor" | "contributor" | "member";
+export type Role = "owner" | "admin" | "editor" | "moderator" | "contributor" | "member";
 
 // Capability model mirrored from the runtime (runtime/go/data).
 // Used to gate the admin UI; the server enforces the real checks.
@@ -10,20 +10,23 @@ export type Capability =
   | "content.edit.own"
   | "content.edit.any"
   | "content.publish"
-  | "comment.moderate.own"
-  | "comment.moderate.any"
+  | "review.own"
+  | "review.any"
+  | "review.posts"
   | "user.manage"
   | "site.configure"
   | "site.own";
 
 // Each role holds everything the one below it does, exactly as the server grants
 // them (runtime/go/data/data.go, roleCapabilities).
-const CONTRIBUTOR: Capability[] = ["content.create", "content.edit.own", "comment.moderate.own"];
-const EDITOR: Capability[] = [...CONTRIBUTOR, "content.edit.any", "content.publish", "comment.moderate.any"];
+const CONTRIBUTOR: Capability[] = ["content.create", "content.edit.own", "review.own"];
+const MODERATOR: Capability[] = [...CONTRIBUTOR, "review.any", "review.posts"];
+const EDITOR: Capability[] = [...MODERATOR, "content.edit.any", "content.publish"];
 const ADMIN: Capability[] = [...EDITOR, "user.manage", "site.configure"];
 const ROLE_CAPS: { [role in Role]: Capability[] } = {
   member: [],
   contributor: CONTRIBUTOR,
+  moderator: MODERATOR,
   editor: EDITOR,
   admin: ADMIN,
   owner: [...ADMIN, "site.own"],
@@ -39,6 +42,9 @@ export type User = {
   name: string;
   role: Role;
   created?: string;
+  // The persona attribution flows to (GET /me), and its address (GET /users).
+  author_id?: string;
+  profile_slug?: string;
 };
 
 export type UserInput = {
@@ -59,12 +65,6 @@ export type SetupStatus = {
   emailConfigured?: boolean;
 };
 
-export type AccessSettings = {
-  default_role: "member" | "contributor";
-  signups_enabled: boolean;
-  require_approval: boolean;
-  password_login: boolean;
-};
 
 // A request-code response: the code is only present in local dev (echo mode).
 export type CodeSent = { sent: boolean; emailed?: boolean; code?: string };
@@ -79,31 +79,41 @@ export type Features = {
   rsvp: boolean;
   locations: boolean;
   chats: boolean;
+  follows: boolean;
+  groups: boolean;
 };
 
-export const ALL_FEATURES_ON: Features = { comments: true, reactions: true, polls: true, rsvp: true, locations: true, chats: true };
+export const ALL_FEATURES_ON: Features = { comments: true, reactions: true, polls: true, rsvp: true, locations: true, chats: true, follows: true, groups: true };
 
-export type Settings = {
+// Who may see member profiles (/profiles/<slug> and the profiles API).
+export type ProfileVisibility = "members" | "public";
+
+// Every setting by its one name — the same word in friendo.toml's [settings]
+// block, in the database and in the API.
+export type SettingValues = {
+  open_signups: boolean;
+  signups_are_contributors: boolean;
+  members_can_post: boolean;
+  posts_need_review: boolean;
+  comments_need_review: boolean;
+  password_login: boolean;
+  members_can_start_groups: boolean;
+  profile_visibility: ProfileVisibility;
+  // Which built-in collections show when friendo.toml lists no [content] collections.
+  default_collections: string[];
+};
+
+export type Settings = SettingValues & {
   site: { name: string };
   collections: number;
   users: number;
-  moderation: { auto_approve: boolean };
-  access: AccessSettings;
-  content: {
-    accept_submissions: boolean;
-    // Which built-in collections show when friendo.toml lists no [content] types.
-    default_collections: string[];
-    types_declared: boolean;
-  };
+  collections_declared: boolean;
   features: Features;
-  // DB keys frozen by friendo.toml's [settings] block — rendered read-only.
+  // Keys frozen by friendo.toml's [settings] block — rendered read-only.
   managed: string[];
 };
 
-export type SettingsPatch = {
-  moderation?: { auto_approve: boolean };
-  access?: Partial<AccessSettings>;
-  content?: { accept_submissions?: boolean; default_collections?: string[] };
+export type SettingsPatch = Partial<SettingValues> & {
   features?: Partial<Features>;
 };
 
@@ -155,16 +165,16 @@ export type DeclaredField = {
 // exist because they have records (or are the built-in defaults).
 export type Collection = { name: string; count: number; declared: boolean; fields: DeclaredField[] };
 
-// A post's calendar time, as the API returns it (null for a post with no time).
+// A post's time, as the API returns it (null for a post with no time).
 export type When = {
-  starts: string; // RFC 3339, in the event's zone
-  ends: string; // "" when open-ended
+  start: string; // RFC 3339, in the event's zone
+  end: string; // "" when open-ended
   all_day: boolean;
   timezone: string;
   repeats: string; // human text: "weekly", "monthly on the first Tuesday", ""
   rule: string; // the RRULE body, "" for a one-off
   except: string[];
-  next: { starts: string; ends: string; all_day: boolean } | null;
+  next: { start: string; end: string; all_day: boolean } | null;
 };
 
 export type Record = {
@@ -178,7 +188,7 @@ export type Record = {
   published_at?: string;
   created?: string;
   updated?: string;
-  data?: { [key: string]: unknown };
+  fields?: { [key: string]: unknown };
   when?: When | null;
 };
 
@@ -187,9 +197,8 @@ export type RecordInput = {
   title: string;
   body: string;
   status: string;
-  // Front-matter style fields. The reserved calendar keys (when, ends, all_day,
-  // timezone, repeats, except, rrule) are lifted into the post's event server-side.
-  data?: { [key: string]: unknown };
+  // Front-matter style fields. `when` is lifted into the post's event server-side.
+  fields?: { [key: string]: unknown };
 };
 
 export type PendingRecord = {
@@ -204,23 +213,27 @@ export type PendingRecord = {
   when?: When | null;
 };
 
-export type Attendee = {
+export type RSVPName = {
   id: string;
-  occurrence: string;
-  occurrence_text: string;
+  date: string;
+  date_text: string;
   scheduled: boolean;
   author_id: string;
   author_name: string;
   author_email: string;
-  answer: "going" | "not_going" | "maybe";
+  answer: "going" | "not_going" | "maybe" | "invited";
   created: string;
   updated: string;
 };
 
+// The result of inviting people to an event: how many were asked, how many had
+// already answered, and any addresses that matched nobody.
+export type InviteResult = { invited: number; skipped: number; unknown: string[]; counts: { going: number; maybe: number; not_going: number; invited: number } };
+
 export type Location = {
   id: string;
   target_type: string;
-  target_id: string;
+  target_id: string; // the post
   lat: number;
   lng: number;
   label: string;
@@ -237,6 +250,17 @@ export type FileRow = {
   mime: string;
   size: number;
   created: string;
+};
+
+// A member of a group: their profile plus their standing in it.
+export type GroupMember = {
+  id: string;
+  slug: string;
+  name: string;
+  avatar: string;
+  role: "admin" | "moderator" | "member";
+  status: "member" | "requested" | "invited";
+  since: string;
 };
 
 export type CommentStatus = "pending" | "approved" | "rejected";
@@ -272,60 +296,64 @@ export const api = {
   // Public: which community features the site has on.
   features: () => req<{ features: Features }>("/features"),
 
-  // `declared` says whether friendo.toml has a [content] types list at all.
-  collections: () => req<{ collections: Collection[]; declared: boolean }>("/collections"),
+  // `declared` says whether friendo.toml has a [content] collections list at all;
+  // `profile_fields` are the [profiles] fields a member's profile carries.
+  collections: () =>
+    req<{ collections: Collection[]; declared: boolean; profile_fields: DeclaredField[] }>("/collections"),
   // The [content] block that matches the site as it is, to paste into friendo.toml.
   contentToml: () => req<{ toml: string }>("/content/toml"),
   records: (collection: string) =>
-    req<{ records: Record[] }>(`/collections/${encodeURIComponent(collection)}/records`),
-  record: (id: string) => req<{ record: Record }>(`/records/${encodeURIComponent(id)}`),
+    req<{ posts: Record[] }>(`/collections/${encodeURIComponent(collection)}/posts`),
+  record: (id: string) => req<{ post: Record }>(`/posts/${encodeURIComponent(id)}`),
   createRecord: (collection: string, input: RecordInput) =>
-    req<{ record: Record }>(`/collections/${encodeURIComponent(collection)}/records`, {
+    req<{ post: Record }>(`/collections/${encodeURIComponent(collection)}/posts`, {
       method: "POST",
       body: JSON.stringify(input),
     }),
   updateRecord: (id: string, input: RecordInput) =>
-    req<{ record: Record }>(`/records/${encodeURIComponent(id)}`, {
+    req<{ post: Record }>(`/posts/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify(input),
     }),
   deleteRecord: (id: string) =>
-    req<void>(`/records/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    req<void>(`/posts/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   // Who answered an event's RSVP (the post's author or a moderator).
-  attendees: (recordId: string) =>
-    req<{ attendees: Attendee[] }>(`/posts/${encodeURIComponent(recordId)}/attendees`),
+  rsvpNames: (recordId: string) =>
+    req<{ names: RSVPName[] }>(`/posts/${encodeURIComponent(recordId)}/rsvps/names`),
+  // Ask people to an event: profile names, a group's members, or your followers.
+  invite: (recordId: string, body: { slugs?: string[]; group?: string; followers?: boolean; date?: string }) =>
+    req<InviteResult>(`/posts/${encodeURIComponent(recordId)}/invites`, { method: "POST", body: JSON.stringify(body) }),
 
-  // A post's map pin (the Where section of the record form).
+  // A post's location (the Location section of the post form).
   locations: (recordId: string) =>
-    req<{ locations: Location[] }>(`/locations?target_type=post&target_id=${encodeURIComponent(recordId)}`),
+    req<{ locations: Location[] }>(`/locations?post_id=${encodeURIComponent(recordId)}`),
   addLocation: (recordId: string, lat: number, lng: number, label: string) =>
     req<{ location: Location }>("/locations", {
       method: "POST",
-      body: JSON.stringify({ target_type: "post", target_id: recordId, lat, lng, label }),
+      body: JSON.stringify({ post_id: recordId, lat, lng, label }),
     }),
   removeLocation: (id: string) =>
     req<void>(`/locations/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
-  // Images attached to a record. Uploading needs the record to exist first, so a
-  // new record is saved, then its images go up, then the URLs are written back.
+  // Images attached to a post. Uploading needs the post to exist first, so a
+  // new post is saved, then its images go up, then the URLs are written back.
   files: (recordId: string) =>
-    req<{ files: FileRow[] }>(`/files?record_type=post&record_id=${encodeURIComponent(recordId)}`),
+    req<{ files: FileRow[] }>(`/files?post_id=${encodeURIComponent(recordId)}`),
   uploadFile: (recordId: string, field: string, file: File) => {
     const fd = new FormData();
-    fd.append("record_type", "post");
-    fd.append("record_id", recordId);
+    fd.append("post_id", recordId);
     fd.append("field", field);
     fd.append("file", file);
     return req<{ file: FileRow }>("/files", { method: "POST", body: fd });
   },
   deleteFile: (id: string) => req<void>(`/files/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
-  // Post-review queue (editor+)
+  // The review queue (moderator+)
   recordsByStatus: (status: string) =>
-    req<{ records: PendingRecord[] }>(`/records?status=${encodeURIComponent(status)}`),
+    req<{ posts: PendingRecord[] }>(`/posts?status=${encodeURIComponent(status)}`),
   setRecordStatus: (id: string, status: string) =>
-    req<{ record: Record }>(`/records/${encodeURIComponent(id)}/status`, {
+    req<{ post: Record }>(`/posts/${encodeURIComponent(id)}/status`, {
       method: "PUT",
       body: JSON.stringify({ status }),
     }),
@@ -366,6 +394,22 @@ export const api = {
       body: JSON.stringify(patch),
     }),
 
+  // A group's members (the Members section of a group record).
+  groupMembers: (groupId: string, status: "member" | "requested" = "member") =>
+    req<{ members: GroupMember[] }>(`/groups/${encodeURIComponent(groupId)}/members?status=${status}`),
+  addGroupMember: (groupId: string, slug: string, role: "admin" | "moderator" | "member" = "member") =>
+    req<{ members: GroupMember[] }>(`/groups/${encodeURIComponent(groupId)}/members`, {
+      method: "POST",
+      body: JSON.stringify({ slug, role }),
+    }),
+  setGroupMember: (groupId: string, authorId: string, patch: { status?: string; role?: string }) =>
+    req<{ members: GroupMember[]; requested: GroupMember[] }>(
+      `/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(authorId)}`,
+      { method: "PUT", body: JSON.stringify(patch) }
+    ),
+  removeGroupMember: (groupId: string, authorId: string) =>
+    req<void>(`/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(authorId)}`, { method: "DELETE" }),
+
   // Comment moderation
   comments: (status: CommentStatus = "pending") =>
     req<{ comments: Comment[] }>(`/comments?status=${encodeURIComponent(status)}`),
@@ -382,7 +426,7 @@ export const api = {
 // needs site.own (owners only); lower roles need user.manage. Mirrors the runtimes.
 export function availableRoles(actorRole: Role): Role[] {
   if (!can(actorRole, "user.manage")) return [];
-  const roles: Role[] = ["member", "contributor", "editor"];
+  const roles: Role[] = ["member", "contributor", "moderator", "editor"];
   if (can(actorRole, "site.own")) roles.push("admin", "owner");
   return roles;
 }

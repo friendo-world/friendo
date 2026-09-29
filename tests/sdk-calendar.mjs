@@ -22,7 +22,7 @@ const ORIGIN = `http://127.0.0.1:${PORT}`;
 const siteDir = mkdtempSync(join(tmpdir(), "friendo-sdk-calendar-"));
 mkdirSync(join(siteDir, "pages", "events"), { recursive: true });
 writeFileSync(join(siteDir, "friendo.toml"), '[site]\nname = "Cal"\ntimezone = "America/Los_Angeles"\n');
-writeFileSync(join(siteDir, "pages", "events", "[slug].html"), "{{ record.title }}");
+writeFileSync(join(siteDir, "pages", "events", "[slug].html"), "{{ post.title }}");
 writeFileSync(
   join(siteDir, "pages", "cal.html"),
   '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Calendar</title></head><body>' +
@@ -33,7 +33,7 @@ writeFileSync(
     '<friendo-input name="photo" type="media" accept="image/*"></friendo-input>' +
     '<button type="submit">Add</button>' +
     "</friendo-form>" +
-    "<script>window.__record=null;document.addEventListener('friendo:submitted',function(e){window.__record=e.detail.record;});</script>" +
+    "<script>window.__record=null;document.addEventListener('friendo:submitted',function(e){window.__record=e.detail.post;});</script>" +
     '<script src="/friendo.js" defer></script></body></html>'
 );
 
@@ -71,13 +71,13 @@ async function setupOwner() {
 async function seed(cookie) {
   const H = { "Content-Type": "application/json", Cookie: "friendo_session=" + cookie };
   const posts = [
-    { title: "Harvest Fair", slug: "harvest-fair", status: "published", data: { when: "2026-10-04 10:00 to 16:00" } },
-    { title: "Retreat", slug: "retreat", status: "published", data: { when: "2026-10-16 to 2026-10-18" } },
-    { title: "Book club", slug: "book-club", status: "published", data: { when: "2026-10-06 19:00 to 20:30", repeats: "weekly", except: ["2026-10-20"] } },
-    { title: "Secret draft", slug: "secret", status: "draft", data: { when: "2026-10-09" } },
+    { title: "Harvest Fair", slug: "harvest-fair", status: "published", fields: { when: "2026-10-04 10:00 to 16:00" } },
+    { title: "Retreat", slug: "retreat", status: "published", fields: { when: "2026-10-16 to 2026-10-18" } },
+    { title: "Book club", slug: "book-club", status: "published", fields: { when: { start: "2026-10-06 19:00 to 20:30", repeats: "weekly", except: ["2026-10-20"] } } },
+    { title: "Secret draft", slug: "secret", status: "draft", fields: { when: "2026-10-09" } },
   ];
   for (const p of posts) {
-    const r = await fetch(ORIGIN + "/_/api/collections/events/records", { method: "POST", headers: H, body: JSON.stringify(p) });
+    const r = await fetch(ORIGIN + "/_/api/collections/events/posts", { method: "POST", headers: H, body: JSON.stringify(p) });
     if (r.status !== 201) throw new Error(`seeding ${p.slug} failed: ${r.status}`);
   }
 }
@@ -135,8 +135,8 @@ try {
   // The when control inside a form: a weekly event until a date.
   await page.locator("friendo-form input[name=title]").fill("Choir practice");
   const w = page.locator("friendo-input[name=when]");
-  await w.locator('[data-k="when"]').fill("2026-11-05T18:30");
-  await w.locator('[data-k="ends"]').fill("2026-11-05T20:00");
+  await w.locator('[data-k="start"]').fill("2026-11-05T18:30");
+  await w.locator('[data-k="end"]').fill("2026-11-05T20:00");
   await w.locator('[data-k="repeats"]').selectOption("weekly");
   await w.locator('[data-k="until"]').fill("2026-12-31");
   // A photo too: the upload happens after the post is created and writes the
@@ -146,13 +146,13 @@ try {
   await page.locator("friendo-form button[type=submit]").click();
   await page.waitForFunction(() => window.__record, { timeout: 15000 });
   const record = await page.evaluate(() => window.__record);
-  if (!record.when || record.when.starts !== "2026-11-05T18:30:00-08:00") throw new Error(`when.starts = ${JSON.stringify(record.when)}`);
-  if (record.when.ends !== "2026-11-05T20:00:00-08:00") throw new Error(`when.ends = ${record.when.ends}`);
+  if (!record.when || record.when.start !== "2026-11-05T18:30:00-08:00") throw new Error(`when.start = ${JSON.stringify(record.when)}`);
+  if (record.when.end !== "2026-11-05T20:00:00-08:00") throw new Error(`when.end = ${record.when.end}`);
   if (!/^weekly until Dec 31, 2026$/.test(record.when.repeats)) throw new Error(`when.repeats = ${record.when.repeats}`);
-  if (record.data && "when" in record.data) throw new Error("when should be lifted out of data");
-  if (!record.data || !/^\/assets\/uploads\//.test(record.data.photo || "")) throw new Error(`photo = ${JSON.stringify(record.data)}`);
-  const saved = await (await fetch(ORIGIN + "/_/api/records/" + record.id, { headers: { Cookie: "friendo_session=" + cookie } })).json();
-  if (!saved.record.when || saved.record.when.starts !== "2026-11-05T18:30:00-08:00") throw new Error(`time lost after the photo upload: ${JSON.stringify(saved.record.when)}`);
+  if (record.fields && "when" in record.fields) throw new Error("when should be lifted out of data");
+  if (!record.fields || !/^\/assets\/uploads\//.test(record.fields.photo || "")) throw new Error(`photo = ${JSON.stringify(record.fields)}`);
+  const saved = await (await fetch(ORIGIN + "/_/api/posts/" + record.id, { headers: { Cookie: "friendo_session=" + cookie } })).json();
+  if (!saved.post.when || saved.post.when.start !== "2026-11-05T18:30:00-08:00") throw new Error(`time lost after the photo upload: ${JSON.stringify(saved.post.when)}`);
   // The grid refreshed itself and jumped to the new event's month (the test left
   // it in list view; switch back to see the grid).
   await cal.locator('[data-view="month"]').click();

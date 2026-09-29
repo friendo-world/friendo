@@ -22,7 +22,7 @@ type SiteConfig struct {
 		Name string `toml:"name"`
 	} `toml:"site"`
 	Content struct {
-		Types []string `toml:"types"`
+		Types []string `toml:"collections"`
 	} `toml:"content"`
 	Deploy struct {
 		Target string `toml:"target"`
@@ -119,8 +119,12 @@ func RunPush(opts PushOptions) error {
 		if err != nil {
 			return err
 		}
+		memberships, err := readLocalMemberships(siteDir)
+		if err != nil {
+			return err
+		}
 		if len(records) > 0 {
-			if err := siteClient.PushData(records, events); err != nil {
+			if err := siteClient.PushData(records, events, memberships); err != nil {
 				return err
 			}
 			fmt.Printf(" %d records\n", len(records))
@@ -145,12 +149,12 @@ func RunPush(opts PushOptions) error {
 	// Push users (with their author profiles) if requested.
 	if opts.Users {
 		fmt.Printf("Pushing users...")
-		users, authors, err := readLocalUsers(siteDir)
+		users, authors, follows, err := readLocalUsers(siteDir)
 		if err != nil {
 			return err
 		}
 		if len(users) > 0 {
-			if err := siteClient.PushUsers(users, authors); err != nil {
+			if err := siteClient.PushUsers(users, authors, follows); err != nil {
 				return err
 			}
 			fmt.Printf(" %d users\n", len(users))
@@ -204,8 +208,8 @@ func RunPull(opts PullOptions) error {
 	fmt.Printf("Pulling from %s...\n", target)
 
 	if opts.Data {
-		fmt.Printf("Pulling records...")
-		records, events, err := siteClient.PullDataAndEvents()
+		fmt.Printf("Pulling posts...")
+		records, events, memberships, err := siteClient.PullDataAndEvents()
 		if err != nil {
 			return err
 		}
@@ -218,7 +222,7 @@ func RunPull(opts PullOptions) error {
 			}
 
 			dataJSON := "{}"
-			if d, ok := r["data"]; ok && d != nil {
+			if d, ok := r["fields"]; ok && d != nil {
 				if s, isStr := d.(string); isStr {
 					if s != "" {
 						dataJSON = s
@@ -253,6 +257,13 @@ func RunPull(opts PullOptions) error {
 				if err := db.UpsertEvent(ev); err != nil {
 					fmt.Printf("\n  Warning: failed to insert event %s: %v\n", ev.ID, err)
 				}
+			}
+		}
+		// Group memberships travel with the group posts.
+		for _, m := range memberships {
+			str := func(key string) string { v, _ := m[key].(string); return v }
+			if err := db.UpsertMembership(str("id"), str("group_id"), str("author_id"), str("role"), str("status"), str("created")); err != nil {
+				fmt.Printf("\n  Warning: failed to insert membership %s: %v\n", str("id"), err)
 			}
 		}
 
@@ -291,7 +302,7 @@ func RunPull(opts PullOptions) error {
 
 	if opts.Users {
 		fmt.Printf("Pulling users...")
-		users, authors, err := siteClient.PullUsers()
+		users, authors, follows, err := siteClient.PullUsers()
 		if err != nil {
 			return err
 		}
@@ -325,8 +336,21 @@ func RunPull(opts PullOptions) error {
 		// Author profiles travel with accounts.
 		for _, a := range authors {
 			str := func(key string) string { v, _ := a[key].(string); return v }
-			if err := db.UpsertAuthor(str("id"), str("user_id"), str("name"), str("email"), str("avatar"), str("role"), str("created")); err != nil {
+			dataJSON := ""
+			if d, ok := a["fields"]; ok && d != nil {
+				if b, err := json.Marshal(d); err == nil {
+					dataJSON = string(b)
+				}
+			}
+			if err := db.UpsertAuthor(str("id"), str("user_id"), str("name"), str("email"), str("avatar"), str("role"), str("slug"), str("bio"), dataJSON, str("created")); err != nil {
 				fmt.Printf("\n  Warning: failed to insert author %s: %v\n", str("id"), err)
+			}
+		}
+		// Follows ride with the profiles they connect.
+		for _, f := range follows {
+			str := func(key string) string { v, _ := f[key].(string); return v }
+			if err := db.UpsertFollow(str("id"), str("follower_id"), str("followee_id"), str("created")); err != nil {
+				fmt.Printf("\n  Warning: failed to insert follow %s: %v\n", str("id"), err)
 			}
 		}
 		fmt.Printf(" %d users\n", inserted)
@@ -606,21 +630,35 @@ func readLocalFiles(siteDir string) ([]map[string]any, error) {
 	return db.AllFiles()
 }
 
-func readLocalUsers(siteDir string) (users, authors []map[string]any, err error) {
+// readLocalMemberships returns the local site's group memberships (for push --data).
+func readLocalMemberships(siteDir string) ([]map[string]any, error) {
 	dbPath := filepath.Join(siteDir, "data", "friendo.db")
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return nil, nil, nil
+		return nil, nil
+	}
+	db, err := data.Open(siteDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening local database: %w", err)
+	}
+	defer db.Close()
+	return db.ListMemberships()
+}
+
+func readLocalUsers(siteDir string) (users, authors, follows []map[string]any, err error) {
+	dbPath := filepath.Join(siteDir, "data", "friendo.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil, nil, nil, nil
 	}
 
 	db, err := data.Open(siteDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("opening local database: %w", err)
+		return nil, nil, nil, fmt.Errorf("opening local database: %w", err)
 	}
 	defer db.Close()
 
 	list, err := db.ListUsers()
 	if err != nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	for _, u := range list {
 		users = append(users, map[string]any{
@@ -637,7 +675,8 @@ func readLocalUsers(siteDir string) (users, authors []map[string]any, err error)
 		})
 	}
 	authors, _ = db.ListAuthors()
-	return users, authors, nil
+	follows, _ = db.ListFollows()
+	return users, authors, follows, nil
 }
 
 // readLocalSettings returns the local site's settings (access policy, moderation).

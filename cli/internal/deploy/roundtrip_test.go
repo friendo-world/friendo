@@ -60,7 +60,7 @@ func TestCLIPushPullRoundTrip(t *testing.T) {
 		"all_day": false, "timezone": "America/Los_Angeles", "rrule": "FREQ=WEEKLY",
 		"exdates": []string{"2026-10-11"}, "created": "2020-01-01T00:00:00Z",
 	}}
-	if err := client.PushData(records, events); err != nil {
+	if err := client.PushData(records, events, nil); err != nil {
 		t.Fatalf("PushData: %v", err)
 	}
 	files := []map[string]any{{
@@ -73,7 +73,7 @@ func TestCLIPushPullRoundTrip(t *testing.T) {
 	}
 
 	// Pull it back and assert the round-trip.
-	gotRecords, gotEvents, err := client.PullDataAndEvents()
+	gotRecords, gotEvents, _, err := client.PullDataAndEvents()
 	if err != nil {
 		t.Fatalf("PullData: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestCLIPushPullRoundTrip(t *testing.T) {
 
 	// Users round-trip with their password hash intact — the thing `push --users`
 	// promises ("the same password works everywhere").
-	gotUsers, _, err := client.PullUsers()
+	gotUsers, _, _, err := client.PullUsers()
 	if err != nil {
 		t.Fatalf("PullUsers: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestCLIPushPullRoundTrip(t *testing.T) {
 	if h, _ := adminRow["password_hash"].(string); !strings.HasPrefix(h, "$2") {
 		t.Fatalf("pulled admin has no bcrypt hash: %#v", adminRow)
 	}
-	if err := client.PushUsers(gotUsers, nil); err != nil {
+	if err := client.PushUsers(gotUsers, nil, nil); err != nil {
 		t.Fatalf("PushUsers: %v", err)
 	}
 	if _, err := db.AuthenticateUser("admin@test.com", "password12345"); err != nil {

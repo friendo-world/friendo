@@ -24,7 +24,7 @@ writeFileSync(join(siteDir, "friendo.toml"), `[site]
 name = "Types"
 
 [content]
-types = ["recipes"]
+collections = ["recipes"]
 
 [content.recipes.fields]
 serves = "number"
@@ -70,12 +70,12 @@ try {
   await waitForReady();
   const cookie = await setupOwner();
   const H = { Cookie: "friendo_session=" + cookie, "Content-Type": "application/json" };
-  const seeded = await fetch(ORIGIN + "/_/api/collections/recipes/records", { method: "POST", headers: H,
-    body: JSON.stringify({ title: "Soup", slug: "soup", body: "", status: "published", data: { serves: 4, course: "main", extra: "x" } }) });
+  const seeded = await fetch(ORIGIN + "/_/api/collections/recipes/posts", { method: "POST", headers: H,
+    body: JSON.stringify({ title: "Soup", slug: "soup", body: "", status: "published", fields: { serves: 4, course: "main", extra: "x" } }) });
   if (!seeded.ok) throw new Error("seed failed: " + seeded.status);
-  const soup = (await seeded.json()).record;
-  const adhoc = await fetch(ORIGIN + "/_/api/collections/notes/records", { method: "POST", headers: H,
-    body: JSON.stringify({ title: "A note", slug: "a-note", body: "", status: "draft", data: { pinned: true } }) });
+  const soup = (await seeded.json()).post;
+  const adhoc = await fetch(ORIGIN + "/_/api/collections/notes/posts", { method: "POST", headers: H,
+    body: JSON.stringify({ title: "A note", slug: "a-note", body: "", status: "draft", fields: { pinned: true } }) });
   if (!adhoc.ok) throw new Error("seed failed: " + adhoc.status);
 
   browser = await chromium.launch();
@@ -116,9 +116,9 @@ try {
   await panel.locator('[data-field="course"] select').selectOption("starter");
   await panel.locator("button[type=submit]").click();
   await page.waitForURL(/\/_\/collections\/recipes$/, { timeout: 10000 });
-  const list = await (await fetch(ORIGIN + "/_/api/collections/recipes/records", { headers: H })).json();
-  const bread = list.records.find((r) => r.slug === "bread");
-  if (!bread || bread.data.course !== "starter" || "serves" in bread.data) throw new Error("bread data = " + JSON.stringify(bread && bread.data));
+  const list = await (await fetch(ORIGIN + "/_/api/collections/recipes/posts", { headers: H })).json();
+  const bread = list.posts.find((r) => r.slug === "bread");
+  if (!bread || bread.fields.course !== "starter" || "serves" in bread.fields) throw new Error("bread data = " + JSON.stringify(bread && bread.fields));
 
   // 4. An undeclared field a record carries still shows, after the declared ones.
   await page.goto(ORIGIN + "/_/collections/recipes/" + soup.id, { waitUntil: "load" });
@@ -139,7 +139,7 @@ try {
   const toml = page.locator('textarea[name="content-toml"]');
   await page.waitForFunction(() => /\[content\]/.test(document.querySelector('textarea[name="content-toml"]')?.value || ""));
   const block = await toml.inputValue();
-  for (const line of ['types = ["recipes", "notes"]', "[content.recipes.fields]", 'serves = "number"', 'extra = "text"', "[content.notes.fields]", 'pinned = "checkbox"']) {
+  for (const line of ['collections = ["recipes", "notes"]', "[content.recipes.fields]", 'serves = "number"', 'extra = "text"', "[content.notes.fields]", 'pinned = "checkbox"']) {
     if (!block.includes(line)) throw new Error(`toml block missing ${JSON.stringify(line)}:\n${block}`);
   }
 

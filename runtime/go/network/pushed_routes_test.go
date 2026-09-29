@@ -42,7 +42,7 @@ func TestPushedRouteServesWithoutRestart(t *testing.T) {
 	}
 
 	// Push the dynamic page through the real endpoint.
-	body := `{"files":[{"path":"pages/docs/[slug].html","content":"<h1>{{ record.title }}</h1>"}]}`
+	body := `{"files":[{"path":"pages/docs/[slug].html","content":"<h1>{{ post.title }}</h1>"}]}`
 	req := httptest.NewRequest("POST", "http://docs.localhost/_/api/push/templates", strings.NewReader(body))
 	req.Host = "docs.localhost"
 	req.Header.Set("Content-Type", "application/json")

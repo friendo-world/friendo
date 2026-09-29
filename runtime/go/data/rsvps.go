@@ -15,10 +15,15 @@ import (
 // moved (see RekeyRSVPs); answers to a date that no longer exists are kept and
 // shown to the organizer as no longer scheduled.
 
-// RSVPAnswers are the accepted answers.
+// RSVPAnswers are the answers a member may give.
 var RSVPAnswers = map[string]bool{"going": true, "not_going": true, "maybe": true}
 
-// ValidRSVPAnswer reports whether s is one of the three answers.
+// RSVPInvited is the one answer a member can't give themselves: an organizer
+// put it there (v0.6 Tier E). It sits in the same row an answer will replace,
+// so "invited but hasn't said" is just an RSVP nobody has answered yet.
+const RSVPInvited = "invited"
+
+// ValidRSVPAnswer reports whether s is one of the three answers a member may give.
 func ValidRSVPAnswer(s string) bool { return RSVPAnswers[s] }
 
 // RSVPCounts is the public tally for one occurrence.
@@ -26,6 +31,41 @@ type RSVPCounts struct {
 	Going    int `json:"going"`
 	NotGoing int `json:"not_going"`
 	Maybe    int `json:"maybe"`
+	Invited  int `json:"invited"` // asked, no answer yet
+}
+
+// InviteRSVP marks a profile invited to an occurrence. It never overwrites a
+// real answer — an invitation to someone who already said "going" is a no-op —
+// and reports whether a row was written.
+func (db *DB) InviteRSVP(eventID, occurrence, authorID string) (bool, error) {
+	if authorID == "" {
+		return false, nil
+	}
+	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	res, err := db.Conn.Exec(
+		`INSERT INTO rsvps (id, site_id, event_id, occurrence, author_id, answer, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(event_id, occurrence, author_id) DO NOTHING`,
+		GenerateID(), db.SiteID, eventID, occurrence, authorID, RSVPInvited, now, now,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// InvitedFor lists the profiles invited to an occurrence who haven't answered.
+func (db *DB) InvitedFor(eventID, occurrence string) ([]map[string]any, error) {
+	rows, err := db.Conn.Query(
+		`SELECT `+prefixed(profileCols, "a.")+` FROM rsvps r JOIN authors a ON a.id = r.author_id AND a.site_id = r.site_id
+		 WHERE r.site_id = ? AND r.event_id = ? AND r.occurrence = ? AND r.answer = ? ORDER BY r.created, r.rowid`,
+		db.SiteID, eventID, occurrence, RSVPInvited,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return scanProfiles(rows)
 }
 
 // ResolveOccurrence validates a requested occurrence against a series: "" means
@@ -100,13 +140,15 @@ func (db *DB) RSVPCountsFor(eventID, occurrence string) (RSVPCounts, error) {
 			c.NotGoing = n
 		case "maybe":
 			c.Maybe = n
+		case RSVPInvited:
+			c.Invited = n
 		}
 	}
 	return c, rows.Err()
 }
 
 // RSVPForUser is the account's own answer for an occurrence ("" if none). An
-// account may hold several personas; any of them counts as "mine".
+// account may hold several profiles; any of them counts as "mine".
 func (db *DB) RSVPForUser(eventID, occurrence, userID string) string {
 	var answer string
 	err := db.Conn.QueryRow(
@@ -121,7 +163,7 @@ func (db *DB) RSVPForUser(eventID, occurrence, userID string) string {
 }
 
 // ListRSVPs lists who answered for one occurrence (organizer view), with each
-// author's display name and an email to reach them (the persona's, else the
+// author's display name and an email to reach them (the profile's, else the
 // account's — a pen name still has a person behind it).
 func (db *DB) ListRSVPs(eventID, occurrence string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
@@ -144,7 +186,7 @@ func (db *DB) ListRSVPs(eventID, occurrence string) ([]map[string]any, error) {
 			return nil, err
 		}
 		out = append(out, map[string]any{
-			"id": id, "occurrence": occ, "author_id": authorID, "answer": answer,
+			"id": id, "date": occ, "author_id": authorID, "answer": answer,
 			"author_name": name, "author_email": email, "created": created, "updated": updated,
 		})
 	}
@@ -220,10 +262,10 @@ func (db *DB) RSVPSummary(e *Event, now time.Time) map[string]any {
 	}
 	key, err := e.ResolveOccurrence("", now)
 	if err != nil {
-		return map[string]any{"going": 0, "not_going": 0, "maybe": 0, "occurrence": ""}
+		return map[string]any{"going": 0, "not_going": 0, "maybe": 0, "invited": 0, "date": ""}
 	}
 	c, _ := db.RSVPCountsFor(e.ID, key)
-	return map[string]any{"going": c.Going, "not_going": c.NotGoing, "maybe": c.Maybe, "occurrence": key}
+	return map[string]any{"going": c.Going, "not_going": c.NotGoing, "maybe": c.Maybe, "invited": c.Invited, "date": key}
 }
 
 // AttendeeRows flattens every answer on a series for the organizer, grouped by
@@ -247,15 +289,15 @@ func (db *DB) AttendeeRows(e *Event) ([]map[string]any, error) {
 		}
 	}
 	for _, r := range list {
-		key, _ := r["occurrence"].(string)
+		key, _ := r["date"].(string)
 		r["scheduled"] = scheduled[key]
 		if t, err := time.Parse(time.RFC3339, key); err == nil {
 			r["occurrence_text"] = FormatWhen(t.In(loc), time.Time{}, e.AllDay, time.Now().In(loc), "")
 		}
 	}
 	sort.SliceStable(list, func(i, j int) bool {
-		oi, _ := list[i]["occurrence"].(string)
-		oj, _ := list[j]["occurrence"].(string)
+		oi, _ := list[i]["date"].(string)
+		oj, _ := list[j]["date"].(string)
 		return oi < oj
 	})
 	return list, nil
@@ -265,10 +307,36 @@ func uniqueOccurrences(list []map[string]any) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, r := range list {
-		key, _ := r["occurrence"].(string)
+		key, _ := r["date"].(string)
 		if !seen[key] {
 			seen[key] = true
 			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// RSVPEventIDsForUser is the set of series an account has a live answer on —
+// going, maybe, or invited, through any of its profiles — for a "my events"
+// feed. Series-level: a weekly event counts if any date was answered.
+func (db *DB) RSVPEventIDsForUser(userID string) map[string]bool {
+	out := map[string]bool{}
+	if userID == "" {
+		return out
+	}
+	rows, err := db.Conn.Query(
+		`SELECT DISTINCT r.event_id FROM rsvps r JOIN authors a ON a.id = r.author_id AND a.site_id = r.site_id
+		 WHERE r.site_id = ? AND a.user_id = ? AND r.answer IN ('going', 'maybe', 'invited')`,
+		db.SiteID, userID,
+	)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			out[id] = true
 		}
 	}
 	return out

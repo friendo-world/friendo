@@ -1,0 +1,8 @@
+{% extends "layouts/base.html" %}
+{% members only %}
+{% block content %}
+<h1>Inbox</h1>
+<p>What happened to you: new followers, comments on your posts, group requests and
+invitations. {{ user.unread }} unread.</p>
+<friendo-inbox></friendo-inbox>
+{% endblock %}

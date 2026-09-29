@@ -1,5 +1,5 @@
 // Covers v0.5 sign-in: a site signs in with an emailed code by default, passwords
-// are opt-in (access.password_login), first-run setup creates no account until
+// are opt-in (password_login), first-run setup creates no account until
 // the code verifies, and code guesses are rate-limited like password attempts.
 package tests
 
@@ -137,9 +137,9 @@ func TestCodeSignInIsTheDefault(t *testing.T) {
 	a.want(400, st, out, "short password")
 
 	// Turn passwords on; the editor still has none, so login fails until one is set.
-	st, out = a.do("PUT", "/settings", map[string]any{"access": map[string]any{"password_login": true}})
+	st, out = a.do("PUT", "/settings", map[string]any{"password_login": true})
 	a.want(200, st, out, "enable password login")
-	if out["access"].(map[string]any)["password_login"] != true {
+	if out["password_login"] != true {
 		t.Fatalf("settings payload didn't report password_login on: %v", out)
 	}
 	st, out = a.do("PUT", "/users/"+ed.ID, map[string]any{"name": "Ed", "role": "editor", "password": "password12345"})
@@ -179,7 +179,7 @@ func TestSetupWithPasswordOptsIn(t *testing.T) {
 	// choosing a password at setup is the opt-in, so password login turns on.
 	st, out := a.do("POST", "/setup", map[string]any{"email": "owner@test.com", "name": "Owner", "password": "password12345"})
 	a.want(201, st, out, "setup with password")
-	if !db.GetBoolSetting("access.password_login", false) {
+	if !db.GetBoolSetting("password_login", false) {
 		t.Fatal("setting up with a password should turn password sign-in on")
 	}
 	a.do("POST", "/auth/logout", nil)
@@ -187,7 +187,7 @@ func TestSetupWithPasswordOptsIn(t *testing.T) {
 	a.want(200, st, out, "password login after password setup")
 
 	// The owner can switch passwords off again; the code path keeps working.
-	st, out = a.do("PUT", "/settings", map[string]any{"access": map[string]any{"password_login": false}})
+	st, out = a.do("PUT", "/settings", map[string]any{"password_login": false})
 	a.want(200, st, out, "disable password login")
 	a.do("POST", "/auth/logout", nil)
 	st, out = a.do("POST", "/auth/login", map[string]any{"email": "owner@test.com", "password": "password12345"})

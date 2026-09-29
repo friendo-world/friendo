@@ -2,7 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { api, type PendingRecord } from "../api";
 import { formatWhen } from "../when";
 
-// Posts waiting for an editor, as a section of the Moderation page.
+// Posts waiting for a moderator, as a section of the Review page.
 export function ReviewQueue() {
   const [records, setRecords] = useState<PendingRecord[] | null>(null);
   const [error, setError] = useState("");
@@ -12,8 +12,8 @@ export function ReviewQueue() {
     setError("");
     api
       .recordsByStatus("pending")
-      .then((r) => setRecords(r.records))
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load pending posts."));
+      .then((r) => setRecords(r.posts))
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load the posts waiting for review."));
   }
 
   useEffect(load, []);
@@ -41,7 +41,7 @@ export function ReviewQueue() {
     <section data-section="review">
       <h2 class="mb-1 text-sm font-bold text-dim">Posts to review</h2>
       <p class="mb-3 text-xs text-dim">
-        Posts awaiting approval. Publishing makes them live on the site.
+        Posts waiting for review. Publishing makes them live on the site.
       </p>
 
       {error && <div class="mb-4 border border-crimson bg-tint px-3 py-2 text-sm text-crimson">{error}</div>}

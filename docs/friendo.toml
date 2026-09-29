@@ -2,7 +2,7 @@
 name = "Friendo Docs"
 
 [content]
-types = ["docs"]
+collections = ["docs"]
 
 [deploy]
 target = "https://docs.friendo.world"

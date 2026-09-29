@@ -31,10 +31,10 @@ export function Users() {
   return (
     <div class="mx-auto max-w-[960px] px-4 py-8">
       <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-xl font-bold">Users</h1>
-        <a href="/_/users/new"
+        <h1 class="text-xl font-bold">Members</h1>
+        <a href="/_/members/new"
           class="bg-ink px-4 py-2 text-sm font-bold text-white hover:bg-link">
-          Add user
+          Add member
         </a>
       </div>
 
@@ -56,12 +56,20 @@ export function Users() {
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} class="border-b border-ink hover:bg-tint">
-                  <td class="px-4 py-3 text-sm font-bold">{u.name}</td>
+                  <td class="px-4 py-3 text-sm font-bold">
+                    {u.name}
+                    {u.profile_slug && (
+                      <a href={`/profiles/${encodeURIComponent(u.profile_slug)}`} target="_blank" rel="noreferrer"
+                        class="ml-2 text-xs font-normal text-link hover:underline" title="Open profile page">
+                        /profiles/{u.profile_slug}
+                      </a>
+                    )}
+                  </td>
                   <td class="px-4 py-3 text-sm text-dim">{u.email}</td>
                   <td class="px-4 py-3"><RoleBadge role={u.role} /></td>
                   <td class="px-4 py-3">
                     <div class="flex justify-end gap-2">
-                      <a href={`/_/users/${encodeURIComponent(u.id)}/edit`}
+                      <a href={`/_/members/${encodeURIComponent(u.id)}/edit`}
                         class="bg-ink px-2 py-1 text-xs font-bold text-white hover:bg-link">
                         Edit
                       </a>
@@ -80,7 +88,7 @@ export function Users() {
         </div>
       ) : (
         <div class="bg-white p-6 text-center border border-ink">
-          <p class="text-sm text-dim">No users yet.</p>
+          <p class="text-sm text-dim">No members yet.</p>
         </div>
       )}
     </div>

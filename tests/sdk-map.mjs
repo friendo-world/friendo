@@ -27,7 +27,7 @@ mkdirSync(join(siteDir, "pages"), { recursive: true });
 writeFileSync(
   join(siteDir, "pages", "map.html"),
   '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Map</title></head><body>' +
-    '<friendo-map target-type="post" target-id="p1"></friendo-map>' +
+    '<friendo-map post-id="p1"></friendo-map>' +
     '<script src="/friendo.js" defer></script></body></html>'
 );
 
@@ -65,8 +65,8 @@ async function seed() {
   }
   const H = { "Content-Type": "application/json", Cookie: "friendo_session=" + cookie };
   const pins = [
-    { target_type: "post", target_id: "p1", lat: 48.8584, lng: 2.2945, label: "Eiffel Tower" },
-    { target_type: "post", target_id: "p1", lat: 40.6892, lng: -74.0445, label: "Statue of Liberty" },
+    { post_id: "p1", lat: 48.8584, lng: 2.2945, label: "Eiffel Tower" },
+    { post_id: "p1", lat: 40.6892, lng: -74.0445, label: "Statue of Liberty" },
   ];
   for (const p of pins) {
     const r = await fetch(ORIGIN + "/_/api/locations", { method: "POST", headers: H, body: JSON.stringify(p) });
