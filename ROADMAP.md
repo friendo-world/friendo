@@ -13,6 +13,7 @@ What's shipped and what's next. For how the pieces fit together, see
 | **v0.4** | Open the network — quotas, account management, custom domains | ✅ Shipped |
 | **v0.5** | One obvious sign-in; the network as a friendo site (home site + `<friendo-account>` / `<friendo-console>`); members-only pages; a built-in calendar with RSVP; declared fields + feature switches + a rebuilt records admin; docs + landing | ✅ Shipped |
 | **v0.6** | Social graph, built the friendo way — profiles at `/profiles/<slug>` with declared fields, one-way follows (friends = mutual), an in-page inbox, groups as a built-in collection with memberships and visibility, event invitations | ✅ Built (tag pending) |
+| **v0.9** | Onion addresses — `friendo serve --onion` and `friendo deploy --onion` (Tor via bine + a real `tor`), onion-safe local admin and rate limits, `Onion-Location` on clearnet | Proposed |
 
 ---
 
@@ -154,6 +155,13 @@ gates that come with being built in — `user.groups` lights up the `if` tail re
 v0.5); richer profiles with a public page; in-page notifications (email later); and event
 invitations as an `invited` RSVP. Per site, synced and exported like RSVPs. Scope, names
 and tiers: [design/v0.6-roadmap.md](design/v0.6-roadmap.md).
+
+**v0.9 — proposed (after 0.7 and 0.8):** onion addresses, so a site is readable in Tor
+Browser at a `.onion` address from a laptop (`friendo serve --onion`) or a network
+(`friendo deploy --onion`). It uses bine to drive a real `tor`. On the network an onion is a
+custom domain that's verified from the start. Two `friendo serve` holes must close first:
+the localhost open admin and the OTP echo would both be reachable over Tor. Feasibility,
+design and open decisions: [design/v0.9-roadmap.md](design/v0.9-roadmap.md).
 
 ---
 
