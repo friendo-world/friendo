@@ -227,7 +227,7 @@ func PrivateLinks(baseURL, token string) map[string]string {
 		"ics":    ics,
 		"json":   base + "/calendar.json?token=" + url.QueryEscape(token),
 		"webcal": "webcal://" + strings.TrimPrefix(strings.TrimPrefix(ics, "https://"), "http://"),
-		"google": "https://calendar.google.com/calendar/r?cid=" + url.QueryEscape(ics),
+		"google": "https://calendar.google.com/calendar/r?cid=" + url.QueryEscape("webcal://" + strings.TrimPrefix(strings.TrimPrefix(ics, "https://"), "http://")),
 	}
 }
 
@@ -246,7 +246,9 @@ func Links(baseURL string) map[string]string {
 	out["ics"] = abs
 	out["json"] = strings.TrimSuffix(baseURL, "/") + "/calendar.json"
 	out["webcal"] = "webcal://" + strings.TrimPrefix(strings.TrimPrefix(abs, "https://"), "http://")
-	out["google"] = "https://calendar.google.com/calendar/r?cid=" + url.QueryEscape(abs)
+	// Google reads `cid` as a feed only when it's webcal://; given https:// it
+	// looks for a calendar with that ID and fails.
+	out["google"] = "https://calendar.google.com/calendar/r?cid=" + url.QueryEscape(out["webcal"])
 	return out
 }
 

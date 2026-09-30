@@ -1261,7 +1261,9 @@
         }
         var menuOf = function (feed) {
           return [
-            { text: "Google Calendar", href: "https://calendar.google.com/calendar/r?cid=" + encodeURIComponent(feed) },
+            // Google only reads `cid` as a feed when it's webcal://; an https://
+            // address is taken for a calendar ID and fails.
+            { text: "Google Calendar", href: "https://calendar.google.com/calendar/r?cid=" + encodeURIComponent(feed.replace(/^https?:\/\//, "webcal://")) },
             { text: "Apple Calendar", href: feed.replace(/^https?:\/\//, "webcal://") },
             { text: "Outlook", href: feed.replace(/^https?:\/\//, "webcal://") },
             // Proton wants the https:// address, pasted by hand.

@@ -261,7 +261,7 @@ func TestLinksAndGoogleURL(t *testing.T) {
 	if l["ics"] != "https://village.example/calendar.ics" || l["webcal"] != "webcal://village.example/calendar.ics" {
 		t.Errorf("links: %v", l)
 	}
-	if l["google"] != "https://calendar.google.com/calendar/r?cid=https%3A%2F%2Fvillage.example%2Fcalendar.ics" {
+	if l["google"] != "https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fvillage.example%2Fcalendar.ics" {
 		t.Errorf("google subscribe: %s", l["google"])
 	}
 	if l := Links(""); l["google"] != "" || l["ics"] != "/calendar.ics" {
