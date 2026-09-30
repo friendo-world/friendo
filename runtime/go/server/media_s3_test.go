@@ -54,7 +54,12 @@ func TestMediaS3RoundTrip(t *testing.T) {
 	imageBytes := []byte("\x89PNG\r\n\x1a\n-fake-image-bytes-for-test-")
 
 	// Upload via the media API.
-	body, contentType := multipartImage(t, "gallery", "photo.png", imageBytes)
+	// Uploads attach to a post that exists.
+	postID, err := db.CreateRecord("blog", "p1", "P1", "", "published", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, contentType := multipartImage(t, postID, "gallery", "photo.png", imageBytes)
 	up := httptest.NewRequest(http.MethodPost, "/_/api/files", body)
 	up.Header.Set("Content-Type", contentType)
 	rec := httptest.NewRecorder()
@@ -180,11 +185,11 @@ func setupS3(t *testing.T) (endpoint, bucket, access, secret string) {
 	return endpoint, bucket, access, secret
 }
 
-func multipartImage(t *testing.T, field, filename string, content []byte) (*bytes.Buffer, string) {
+func multipartImage(t *testing.T, postID, field, filename string, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	_ = mw.WriteField("post_id", "p1")
+	_ = mw.WriteField("post_id", postID)
 	_ = mw.WriteField("field", field)
 	h := textproto.MIMEHeader{}
 	h.Set("Content-Disposition", `form-data; name="file"; filename="`+filename+`"`)

@@ -98,10 +98,15 @@ export type SettingValues = {
   comments_need_review: boolean;
   password_login: boolean;
   members_can_start_groups: boolean;
+  // Members (and visitors) can add images to what they post.
+  members_can_upload: boolean;
+  visitors_can_upload: boolean;
   // What a visitor (not signed in) may do; each is off by default.
   visitors_can_react: boolean;
   visitors_can_vote: boolean;
   visitors_can_rsvp: boolean;
+  visitors_can_comment: boolean;
+  visitors_can_post: boolean;
   profile_visibility: ProfileVisibility;
   // Which built-in collections show when friendo.toml lists no [content] collections.
   default_collections: string[];
@@ -212,6 +217,10 @@ export type PendingRecord = {
   title: string;
   author_id: string;
   author_name: string;
+  // Written by a visitor (not signed in); author_name reads "Robin (visitor)".
+  visitor?: boolean;
+  // The first image uploaded with the post ("" if none), for a thumbnail.
+  image?: string;
   status: string;
   created: string;
   when?: When | null;
@@ -276,6 +285,7 @@ export type Comment = {
   author_id: string;
   author_name: string;
   author_avatar: string;
+  visitor?: boolean;
   body: string;
   status: CommentStatus;
   created: string;

@@ -26,13 +26,19 @@ const (
 	settingVisitorsCanReact = "visitors_can_react"
 	settingVisitorsCanVote  = "visitors_can_vote"
 	settingVisitorsCanRSVP  = "visitors_can_rsvp"
+	// A visitor's comments and posts always wait for review.
+	settingVisitorsCanComment = "visitors_can_comment"
+	settingVisitorsCanPost    = "visitors_can_post"
 )
 
 // visitorActions maps each action a visitor may take to its setting.
 var visitorActions = map[string]string{
-	"react": settingVisitorsCanReact,
-	"vote":  settingVisitorsCanVote,
-	"rsvp":  settingVisitorsCanRSVP,
+	"react":   settingVisitorsCanReact,
+	"vote":    settingVisitorsCanVote,
+	"rsvp":    settingVisitorsCanRSVP,
+	"comment": settingVisitorsCanComment,
+	"post":    settingVisitorsCanPost,
+	"upload":  settingVisitorsCanUpload, // images on their own pending post (uploads.go)
 }
 
 // Visitor rate limits, keyed by network address since a visitor has no email:
@@ -159,6 +165,51 @@ func handleVisitor(db *data.DB, authFunc func(*http.Request) *data.User) http.Ha
 		}
 		jsonResponse(w, map[string]any{"visitor": visitor, "can": can})
 	}
+}
+
+// setVisitorName applies the optional name a visitor sent with a comment or
+// post, answering 400 (and false) when it can't be used.
+func setVisitorName(w http.ResponseWriter, db *data.DB, user *data.User, name string) bool {
+	if !user.IsVisitor() || strings.TrimSpace(name) == "" {
+		return true
+	}
+	if err := db.SetVisitorName(user.ID, name); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// trapped reports whether a visitor filled in the hidden "trap" field the SDK
+// adds to its forms. People never see it; form-filling bots fill everything.
+// The bot is told it worked (202, nothing saved), so it has nothing to learn.
+func trapped(w http.ResponseWriter, user *data.User, trap string) bool {
+	if !user.IsVisitor() || strings.TrimSpace(trap) == "" {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"ok":true}` + "\n"))
+	return true
+}
+
+// VisitorContext is {{ visitor }} in templates: nil for a signed-in member,
+// otherwise what a visitor may do here and, when this browser already is one,
+// their name — so a page can say "Sign in to keep this" or show a composer.
+func VisitorContext(r *http.Request, db *data.DB, signedIn bool) map[string]any {
+	if signedIn {
+		return nil
+	}
+	can := map[string]any{}
+	for action := range visitorActions {
+		can[action] = visitorsCan(db, action)
+	}
+	out := map[string]any{"can": can, "known": false, "name": ""}
+	if v, _ := sessionVisitor(r, db); v != nil {
+		out["known"] = true
+		out["name"] = db.VisitorName(v.ID)
+	}
+	return out
 }
 
 // clientIP is the address a request came from, for visitor rate limits.

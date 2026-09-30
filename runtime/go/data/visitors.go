@@ -52,6 +52,20 @@ var authorTables = []struct {
 	{"comments", false},
 	{"posts", false},
 	{"messages", false},
+	{"notifications", true}, // the recipient's; its unique index dedups repeats
+}
+
+// AuthorDisplayName is how a profile's name shows beside what it wrote. A
+// visitor's name is theirs to type, so it's marked — "Robin (visitor)" can't
+// pass for a member called Robin — and one who gave none is just "Visitor".
+func AuthorDisplayName(name, role string) string {
+	if role != RoleVisitor {
+		return name
+	}
+	if name == "" {
+		return "Visitor"
+	}
+	return name + " (visitor)"
 }
 
 // IsVisitor reports whether the account is a visitor's.

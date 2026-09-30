@@ -12,6 +12,7 @@ export function CommentsQueue() {
   const [status, setStatus] = useState<CommentStatus>("pending");
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [error, setError] = useState("");
+  const [visitorsOnly, setVisitorsOnly] = useState(false);
 
   function load(s: CommentStatus) {
     setComments(null);
@@ -47,20 +48,23 @@ export function CommentsQueue() {
     <section data-section="comments">
       <div class="mb-3 flex items-center justify-between">
         <h2 class="text-sm font-bold text-dim">Comments</h2>
-        <div class="flex border border-ink">
-          {TABS.map((t, i) => (
-            <button
-              key={t.key}
-              onClick={() => setStatus(t.key)}
-              class={
-                "px-3 py-1 text-sm font-bold " +
-                (i > 0 ? "border-l border-ink " : "") +
-                (status === t.key ? "bg-ink text-white" : "text-dim hover:bg-tint hover:text-ink")
-              }
-            >
-              {t.label}
-            </button>
-          ))}
+        <div class="flex items-center gap-4">
+          <VisitorsOnly on={visitorsOnly} onToggle={setVisitorsOnly} />
+          <div class="flex border border-ink">
+            {TABS.map((t, i) => (
+              <button
+                key={t.key}
+                onClick={() => setStatus(t.key)}
+                class={
+                  "px-3 py-1 text-sm font-bold " +
+                  (i > 0 ? "border-l border-ink " : "") +
+                  (status === t.key ? "bg-ink text-white" : "text-dim hover:bg-tint hover:text-ink")
+                }
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -68,9 +72,9 @@ export function CommentsQueue() {
 
       {comments === null && !error ? (
         <p class="text-sm text-dim">Loading…</p>
-      ) : comments && comments.length > 0 ? (
+      ) : comments && comments.some((c) => !visitorsOnly || c.visitor) ? (
         <ul class="space-y-3">
-          {comments.map((c) => (
+          {comments.filter((c) => !visitorsOnly || c.visitor).map((c) => (
             <li key={c.id} class="bg-white p-4 border border-ink">
               <div class="mb-2 flex items-center gap-2 text-sm text-dim">
                 <span class="font-bold text-ink">{c.author_name || "Anonymous"}</span>
@@ -111,5 +115,16 @@ export function CommentsQueue() {
         </div>
       )}
     </section>
+  );
+}
+
+// VisitorsOnly narrows a review list to what visitors (not signed in) wrote —
+// the part most likely to need a closer look.
+export function VisitorsOnly({ on, onToggle }: { on: boolean; onToggle: (v: boolean) => void }) {
+  return (
+    <label class="flex items-center gap-1.5 text-xs text-dim">
+      <input type="checkbox" checked={on} onChange={(e) => onToggle((e.target as HTMLInputElement).checked)} />
+      Only from visitors
+    </label>
   );
 }

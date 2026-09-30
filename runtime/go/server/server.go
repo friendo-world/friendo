@@ -958,6 +958,9 @@ func baseContext(req *http.Request, db *data.DB, siteCfg siteConfig, user *data.
 		"request":     map[string]string{"path": req.URL.Path},
 		"collections": collections,
 		"user":        viewerContext(db, user),
+		// {{ visitor }}: nil for a member; else what a visitor may do here
+		// (visitor.can.comment, …) and, once this browser is one, visitor.name.
+		"visitor": api.VisitorContext(req, db, user != nil),
 		// {{ calendar.google }} / .webcal / .ics — ways to subscribe to the site's events.
 		"calendar": calendar.Links(origin),
 	}

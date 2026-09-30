@@ -19,7 +19,7 @@ use them anywhere:
 | Tag | What it does |
 |---|---|
 | `<friendo-signin>` | Sign in with an email code; shows who's signed in, their profiles, and a sign-out button |
-| `<friendo-comments>` | The approved comments and, for members, a box to write one |
+| `<friendo-comments>` | The approved comments and, for members (and [visitors](/docs/visitors) when allowed), a box to write one |
 | `<friendo-reactions>` | Emoji reactions with live counts; a click toggles yours |
 | `<friendo-poll>` | A poll; members vote once and see the tally |
 | `<friendo-chat>` | A realtime message feed |
@@ -81,7 +81,8 @@ and site moderators see waiting comments with approve / reject / delete.
 | `post-id` | The post |
 
 Parts: `list`, `comment`, `author`, `badge`, `body`, `actions`, `approve`, `reject`,
-`delete`, `form`, `input`, `submit`, `status`, `empty`, `signed-out`.
+`delete`, `form`, `input`, `submit`, `status`, `empty`, `signed-out`, and
+`name-input` (the optional name box a [visitor](/docs/visitors) sees).
 
 ## `<friendo-reactions>`
 
@@ -170,7 +171,12 @@ The one tag that stays in your page's DOM, so its parts are styled by attribute:
 | `redirect` | Where to go after, with `{slug}` and `{id}` filled in |
 | `status` | The status to ask for (`published`, the default, or `draft`) |
 
-Parts: `status`, `error`. Fires `friendo:submitted` with `detail.post`.
+An input named `author_name` is a [visitor's](/docs/visitors) name for their
+post; it's used only when the person posting isn't signed in.
+
+Parts: `status`, `error`, `withdraw` (the *Take it back* button shown while a
+post waits for review). Fires `friendo:submitted` with `detail.post`, and
+`friendo:withdrawn` with `detail.post` when it's taken back.
 
 ## `<friendo-input>`
 
@@ -412,6 +418,7 @@ Each event is a `CustomEvent`; what it carries is in `event.detail`. See
 | `friendo:needs-auth` | from `<friendo-follow>`, `<friendo-reactions>`, `<friendo-rsvp>` or `<friendo-poll>` when a visitor tries to use it (and the site doesn't [let visitors](/docs/visitors) do that) | |
 | `friendo:submitted` | from `<friendo-form>` after it makes a post | `post` |
 | `friendo:rsvp` | from `<friendo-rsvp>` after an answer | `postId`, `date`, `answer` |
+| `friendo:withdrawn` | from `<friendo-form>` when a post waiting for review is taken back | `post` |
 | `friendo:invite` | from `<friendo-invite>` after inviting | `postId`, `invited` |
 | `friendo:follow` | from `<friendo-follow>` | `profileId`, `following` |
 | `friendo:profile` | on `document`, when a profile is edited | `profile` |

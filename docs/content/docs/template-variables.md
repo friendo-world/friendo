@@ -6,7 +6,7 @@ weight: 40
 description: Every variable a page template can read, and what each one carries.
 ---
 
-Every page gets `site`, `request`, `collections`, `user` and `calendar`. A post's
+Every page gets `site`, `request`, `collections`, `user`, `visitor` and `calendar`. A post's
 page adds `post` (and `event` or `group` when it is one). A profile page adds
 `profile`. A `login.html` standing in for a members-only page adds `gate`.
 
@@ -52,6 +52,22 @@ Empty for a visitor, so `{% if user %}` reads naturally.
 
 `following`, `followers`, `friends` and `groups` are always lists, empty while
 that feature is switched off.
+
+## visitor
+
+Empty for a signed-in member. For everyone else, what a
+[visitor](/docs/visitors) may do on this site, and who they are once they've
+done something.
+
+| Variable | What |
+|---|---|
+| `visitor.can.react`, `.vote`, `.rsvp`, `.comment`, `.post`, `.upload` | Whether the site lets visitors do it |
+| `visitor.known` | This browser has already reacted, voted, answered, commented or posted |
+| `visitor.name` | The name they gave, or empty |
+
+```html
+{% if visitor.can.post %}<p>No account needed; your post waits for review.</p>{% endif %}
+```
 
 ## post
 

@@ -124,17 +124,24 @@ func (db *DB) EnsureAuthorSlugs() error {
 const profileCols = `id, name, avatar, role, slug, bio, data, created`
 
 // profileMap is a profile as templates and the API see it. Never the email.
+// A visitor's (only ever reached through AttachAuthors, as a post's author) has
+// its name marked and no page to link to.
 func profileMap(id, name, avatar, role, slug, bio, dataJSON, created string) map[string]any {
+	url := "/profiles/" + slug
+	if role == RoleVisitor {
+		url = ""
+	}
 	return map[string]any{
 		"id":      id,
-		"name":    name,
+		"name":    AuthorDisplayName(name, role),
+		"visitor": role == RoleVisitor,
 		"avatar":  avatar,
 		"role":    role,
 		"slug":    slug,
 		"bio":     bio,
 		"fields":  decodeData(dataJSON),
 		"created": created,
-		"url":     "/profiles/" + slug,
+		"url":     url,
 	}
 }
 

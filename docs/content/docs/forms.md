@@ -50,7 +50,7 @@ For values a native input can't give you, use a `<friendo-input>` with a `type`:
 |---|---|---|
 | `richtext` | a WYSIWYG editor (bold, headings, lists, links) | markdown, so it fits `body` |
 | `location` | a click-to-pick map | `{ lat, lng }`; the post gets a [location](/docs/locations) too |
-| `media` | a file picker with preview | the uploaded image's URL (contributors and up) |
+| `media` | a file picker with preview | the uploaded image's URL (contributors and up; members and visitors when allowed, see below) |
 | `tags` | a chip input | a list of strings |
 | `when` | start, end, all-day and repeats in one control | the post's [`when`](/docs/calendar) |
 
@@ -79,7 +79,19 @@ tag (or put a field named `status` in the form).
   **Settings → Members & roles** (`members_can_post` in
   [`friendo.toml`](/docs/config#settings)). Their posts always wait for review,
   and they're rate-limited.
-- **Visitors** can't post. The form tells them *Please sign in before posting.*
+- **Visitors** (not signed in) can post once you turn on **Visitors can post**
+  (`visitors_can_post`). Their posts always wait for review. Add an input named
+  `author_name` if you'd like them to give a name. With it off, the form tells
+  them *Please sign in before posting.* See [Let visitors take part](/docs/visitors).
+
+While a post waits for review, the form shows **Take it back**, so whoever sent
+it, member or visitor, can withdraw it, along with any images sent with it.
+
+Images from a `media` input are for contributors and up. To let others attach
+them, turn on **Members can add images** (`members_can_upload`) or **Visitors can
+add images** (`visitors_can_upload`). Their images wait for review along with the
+post, and each post can carry up to 10. Without the switch, the picker shows a
+note instead.
 
 > **Common mistake:** a signed-in member sees *Your account can't post here.*
 > That's a member without a role on a site where **Members can post** is off.

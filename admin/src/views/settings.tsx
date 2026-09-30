@@ -230,6 +230,15 @@ export function SettingsView() {
               onToggle={() => patch({ members_can_post: !s.members_can_post })}
             />
           )}
+          {s && (
+            <Toggle
+              label="Members can add images"
+              hint={managedHint("When on, a member posting from a <friendo-form> can include images. They wait for review with the post. Contributors and up can always add images.", "members_can_upload")}
+              on={s.members_can_upload}
+              disabled={saving || isManaged("members_can_upload")}
+              onToggle={() => patch({ members_can_upload: !s.members_can_upload })}
+            />
+          )}
           {s && s.features.groups && (
             <Toggle
               label="Members can start groups"
@@ -264,6 +273,33 @@ export function SettingsView() {
               on={s.visitors_can_rsvp}
               disabled={saving || isManaged("visitors_can_rsvp")}
               onToggle={() => patch({ visitors_can_rsvp: !s.visitors_can_rsvp })}
+            />
+          )}
+          {s && s.features.comments && (
+            <Toggle
+              label="Visitors can comment"
+              hint={managedHint("When on, someone who hasn't signed in can comment, with a name if they like. Their comments always wait for review.", "visitors_can_comment")}
+              on={s.visitors_can_comment}
+              disabled={saving || isManaged("visitors_can_comment")}
+              onToggle={() => patch({ visitors_can_comment: !s.visitors_can_comment })}
+            />
+          )}
+          {s && (
+            <Toggle
+              label="Visitors can post"
+              hint={managedHint("When on, someone who hasn't signed in can post from a page's <friendo-form>. Their posts always wait in the review queue.", "visitors_can_post")}
+              on={s.visitors_can_post}
+              disabled={saving || isManaged("visitors_can_post")}
+              onToggle={() => patch({ visitors_can_post: !s.visitors_can_post })}
+            />
+          )}
+          {s && s.visitors_can_post && (
+            <Toggle
+              label="Visitors can add images"
+              hint={managedHint("When on, a visitor posting from a <friendo-form> can include images. They wait for review with the post, and go if the visitor takes the post back.", "visitors_can_upload")}
+              on={s.visitors_can_upload}
+              disabled={saving || isManaged("visitors_can_upload")}
+              onToggle={() => patch({ visitors_can_upload: !s.visitors_can_upload })}
             />
           )}
           <label class="flex items-center justify-between gap-4">

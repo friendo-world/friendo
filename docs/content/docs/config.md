@@ -105,9 +105,13 @@ comments_need_review = true        # comments wait for review before they show
 password_login = false             # also allow signing in with a password
 profile_visibility = "members"     # who sees profiles: "members" or "public"
 members_can_start_groups = false   # any member can start a group (and is its admin)
+members_can_upload = false         # members can add images to what they post
 visitors_can_react = false         # someone who hasn't signed in can react
 visitors_can_vote = false          # ... vote in polls
 visitors_can_rsvp = false          # ... answer an event, giving a name
+visitors_can_comment = false       # ... comment (always waits for review)
+visitors_can_post = false          # ... post from a <friendo-form> (always waits for review)
+visitors_can_upload = false        # ... and add images to that post
 comments = true                    # feature switches, see below
 default_collections = ["blog", "pages"]   # built-in collections shown while [content] collections is unset
 ```
@@ -122,7 +126,8 @@ default_collections = ["blog", "pages"]   # built-in collections shown while [co
 | `password_login` | Also allow signing in with a password. Everyone can always sign in with an emailed code. See [Signing in](/docs/signing-in) | `false` |
 | `profile_visibility` | Who may see [profiles](/docs/profiles): `members` (anyone signed in) or `public` | `members` |
 | `members_can_start_groups` | Any member can start a [group](/docs/groups) and is its admin. Off, contributors and up can | `false` |
-| `visitors_can_react`, `visitors_can_vote`, `visitors_can_rsvp` | Someone who hasn't signed in can react, vote or RSVP. Their browser remembers them, and signing in brings what they did along. See [Let visitors take part](/docs/visitors) | `false` |
+| `members_can_upload` | A member posting from a [`<friendo-form>`](/docs/forms) can add images; they wait for review with the post. Contributors and up always can | `false` |
+| `visitors_can_react`, `visitors_can_vote`, `visitors_can_rsvp`, `visitors_can_comment`, `visitors_can_post`, `visitors_can_upload` | Someone who hasn't signed in can react, vote, RSVP, comment, post, or add images to their post (comments and posts always wait for review). Their browser remembers them, and signing in brings what they did along. See [Let visitors take part](/docs/visitors) | `false` |
 | `comments`, `reactions`, `polls`, `rsvp`, `locations`, `chats`, `follows`, `groups` | Feature switches (admin **Settings → Features**). Off, the feature's API refuses it, its `<friendo-*>` tag renders nothing, and `post.comments` (and so on) is empty. What people already wrote is kept | `true` |
 | `default_collections` | Which built-in collections (`blog`, `pages`) the admin lists while `[content] collections` is unset | both |
 

@@ -273,10 +273,14 @@ func (db *DB) QueryCollectionOwnedBy(collection, userID string) ([]map[string]an
 }
 
 // ListRecordsByStatus returns posts across all collections with the given status
-// (the post-review queue), newest first, with each author's display name joined.
+// (the post-review queue), newest first, with each author's display name and the
+// first image uploaded with it (image, "" if none) joined.
 func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
-		`SELECT p.id, p.collection, p.slug, p.title, p.author_id, p.status, p.created, a.name
+		`SELECT p.id, p.collection, p.slug, p.title, p.author_id, p.status, p.created, a.name, a.role,
+		        COALESCE((SELECT f.r2_key FROM files f
+		                  WHERE f.site_id = p.site_id AND f.record_type = 'post' AND f.record_id = p.id
+		                    AND f.mime LIKE 'image/%' ORDER BY f.created LIMIT 1), '')
 		 FROM posts p LEFT JOIN authors a ON a.id = p.author_id
 		 WHERE p.site_id = ? AND p.status = ? ORDER BY p.created DESC`,
 		db.SiteID, status,
@@ -288,13 +292,21 @@ func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, collection, slug, title, authorID, st, created string
-		var authorName sql.NullString
-		if err := rows.Scan(&id, &collection, &slug, &title, &authorID, &st, &created, &authorName); err != nil {
+		var authorName, authorRole sql.NullString
+		var imageKey string
+		if err := rows.Scan(&id, &collection, &slug, &title, &authorID, &st, &created, &authorName, &authorRole, &imageKey); err != nil {
 			return nil, err
+		}
+		// The first image uploaded with the post, so a reviewer sees what came with it.
+		image := ""
+		if imageKey != "" {
+			image = "/" + imageKey
 		}
 		out = append(out, map[string]any{
 			"id": id, "collection": collection, "slug": slug, "title": title,
-			"author_id": authorID, "author_name": authorName.String, "status": st, "created": created,
+			"author_id": authorID, "author_name": AuthorDisplayName(authorName.String, authorRole.String),
+			"visitor": authorRole.String == RoleVisitor, "status": st, "created": created,
+			"image": image,
 		})
 	}
 	return out, rows.Err()
@@ -531,17 +543,19 @@ func (db *DB) DeleteRecord(id string) error {
 // display fields joined in.
 func scanComment(scan func(dest ...any) error) (map[string]any, error) {
 	var id, postID, parentID, authorID, body, status, created string
-	var authorName, authorAvatar sql.NullString
-	if err := scan(&id, &postID, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar); err != nil {
+	var authorName, authorAvatar, authorRole sql.NullString
+	if err := scan(&id, &postID, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar, &authorRole); err != nil {
 		return nil, err
 	}
+	visitor := authorRole.String == RoleVisitor
 	return map[string]any{
 		"id":            id,
 		"post_id":       postID,
 		"parent_id":     parentID,
 		"author_id":     authorID,
-		"author_name":   authorName.String,
+		"author_name":   AuthorDisplayName(authorName.String, authorRole.String),
 		"author_avatar": authorAvatar.String,
+		"visitor":       visitor,
 		"body":          body,
 		"status":        status,
 		"created":       created,
@@ -549,7 +563,7 @@ func scanComment(scan func(dest ...any) error) (map[string]any, error) {
 }
 
 const commentSelect = `SELECT c.id, c.post_id, c.parent_id, c.author_id, c.body, c.status, c.created,
-       a.name, a.avatar
+       a.name, a.avatar, a.role
 FROM comments c LEFT JOIN authors a ON a.id = c.author_id`
 
 // ListCommentsByPost returns a post's comments, oldest first. When
@@ -583,7 +597,7 @@ func (db *DB) ListCommentsByPost(postID string, includeUnapproved bool) ([]map[s
 // row carries a `mine` flag (the viewer wrote it) for inline self-delete.
 func (db *DB) ListCommentsForViewer(postID, viewerUserID string, canModerate bool) ([]map[string]any, error) {
 	q := `SELECT c.id, c.post_id, c.parent_id, c.author_id, c.body, c.status, c.created,
-	             a.name, a.avatar, CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
+	             a.name, a.avatar, a.role, CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
 	      FROM comments c LEFT JOIN authors a ON a.id = c.author_id
 	      WHERE c.site_id = ? AND c.post_id = ?`
 	args := []any{viewerUserID, viewerUserID, db.SiteID, postID}
@@ -601,14 +615,15 @@ func (db *DB) ListCommentsForViewer(postID, viewerUserID string, canModerate boo
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, pid, parentID, authorID, body, status, created string
-		var authorName, authorAvatar sql.NullString
+		var authorName, authorAvatar, authorRole sql.NullString
 		var mine int
-		if err := rows.Scan(&id, &pid, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar, &mine); err != nil {
+		if err := rows.Scan(&id, &pid, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar, &authorRole, &mine); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
 			"id": id, "post_id": pid, "parent_id": parentID, "author_id": authorID,
-			"author_name": authorName.String, "author_avatar": authorAvatar.String,
+			"author_name":   AuthorDisplayName(authorName.String, authorRole.String),
+			"author_avatar": authorAvatar.String, "visitor": authorRole.String == RoleVisitor,
 			"body": body, "status": status, "created": created, "mine": mine == 1,
 		})
 	}
@@ -1275,6 +1290,28 @@ func (db *DB) SetRecordData(id, dataJSON string) error {
 	}
 	_, err := db.Conn.Exec(`UPDATE posts SET data = ? WHERE id = ? AND site_id = ?`, dataJSON, id, db.SiteID)
 	return err
+}
+
+// SetRecordField sets one field of a post's data, leaving the rest as they are
+// — how an image a member or visitor uploads lands in their pending post, since
+// they can't edit the post itself. The caller checks the name is a plain one.
+func (db *DB) SetRecordField(id, field string, value any) error {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	res, err := db.Conn.Exec(
+		`UPDATE posts SET data = json_set(COALESCE(NULLIF(data, ''), '{}'), '$."' || ? || '"', json(?))
+		 WHERE id = ? AND site_id = ?`,
+		field, string(b), id, db.SiteID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // CastVote records a member's vote. Enforces one vote per (poll, author) and

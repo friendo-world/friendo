@@ -23,7 +23,9 @@ In admin **Settings**, or as keys under [`[settings]`](/docs/config#settings) in
 | **Members can post** | Members & roles | `members_can_post` | off |
 
 With **Members can post** on, plain members can post from a
-[`<friendo-form>`](/docs/forms), and their posts *always* wait for review.
+[`<friendo-form>`](/docs/forms), and their posts *always* wait for review. So do
+comments and posts from [visitors](/docs/visitors) (people who aren't signed in),
+when you let them comment or post.
 
 The presets in **Settings → Members & roles** set the post rule for you:
 **Personal** and **Community** leave it off, **Blog** turns it on.
@@ -43,11 +45,15 @@ in the admin.
 Open **Review** in the admin (`/_/review`). It has two parts:
 
 - **Posts to review**: each waiting post with its collection, author and, for an
-  event, its date. **Edit** opens it, **Publish** makes it live, **Delete**
+  event, its date. A post that came with images shows the first as a thumbnail;
+  click it for the full image. **Edit** opens it, **Publish** makes it live, **Delete**
   removes it.
 - **Comments**: tabs for *Pending*, *Approved* and *Rejected*. Each comment has
   **Approve**, **Reject** and **Delete**. A rejected comment can still be
   approved later.
+
+Each part has **Only from visitors**, which narrows it to what people who weren't
+signed in wrote. Their names read "Robin (visitor)".
 
 ## 3. Or review on the page
 

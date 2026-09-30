@@ -106,8 +106,8 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// Community: public reads, member-gated writes. These self-gate rather
 		// than joining the admin group — reads are open, and a write needs only
 		// an authenticated member (any role), not admin.
-		r.Get("/posts/{id}/comments", featureGate(db, "comments", handleListComments(db, authFunc)))
-		r.Post("/posts/{id}/comments", featureGate(db, "comments", handlePostComment(db, authFunc)))
+		r.Get("/posts/{id}/comments", featureGate(db, "comments", handleListComments(db, viewer)))
+		r.Post("/posts/{id}/comments", featureGate(db, "comments", visitorsMay(db, authFunc, "comment", func(a authFn) http.HandlerFunc { return handlePostComment(db, a) })))
 		r.Get("/reactions", featureGate(db, "reactions", handleListReactions(db, viewer)))
 		r.Post("/reactions", featureGate(db, "reactions", visitorsMay(db, authFunc, "react", func(a authFn) http.HandlerFunc { return handleToggleReaction(db, a) })))
 
@@ -155,7 +155,10 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// Create self-gates: contributors+ (content.create) post directly; when the
 		// site opts in (content.accept_submissions), a signed-in member may submit a
 		// post that's forced into the pending review queue.
-		r.Post("/collections/{collection}/posts", handleCreateRecord(db, authFunc))
+		r.Post("/collections/{collection}/posts", visitorsMay(db, authFunc, "post", func(a authFn) http.HandlerFunc { return handleCreateRecord(db, a) }))
+		// Whoever submitted a post that's still waiting for review — a member
+		// or a visitor — can take it back.
+		r.Post("/posts/{id}/withdraw", handleWithdrawRecord(db, viewer, siteDir, store))
 		// The review queue — moderator+ (review.posts) lists posts by status and
 		// approves or rejects a pending one; content.publish (editor+) may set any
 		// status. Neither touches the post's content.
@@ -171,7 +174,8 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Put("/comments/{id}", featureGate(db, "comments", capGate(authFunc, data.CapReviewOwn, handleUpdateComment(db, authFunc))))
 		// Delete self-gates: a member may delete their own comment; moderators
 		// may delete comments they're allowed to moderate.
-		r.Delete("/comments/{id}", featureGate(db, "comments", handleDeleteComment(db, authFunc)))
+		// Self-delete works for a visitor's own comment too.
+		r.Delete("/comments/{id}", featureGate(db, "comments", handleDeleteComment(db, viewer)))
 
 		// Poll creation — editor+ (content.edit.any).
 		r.Post("/polls", featureGate(db, "polls", capGate(authFunc, data.CapContentEditAny, handleCreatePoll(db))))
@@ -184,8 +188,10 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 
 		// Media upload — contributor+ (content.create). Bytes land in assets/ and
 		// are served by the static /assets/* handler; the row links them to a record.
-		r.Post("/files", capGate(authFunc, data.CapContentCreate, handleUploadFile(db, siteDir, store)))
-		r.Delete("/files/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteFile(db, siteDir, store)))
+		// A member or visitor may add images to their own pending post when the
+		// site allows it (members_can_upload / visitors_can_upload; see uploads.go).
+		r.Post("/files", handleFiles(db, siteDir, store, authFunc, viewer))
+		r.Delete("/files/{id}", capGate(authFunc, data.CapContentCreate, handleDeleteFile(db, siteDir, store, authFunc)))
 
 		// Chat management — admin+ (site.configure); posting is member-gated above.
 		r.Post("/chats", featureGate(db, "chats", capGate(authFunc, data.CapSiteConfigure, handleCreateChat(db))))
@@ -438,6 +444,10 @@ type recordInput struct {
 	Body   string          `json:"body"`
 	Status string          `json:"status"`
 	Data   json.RawMessage `json:"fields"` // optional front-matter fields; omitted leaves data untouched
+	// Only for a visitor's post: the name they gave, and the hidden field only
+	// bots fill (see visitors.go).
+	AuthorName string `json:"author_name"`
+	Trap       string `json:"trap"`
 }
 
 func (in recordInput) status() string {
@@ -465,16 +475,20 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		// rate-limited and forced into the pending review queue. A group is the
 		// exception: with member_groups on, a member makes one live at once and
 		// becomes its first moderator.
+		// A visitor (visitors_can_post) submits the same way, but never a group.
 		memberSubmission, memberGroup := false, false
 		if !user.Can(data.CapContentCreate) {
 			switch {
+			case user.IsVisitor() && collection == data.GroupsCollection:
+				jsonError(w, "sign in to start a group", http.StatusForbidden)
+				return
 			case collection == data.GroupsCollection && db.FeatureOn("groups") && db.MembersCanStartGroups():
 				if !db.RateLimitAllow("group:"+user.ID, commentRateLimit, commentRateWindow) {
 					jsonError(w, "you're creating groups too fast — slow down", http.StatusTooManyRequests)
 					return
 				}
 				memberGroup = true
-			case db.GetBoolSetting(settingMembersCanPost, false):
+			case user.IsVisitor() && visitorsCan(db, "post"), !user.IsVisitor() && db.GetBoolSetting(settingMembersCanPost, false):
 				if !db.RateLimitAllow("submission:"+user.ID, commentRateLimit, commentRateWindow) {
 					jsonError(w, "you're submitting too fast — slow down", http.StatusTooManyRequests)
 					return
@@ -489,6 +503,9 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		var in recordInput
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if trapped(w, user, in.Trap) || !setVisitorName(w, db, user, in.AuthorName) {
 			return
 		}
 		authorID := db.DefaultAuthorID(user.ID)
@@ -532,6 +549,36 @@ func administersGroupRecord(db *data.DB, user *data.User, record map[string]any)
 
 // reviewsPendingRecord: a moderator (review.posts) may throw out a post that is
 // waiting for review, the same as rejecting it.
+// handleWithdrawRecord deletes a post its author submitted while it still waits
+// for review — the "take it back" a member or visitor gets after submitting.
+// Once a moderator has approved it, it's the site's to remove.
+func handleWithdrawRecord(db *data.DB, authFunc authFn, siteDir string, store storage.Backend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := authFunc(r)
+		if user == nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		id := chi.URLParam(r, "id")
+		rec, err := db.GetRecordByID(id)
+		if err != nil || !db.UserOwnsPost(user.ID, id) {
+			jsonError(w, "post not found", http.StatusNotFound)
+			return
+		}
+		if rec["status"] != "pending" {
+			jsonError(w, "only a post still waiting for review can be taken back", http.StatusConflict)
+			return
+		}
+		if err := db.DeleteRecord(id); err != nil {
+			jsonError(w, fmt.Sprintf("delete error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		// Images sent with it go too.
+		removeRecordFiles(r.Context(), db, siteDir, store, id)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func reviewsPendingRecord(db *data.DB, user *data.User, id string) bool {
 	if !user.Can(data.CapReviewPosts) {
 		return false
@@ -698,7 +745,9 @@ func handleListComments(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		canModerate := false
 		if u := authFunc(r); u != nil {
 			viewerID = u.ID
-			canModerate = u.Can(data.CapReviewAny) || db.UserOwnsPost(u.ID, postID)
+			// A visitor never moderates — not even comments on a post of theirs
+			// that was approved.
+			canModerate = !u.IsVisitor() && (u.Can(data.CapReviewAny) || db.UserOwnsPost(u.ID, postID))
 		}
 		comments, err := db.ListCommentsForViewer(postID, viewerID, canModerate)
 		if err != nil {
@@ -721,13 +770,22 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 		var in struct {
 			Body     string `json:"body"`
 			ParentID string `json:"parent_id"`
+			// A visitor's optional name, and the hidden field only bots fill.
+			Name string `json:"name"`
+			Trap string `json:"trap"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
+		if trapped(w, user, in.Trap) {
+			return
+		}
 		if strings.TrimSpace(in.Body) == "" {
 			jsonError(w, "body is required", http.StatusBadRequest)
+			return
+		}
+		if !setVisitorName(w, db, user, in.Name) {
 			return
 		}
 		if !db.RateLimitAllow("comment:"+user.ID, commentRateLimit, commentRateWindow) {
@@ -735,7 +793,8 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			return
 		}
 		status := "pending"
-		if !commentsNeedReview(db) {
+		// A visitor's comment always waits for review.
+		if !commentsNeedReview(db) && !user.IsVisitor() {
 			status = "approved"
 		}
 		authorID := db.DefaultAuthorID(user.ID)
@@ -781,6 +840,9 @@ func handleModerationList(db *data.DB, authFunc func(*http.Request) *data.User) 
 // canModerateComment reports whether the actor may moderate this comment — any
 // comment with moderate.any, else only comments on their own posts.
 func canModerateComment(db *data.DB, user *data.User, commentID string) bool {
+	if user.IsVisitor() {
+		return false
+	}
 	return user.Can(data.CapReviewAny) || db.UserOwnsCommentPost(user.ID, commentID)
 }
 
@@ -1281,10 +1343,24 @@ func handleListFiles(db *data.DB) http.HandlerFunc {
 	}
 }
 
+// canEditPost reports whether the account may change a post's media: an editor
+// (content.edit.any) on any post, a contributor (content.edit.own) on their own.
+// The same rule as editing the post itself.
+func canEditPost(db *data.DB, user *data.User, postID string) bool {
+	if user == nil {
+		return false
+	}
+	if user.Can(data.CapContentEditAny) {
+		return true
+	}
+	return user.Can(data.CapContentEditOwn) && db.UserOwnsPost(user.ID, postID)
+}
+
 // handleUploadFile accepts a multipart image upload and links it to a record
-// (contributor+). The bytes land in the site's assets/ dir so the existing
-// /assets/* static handler serves them; the edge runtime stores the same key in R2.
-func handleUploadFile(db *data.DB, siteDir string, store storage.Backend) http.HandlerFunc {
+// (contributor+, on a post they may edit). The bytes land in the site's assets/
+// dir so the existing /assets/* static handler serves them; the edge runtime
+// stores the same key in R2.
+func handleUploadFile(db *data.DB, siteDir string, store storage.Backend, authFunc authFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
 			jsonError(w, "expected a multipart form upload", http.StatusBadRequest)
@@ -1293,6 +1369,14 @@ func handleUploadFile(db *data.DB, siteDir string, store storage.Backend) http.H
 		recordType, recordID := "post", r.FormValue("post_id")
 		if recordID == "" {
 			jsonError(w, "post_id is required", http.StatusBadRequest)
+			return
+		}
+		if _, err := db.GetRecordByID(recordID); err != nil {
+			jsonError(w, "post not found", http.StatusNotFound)
+			return
+		}
+		if !canEditPost(db, authFunc(r), recordID) {
+			jsonError(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		file, header, err := r.FormFile("file")
@@ -1331,9 +1415,23 @@ func handleUploadFile(db *data.DB, siteDir string, store storage.Backend) http.H
 	}
 }
 
-// handleDeleteFile removes a file row and the stored object (contributor+).
-func handleDeleteFile(db *data.DB, siteDir string, store storage.Backend) http.HandlerFunc {
+// handleDeleteFile removes a file row and the stored object (contributor+, on a
+// post they may edit).
+func handleDeleteFile(db *data.DB, siteDir string, store storage.Backend, authFunc authFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		f, err := db.GetFile(chi.URLParam(r, "id"))
+		if err == sql.ErrNoRows {
+			jsonError(w, "file not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		if postID, _ := f["record_id"].(string); !canEditPost(db, authFunc(r), postID) {
+			jsonError(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		key, err := db.DeleteFile(chi.URLParam(r, "id"))
 		if err == sql.ErrNoRows {
 			jsonError(w, "file not found", http.StatusNotFound)
@@ -1894,6 +1992,8 @@ func handleMe(db *data.DB, authFunc func(*http.Request) *data.User) http.Handler
 		me := userJSON(user)
 		authorID := db.DefaultAuthorID(user.ID)
 		me["profile_id"] = authorID
+		// Whether a <friendo-form>'s image picker is for them (see uploads.go).
+		me["can_upload"] = user.Can(data.CapContentCreate) || db.GetBoolSetting(settingMembersCanUpload, false)
 		// Who they follow (author ids), so a page of follow buttons paints its
 		// pressed state without a call per button. Empty while follows is off.
 		me["following"] = []string{}
@@ -3061,10 +3161,16 @@ type tomlSettingsConfig struct {
 		ProfileVisibility *string `toml:"profile_visibility"`
 		// Whether plain members may start groups (default off).
 		MembersCanStartGroups *bool `toml:"members_can_start_groups"`
+		// Members (and visitors) may add images to what they post.
+		MembersCanUpload  *bool `toml:"members_can_upload"`
+		VisitorsCanUpload *bool `toml:"visitors_can_upload"`
 		// What a visitor (not signed in) may do (each default off).
 		VisitorsCanReact *bool `toml:"visitors_can_react"`
 		VisitorsCanVote  *bool `toml:"visitors_can_vote"`
 		VisitorsCanRSVP  *bool `toml:"visitors_can_rsvp"`
+		// A visitor's comments and posts always wait for review.
+		VisitorsCanComment *bool `toml:"visitors_can_comment"`
+		VisitorsCanPost    *bool `toml:"visitors_can_post"`
 		// Feature switches (see data.Features) and the built-in collections a
 		// site without [content] collections shows.
 		Comments           *bool    `toml:"comments"`
@@ -3108,8 +3214,13 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 		settingMembersCanPost: s.MembersCanPost, settingPostsNeedReview: s.PostsNeedReview,
 		settingCommentsNeedReview: s.CommentsNeedReview, settingPasswordLogin: s.PasswordLogin,
 		data.SettingMembersCanStartGroups: s.MembersCanStartGroups,
-		settingVisitorsCanReact: s.VisitorsCanReact, settingVisitorsCanVote: s.VisitorsCanVote,
-		settingVisitorsCanRSVP: s.VisitorsCanRSVP,
+		settingVisitorsCanReact:           s.VisitorsCanReact,
+		settingVisitorsCanVote:            s.VisitorsCanVote,
+		settingVisitorsCanRSVP:            s.VisitorsCanRSVP,
+		settingVisitorsCanComment:         s.VisitorsCanComment,
+		settingVisitorsCanPost:            s.VisitorsCanPost,
+		settingMembersCanUpload:           s.MembersCanUpload,
+		settingVisitorsCanUpload:          s.VisitorsCanUpload,
 	} {
 		if v != nil {
 			set(key, boolSetting(*v))
@@ -3148,9 +3259,13 @@ var boolSettings = []struct {
 	{settingCommentsNeedReview, true},
 	{settingPasswordLogin, false},
 	{data.SettingMembersCanStartGroups, false},
+	{settingMembersCanUpload, false},
 	{settingVisitorsCanReact, false},
 	{settingVisitorsCanVote, false},
 	{settingVisitorsCanRSVP, false},
+	{settingVisitorsCanComment, false},
+	{settingVisitorsCanPost, false},
+	{settingVisitorsCanUpload, false},
 }
 
 // managedList returns the managed setting keys in a stable order for the API, so the

@@ -113,9 +113,14 @@ func (db *DB) ListNotifications(userID string, unreadOnly bool, limit int) ([]*N
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// One query for every actor's profile.
+	// One query for every actor's profile — a visitor's too, marked "(visitor)",
+	// since a visitor's approved comment still tells the post's author.
 	if len(actorIDs) > 0 {
-		profiles, err := db.ListProfiles()
+		rows, err := db.Conn.Query(`SELECT `+profileCols+` FROM authors WHERE site_id = ?`, db.SiteID)
+		var profiles []map[string]any
+		if err == nil {
+			profiles, err = scanProfiles(rows)
+		}
 		if err == nil {
 			byID := map[string]map[string]any{}
 			for _, p := range profiles {

@@ -18,9 +18,10 @@ import (
 // Its auth function mirrors admin.GetSessionUser: a session wins, but never a
 // visitor's.
 type visitorSite struct {
-	t  *testing.T
-	db *data.DB
-	h  http.Handler
+	t   *testing.T
+	db  *data.DB
+	h   http.Handler
+	dir string
 }
 
 func newVisitorSite(t *testing.T, settings string) *visitorSite {
@@ -44,7 +45,7 @@ func newVisitorSite(t *testing.T, settings string) *visitorSite {
 	}
 	r := chi.NewRouter()
 	r.Route("/_", func(r chi.Router) { Mount(r, db, dir, "t", authFunc, nil, nil, nil) })
-	return &visitorSite{t: t, db: db, h: r}
+	return &visitorSite{t: t, db: db, h: r, dir: dir}
 }
 
 // do sends a request with an optional session cookie and returns the response
@@ -300,5 +301,144 @@ func TestClientIP(t *testing.T) {
 		if got := clientIP(r); got != c.want {
 			t.Errorf("clientIP(%s, cf=%q, xff=%q) = %q, want %q", c.remote, c.cf, c.xff, got, c.want)
 		}
+	}
+}
+
+// A visitor's comment waits for review even when comments don't need it, shows
+// only to them until approved, and is theirs to delete but not to moderate.
+func TestVisitorComment(t *testing.T) {
+	s := newVisitorSite(t, "visitors_can_comment = true\ncomments_need_review = false")
+	post, _ := s.db.CreateRecord("posts", "hi", "Hi", "", "published", "")
+	path := "/posts/" + post + "/comments"
+
+	rec, visitor := s.do("POST", path, "", `{"body":"hello","name":"Robin"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("comment = %d %s", rec.Code, rec.Body.String())
+	}
+	c := decode(t, rec)["comment"].(map[string]any)
+	if c["status"] != "pending" || c["author_name"] != "Robin (visitor)" || c["visitor"] != true {
+		t.Fatalf("comment = %v", c)
+	}
+	rec, _ = s.do("GET", path, visitor, "")
+	mine := decode(t, rec)
+	list := mine["comments"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["mine"] != true || mine["can_moderate"] != false {
+		t.Fatalf("visitor's view = %v", mine)
+	}
+	rec, _ = s.do("GET", path, "", "")
+	if list := decode(t, rec)["comments"].([]any); len(list) != 0 {
+		t.Fatalf("a pending comment must not show publicly: %v", list)
+	}
+	if rec, _ := s.do("PUT", "/comments/"+c["id"].(string), visitor, `{"status":"approved"}`); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a visitor approving = %d, want 401", rec.Code)
+	}
+	if rec, _ := s.do("DELETE", "/comments/"+c["id"].(string), visitor, ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("self-delete = %d %s", rec.Code, rec.Body.String())
+	}
+	// A member's comment still skips review here.
+	_, member := s.signIn("m@test.com", "")
+	rec, _ = s.do("POST", path, member, `{"body":"hi"}`)
+	if decode(t, rec)["comment"].(map[string]any)["status"] != "approved" {
+		t.Fatal("members' comments should follow comments_need_review")
+	}
+}
+
+// The trap field drops a bot's comment while looking like success.
+func TestVisitorTrap(t *testing.T) {
+	s := newVisitorSite(t, "visitors_can_comment = true\nvisitors_can_post = true")
+	post, _ := s.db.CreateRecord("posts", "hi", "Hi", "", "published", "")
+	if rec, _ := s.do("POST", "/posts/"+post+"/comments", "", `{"body":"buy now","trap":"http://spam"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("trapped comment = %d", rec.Code)
+	}
+	if rec, _ := s.do("POST", "/collections/tips/posts", "", `{"title":"spam","trap":"x"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("trapped post = %d", rec.Code)
+	}
+	if list, _ := s.db.ListCommentsByStatus(""); len(list) != 0 {
+		t.Fatalf("nothing should be saved: %v", list)
+	}
+	if list, _ := s.db.ListRecordsByStatus("pending"); len(list) != 0 {
+		t.Fatalf("nothing should be saved: %v", list)
+	}
+}
+
+// A visitor's post always waits for review; they can take it back until it's
+// approved, can't start a group, and never moderate comments on it.
+func TestVisitorPost(t *testing.T) {
+	s := newVisitorSite(t, "visitors_can_post = true\nvisitors_can_comment = true")
+	if rec, _ := s.do("POST", "/collections/tips/posts", "", `{"title":"x"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("post = %d %s", rec.Code, rec.Body.String())
+	}
+	rec, visitor := s.do("POST", "/collections/tips/posts", "", `{"title":"A tip","status":"published","author_name":"Robin"}`)
+	p := decode(t, rec)["post"].(map[string]any)
+	if p["status"] != "pending" {
+		t.Fatalf("a visitor's post must wait for review: %v", p)
+	}
+	id := p["id"].(string)
+	if rec, _ := s.do("POST", "/collections/groups/posts", visitor, `{"title":"G"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("a visitor's group = %d, want 403", rec.Code)
+	}
+	// Both were made within the same second, so find Robin's rather than
+	// trusting the order.
+	queue, _ := s.db.ListRecordsByStatus("pending")
+	var robins map[string]any
+	for _, q := range queue {
+		if q["id"] == id {
+			robins = q
+		}
+	}
+	if len(queue) != 2 || robins["author_name"] != "Robin (visitor)" || robins["visitor"] != true {
+		t.Fatalf("review queue = %v", queue)
+	}
+	if rec, _ := s.do("POST", "/posts/"+id+"/withdraw", "", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("withdraw by nobody = %d", rec.Code)
+	}
+	_, other := s.do("POST", "/collections/tips/posts", "", `{"title":"z"}`)
+	if rec, _ := s.do("POST", "/posts/"+id+"/withdraw", other, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("withdraw by another visitor = %d, want 404", rec.Code)
+	}
+
+	// Once approved it's the site's: no withdrawing, and still no moderating.
+	s.db.SetRecordStatus(id, "published")
+	if rec, _ := s.do("POST", "/posts/"+id+"/withdraw", visitor, ""); rec.Code != http.StatusConflict {
+		t.Fatalf("withdraw after approval = %d, want 409", rec.Code)
+	}
+	_, member := s.signIn("m@test.com", "")
+	crec, _ := s.do("POST", "/posts/"+id+"/comments", member, `{"body":"nice"}`)
+	cid := decode(t, crec)["comment"].(map[string]any)["id"].(string)
+	rec, _ = s.do("GET", "/posts/"+id+"/comments", visitor, "")
+	if decode(t, rec)["can_moderate"] != false {
+		t.Fatal("a visitor must not moderate comments on their own post")
+	}
+	if rec, _ := s.do("DELETE", "/comments/"+cid, visitor, ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("a visitor deleting someone's comment = %d, want 403", rec.Code)
+	}
+
+	// A pending one can be taken back, and signing in carries the rest over.
+	rec, _ = s.do("POST", "/collections/tips/posts", visitor, `{"title":"Second"}`)
+	second := decode(t, rec)["post"].(map[string]any)["id"].(string)
+	if rec, _ := s.do("POST", "/posts/"+second+"/withdraw", visitor, ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("withdraw = %d %s", rec.Code, rec.Body.String())
+	}
+	user, _ := s.signIn("robin@test.com", visitor)
+	if !s.db.UserOwnsPost(user["id"].(string), id) {
+		t.Fatal("the post should be the new member's")
+	}
+}
+
+func TestVisitorContext(t *testing.T) {
+	s := newVisitorSite(t, "visitors_can_comment = true")
+	r := httptest.NewRequest("GET", "/", nil)
+	ctx := VisitorContext(r, s.db, false)
+	if ctx["can"].(map[string]any)["comment"] != true || ctx["known"] != false {
+		t.Fatalf("visitor = %v", ctx)
+	}
+	if VisitorContext(r, s.db, true) != nil {
+		t.Fatal("a member is not a visitor")
+	}
+	post, _ := s.db.CreateRecord("posts", "hi", "Hi", "", "published", "")
+	_, visitor := s.do("POST", "/posts/"+post+"/comments", "", `{"body":"x","name":"Robin"}`)
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: visitor})
+	if ctx := VisitorContext(r, s.db, false); ctx["known"] != true || ctx["name"] != "Robin" {
+		t.Fatalf("known visitor = %v", ctx)
 	}
 }

@@ -1,11 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, type PendingRecord } from "../api";
 import { formatWhen } from "../when";
+import { VisitorsOnly } from "./moderation";
 
 // Posts waiting for a moderator, as a section of the Review page.
 export function ReviewQueue() {
   const [records, setRecords] = useState<PendingRecord[] | null>(null);
   const [error, setError] = useState("");
+  const [visitorsOnly, setVisitorsOnly] = useState(false);
 
   function load() {
     setRecords(null);
@@ -39,7 +41,10 @@ export function ReviewQueue() {
 
   return (
     <section data-section="review">
-      <h2 class="mb-1 text-sm font-bold text-dim">Posts to review</h2>
+      <div class="mb-1 flex items-center justify-between">
+        <h2 class="text-sm font-bold text-dim">Posts to review</h2>
+        <VisitorsOnly on={visitorsOnly} onToggle={setVisitorsOnly} />
+      </div>
       <p class="mb-3 text-xs text-dim">
         Posts waiting for review. Publishing makes them live on the site.
       </p>
@@ -48,17 +53,31 @@ export function ReviewQueue() {
 
       {records === null && !error ? (
         <p class="text-sm text-dim">Loading…</p>
-      ) : records && records.length > 0 ? (
+      ) : records && records.some((r) => !visitorsOnly || r.visitor) ? (
         <ul class="space-y-3">
-          {records.map((r) => (
+          {records.filter((r) => !visitorsOnly || r.visitor).map((r) => (
             <li key={r.id} class="bg-white p-4 border border-ink">
-              <div class="mb-2 flex items-baseline justify-between gap-3">
-                <span class="font-bold">{r.title || r.slug || "(untitled)"}</span>
-                <span class="text-xs text-dim">{r.collection}</span>
-              </div>
-              {r.when && <div class="mb-1 text-sm">📅 {formatWhen(r.when)}</div>}
-              <div class="mb-3 text-xs text-dim">
-                by {r.author_name || "Anonymous"} · {r.created?.replace("T", " ").replace("Z", "")}
+              <div class="flex gap-4">
+                {r.image && (
+                  <a href={r.image} target="_blank" rel="noreferrer" class="shrink-0" title="Open the full image">
+                    <img
+                      src={r.image}
+                      alt=""
+                      loading="lazy"
+                      class="h-20 w-20 border border-ink object-cover"
+                    />
+                  </a>
+                )}
+                <div class="min-w-0 flex-1">
+                  <div class="mb-2 flex items-baseline justify-between gap-3">
+                    <span class="font-bold">{r.title || r.slug || "(untitled)"}</span>
+                    <span class="text-xs text-dim">{r.collection}</span>
+                  </div>
+                  {r.when && <div class="mb-1 text-sm">📅 {formatWhen(r.when)}</div>}
+                  <div class="mb-3 text-xs text-dim">
+                    by {r.author_name || "Anonymous"} · {r.created?.replace("T", " ").replace("Z", "")}
+                  </div>
+                </div>
               </div>
               <div class="flex justify-end gap-2">
                 <a

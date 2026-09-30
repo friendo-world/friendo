@@ -41,8 +41,11 @@ after the post is made:
 <friendo-input name="cover" type="media" accept="image/*"></friendo-input>
 ```
 
-The URL lands in `post.fields.cover`. Uploading needs a contributor or higher; a
-plain member sees *Sign in as a contributor to attach media.*
+The URL lands in `post.fields.cover`. Uploading needs a contributor or higher,
+unless you turn on **Members can add images** (`members_can_upload`) or
+**Visitors can add images** (`visitors_can_upload`). Then members or
+[visitors](/docs/visitors) can attach images to the post they're submitting, and
+the images wait for review with it. Anyone else sees a note instead of the picker.
 
 Uploads from the admin and forms go through the [files API](/docs/api) and land
 in `assets/uploads/`. Only images are accepted (PNG, JPEG, GIF, WebP, SVG), up to

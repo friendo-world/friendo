@@ -133,7 +133,10 @@
 
   // A logged-in/out change should refresh every component on the page.
   function broadcastAuth(user) {
-    mePromise = Promise.resolve(user);
+    // After a sign-in, ask /me afresh: the sign-in reply is the bare account,
+    // and tags read more (profile_id, can_upload, …) from /me.
+    if (user) currentUser(true);
+    else mePromise = Promise.resolve(null);
     visitorPromise = null;
     document.dispatchEvent(new CustomEvent("friendo:signin", { detail: { user: user } }));
   }
@@ -906,12 +909,18 @@
         "background:#fafafa;padding:.15em .5em}" +
         "textarea{font:inherit;width:100%;box-sizing:border-box;padding:.5em;border:1px solid #ccc;border-radius:6px}" +
         "form{margin-top:.75em;display:flex;flex-direction:column;gap:.5em;align-items:flex-start}" +
+        "input{font:inherit;padding:.35em .5em;border:1px solid #ccc;border-radius:6px}" +
+        ".trap{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}" +
         ".empty{opacity:.6}"
       );
     }
     async render() {
       var postId = this.getAttribute("post-id") || "";
       var user = await currentUser();
+      // A visitor (not signed in) may comment when the site allows it
+      // (visitors_can_comment); their comments always wait for review.
+      var vis = user ? null : await visitorState();
+      var visitorMay = !!(vis && vis.can && vis.can.comment);
       var list, comments, canModerate;
       try {
         list = await api("/posts/" + encodeURIComponent(postId) + "/comments");
@@ -949,8 +958,16 @@
             .join("")
         : '<li part="empty" class="empty">No comments yet.</li>';
 
-      var composer = user
-        ? '<form part="form"><textarea part="input" required placeholder="Add a comment…" rows="3"></textarea>' +
+      // A visitor may give a name (optional); the trap field is hidden from
+      // people and filled only by bots, whose comments are then dropped.
+      var visitorFields = !user && visitorMay
+        ? '<input part="name-input" name="name" maxlength="60" autocomplete="name" placeholder="Your name (optional)" value="' +
+          esc((vis.visitor && vis.visitor.name) || "") + '">' +
+          '<div class="trap" aria-hidden="true"><input name="homepage" tabindex="-1" autocomplete="off"></div>'
+        : "";
+      var composer = user || visitorMay
+        ? '<form part="form">' + visitorFields +
+          '<textarea part="input" required placeholder="Add a comment…" rows="3"></textarea>' +
           '<button part="submit" type="submit">Post comment</button>' +
           '<span part="status" class="meta"></span></form>'
         : '<p part="signed-out" class="empty">Sign in to join the conversation.</p>';
@@ -984,11 +1001,21 @@
           var body = this.shadowRoot.querySelector('[part="input"]').value.trim();
           if (!body) return;
           status.textContent = "Posting…";
+          var payload = { body: body };
+          var nameInput = this.shadowRoot.querySelector('[part="name-input"]');
+          if (nameInput) {
+            payload.name = nameInput.value.trim();
+            payload.trap = this.shadowRoot.querySelector('[name="homepage"]').value;
+          }
           try {
-            await api("/posts/" + encodeURIComponent(postId) + "/comments", jsonBody("POST", { body: body }));
-            status.textContent = "Submitted for review.";
-            this.shadowRoot.querySelector('[part="input"]').value = "";
-            self.render();
+            var res = await api("/posts/" + encodeURIComponent(postId) + "/comments", jsonBody("POST", payload));
+            var approved = res && res.comment && res.comment.status === "approved";
+            visitorPromise = null; // a first comment may have made this browser a visitor
+            await self.render();
+            var after = self.shadowRoot.querySelector('[part="status"]');
+            if (after) {
+              after.textContent = approved ? "Posted." : "Submitted for review." + (user ? "" : " Sign in to keep it.");
+            }
           } catch (err) {
             status.textContent = err.message;
           }
@@ -2254,13 +2281,20 @@
       setTimeout(function () { map.invalidateSize(); }, 0);
     }
     async _renderMedia() {
-      // First cut: media is a contributor+ affordance. Members see a note instead
-      // of a picker, so a member submission simply carries no file.
+      // Contributors and up can always attach media; a member when the site
+      // allows it (members_can_upload), a visitor likewise (visitors_can_upload).
+      // Everyone else sees a note instead of a picker.
       var user = await currentUser();
-      var canUpload = !!user && ["contributor", "moderator", "editor", "admin", "owner"].indexOf(user.role) !== -1;
+      var canUpload = false;
+      if (user) {
+        canUpload = !!user.can_upload;
+      } else {
+        var vis = await visitorState();
+        canUpload = !!(vis.can && vis.can.upload && vis.can.post);
+      }
       if (!canUpload) {
         this._file = null;
-        this.paint('<div part="note" class="note">Sign in as a contributor to attach media.</div>');
+        this.paint('<div part="note" class="note">' + (user ? "Images can't be added from your account." : "Sign in to attach images.") + "</div>");
         return;
       }
       var accept = this.getAttribute("accept") || "image/*";
@@ -2319,6 +2353,8 @@
   }
 
   // --- <friendo-form collection [redirect] [status]> -------------------------
+  // A visitor (not signed in) can use it too when the site allows it
+  // (visitors_can_post); an input named author_name carries their name.
   // Turns the author's own inputs into a created post, submitted from the page.
   // Unlike every other component this is a LIGHT-DOM controller — no shadow root —
   // so the author's inputs are its real children: their CSS applies, their
@@ -2337,6 +2373,13 @@
       this._error = document.createElement("div");
       this._error.setAttribute("part", "error");
       this._error.style.cssText = "font-size:.9em;color:#b03030;margin-top:.4em";
+      // The trap: a field people never see and bots fill in. A visitor's post
+      // with it filled is quietly dropped (see api/visitors.go).
+      this._trap = document.createElement("div");
+      this._trap.setAttribute("aria-hidden", "true");
+      this._trap.style.cssText = "position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden";
+      this._trap.innerHTML = '<input data-friendo-trap name="homepage" tabindex="-1" autocomplete="off">';
+      this.appendChild(this._trap);
       this.appendChild(this._status);
       this.appendChild(this._error);
       this._onClick = this._onClick.bind(this);
@@ -2370,14 +2413,15 @@
     async submit() {
       if (this._busy) return;
       this._error.textContent = "";
-      var reserved = { title: 1, body: 1, slug: 1, status: 1 };
+      // author_name is a visitor's name for their post (optional); it isn't a field.
+      var reserved = { title: 1, body: 1, slug: 1, status: 1, author_name: 1 };
       var columns = {};
       var data = {};
       var whenParts = {};
       var media = [];
       this.querySelectorAll("[name]").forEach(function (el) {
         var name = el.getAttribute("name");
-        if (!name) return;
+        if (!name || el.hasAttribute("data-friendo-trap")) return;
         var tag = el.tagName.toLowerCase();
         if (tag === "friendo-input") {
           var itype = (el.getAttribute("type") || "").toLowerCase();
@@ -2419,6 +2463,8 @@
         slug: columns.slug || "",
         status: columns.status || this.getAttribute("status") || "published",
         fields: data,
+        author_name: columns.author_name || "",
+        trap: this.querySelector("[data-friendo-trap]").value,
       };
 
       this._busy = true;
@@ -2427,6 +2473,14 @@
       try {
         var res = await api("/collections/" + encodeURIComponent(collection) + "/posts", jsonBody("POST", payload));
         record = res.post;
+        visitorPromise = null; // a first post may have made this browser a visitor
+        if (!record) {
+          // Dropped by the trap: look done, change nothing.
+          this._busy = false;
+          this._reset();
+          this._status.textContent = "Submitted.";
+          return;
+        }
       } catch (err) {
         this._busy = false;
         this._status.textContent = "";
@@ -2445,6 +2499,7 @@
       // Media is async and record-scoped, so it follows creation: upload each
       // pending file to the new record, then patch its URL into the record's data.
       var patched = false;
+      var uploadError = "";
       for (var i = 0; i < media.length; i++) {
         var file = media[i].el.value;
         if (!file) continue;
@@ -2458,9 +2513,14 @@
           // copy of `data`, which has the calendar keys (when, repeats…) lifted out.
           record.fields = Object.assign({}, data, record.fields || {});
           record.fields[media[i].name] = up.file.url;
-          patched = true;
+          // A member's or visitor's upload is written into their post by the
+          // server (they can't edit posts); only a contributor's needs saving.
+          if (!up.file.attached) patched = true;
         } catch (err) {
-          /* the post exists; the asset just didn't attach */
+          // The post exists; say the image didn't make it rather than hide it.
+          uploadError = err.status === 401 || err.status === 403
+            ? "Your post was sent, but this site doesn't take images from you."
+            : "Your post was sent, but an image couldn't be added: " + err.message;
         }
       }
       if (patched) {
@@ -2477,16 +2537,38 @@
       this._busy = false;
       this._status.textContent = "";
       this.dispatchEvent(new CustomEvent("friendo:submitted", { bubbles: true, detail: { post: record } }));
-
+      // An image that didn't make it keeps us on the page (even with a
+      // redirect set) so the note is seen.
       var redirect = this.getAttribute("redirect");
-      if (redirect) {
+      if (redirect && !uploadError) {
         location.assign(
           redirect.replace("{slug}", encodeURIComponent(record.slug || "")).replace("{id}", encodeURIComponent(record.id))
         );
         return;
       }
       this._reset();
-      this._status.textContent = "Submitted.";
+      this._error.textContent = uploadError;
+      if (record.status !== "pending") {
+        this._status.textContent = "Submitted.";
+        return;
+      }
+      // Waiting for review: whoever sent it can still take it back.
+      this._status.textContent = "Submitted for review. ";
+      var back = document.createElement("button");
+      back.type = "button";
+      back.setAttribute("part", "withdraw");
+      back.textContent = "Take it back";
+      var self = this;
+      back.onclick = async function () {
+        try {
+          await api("/posts/" + encodeURIComponent(record.id) + "/withdraw", { method: "POST" });
+          self._status.textContent = "Taken back.";
+          self.dispatchEvent(new CustomEvent("friendo:withdrawn", { bubbles: true, detail: { post: record } }));
+        } catch (err) {
+          self._error.textContent = err.message;
+        }
+      };
+      this._status.appendChild(back);
     }
     _reset() {
       this.querySelectorAll("input,textarea,select").forEach(function (el) {

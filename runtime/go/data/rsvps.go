@@ -188,13 +188,7 @@ func (db *DB) ListRSVPs(eventID, occurrence string) ([]map[string]any, error) {
 		// A visitor's name is theirs to type, so it's marked: "Sam (visitor)"
 		// can't pass for the member Sam, on the page or in the CSV.
 		visitor := role == RoleVisitor
-		if visitor {
-			if name == "" {
-				name = "Visitor"
-			} else {
-				name += " (visitor)"
-			}
-		}
+		name = AuthorDisplayName(name, role)
 		out = append(out, map[string]any{
 			"id": id, "date": occ, "author_id": authorID, "answer": answer,
 			"author_name": name, "author_email": email, "visitor": visitor, "created": created, "updated": updated,
