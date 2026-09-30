@@ -77,6 +77,10 @@ func Open(siteDir string) (*DB, error) {
 	if err := db.EnsureAuthorSlugs(); err != nil {
 		fmt.Fprintln(os.Stderr, "Warning: profile addresses:", err)
 	}
+	// Expired sessions and visitor accounts with nothing to show go on start.
+	if err := db.ClearIdleVisitors(); err != nil {
+		fmt.Fprintln(os.Stderr, "Warning: clearing idle visitors:", err)
+	}
 	return db, nil
 }
 
@@ -1646,6 +1650,12 @@ func SetupOTPKey(email string) string {
 	return "setup:" + NormalizeEmail(email)
 }
 
+// SignupOTPKey is the otp_codes user_id for a code sent to an email that has no
+// account yet. Like setup, the account is only made once the code verifies.
+func SignupOTPKey(email string) string {
+	return "signup:" + NormalizeEmail(email)
+}
+
 // CreateOTP stores a hashed one-time code for an account.
 func (db *DB) CreateOTP(userID, code string, ttl time.Duration) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
@@ -1804,9 +1814,13 @@ func (db *DB) DeleteUser(id string) error {
 
 // CreateSession creates a new session for a user and returns the token.
 func (db *DB) CreateSession(userID, ipAddress, userAgent string) (string, error) {
+	return db.createSession(userID, ipAddress, userAgent, 7*24*time.Hour)
+}
+
+func (db *DB) createSession(userID, ipAddress, userAgent string, ttl time.Duration) (string, error) {
 	id := GenerateID()
 	token := generateToken()
-	expiresAt := time.Now().UTC().Add(7 * 24 * time.Hour).Format("2006-01-02T15:04:05Z")
+	expiresAt := time.Now().UTC().Add(ttl).Format("2006-01-02T15:04:05Z")
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 
 	_, err := db.Conn.Exec(

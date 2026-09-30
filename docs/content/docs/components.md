@@ -97,7 +97,8 @@ Emoji reactions with live counts; a click toggles yours. The member's own carry
 | `post-id` or `comment-id` | What the reactions are on |
 | `emojis` | Comma-separated choices; default `👍,❤️,🎉` |
 
-Parts: `row`, `button`, `emoji`, `count`.
+Parts: `row`, `button`, `emoji`, `count`, `visitor` (the "Sign in to keep
+your reactions" line a [visitor](/docs/visitors) sees after reacting).
 
 ## `<friendo-poll>`
 
@@ -112,7 +113,7 @@ A poll; members vote once and see the tally. See [Polls](/docs/polls).
 | `poll-slug` | The slug declared in the post's front matter |
 | `poll-id` | The poll's id, instead of `poll-slug` |
 
-Parts: `question`, `option`, `bar`, `result`, `total`.
+Parts: `question`, `option`, `bar`, `result`, `total`, `visitor`.
 
 ## `<friendo-chat>`
 
@@ -224,8 +225,9 @@ Going / Maybe / Can't go on an [event](/docs/calendar#rsvp).
 | `question`, `going-label`, `maybe-label`, `not-going-label` | Your own wording |
 
 Parts: `question`, `when`, `row`, `button`, `count`, `mine`, `invited`,
-`invited-count`, `names`, `name`, `status`, `signed-out`. Fires `friendo:rsvp`
-with `postId`, `date` and `answer`.
+`invited-count`, `names`, `name`, `status`, `signed-out`, and for
+[visitors](/docs/visitors) `name-form`, `name-input` and `visitor`. Fires
+`friendo:rsvp` with `postId`, `date` and `answer`.
 
 ## `<friendo-invite>`
 
@@ -407,7 +409,7 @@ Each event is a `CustomEvent`; what it carries is in `event.detail`. See
 | Event | Fires | `detail` |
 |---|---|---|
 | `friendo:signin` | on `document`, when a member signs in or out | `user` (or `null`) |
-| `friendo:needs-auth` | from `<friendo-follow>`, `<friendo-reactions>`, `<friendo-rsvp>` or `<friendo-poll>` when a visitor tries to use it | |
+| `friendo:needs-auth` | from `<friendo-follow>`, `<friendo-reactions>`, `<friendo-rsvp>` or `<friendo-poll>` when a visitor tries to use it (and the site doesn't [let visitors](/docs/visitors) do that) | |
 | `friendo:submitted` | from `<friendo-form>` after it makes a post | `post` |
 | `friendo:rsvp` | from `<friendo-rsvp>` after an answer | `postId`, `date`, `answer` |
 | `friendo:invite` | from `<friendo-invite>` after inviting | `postId`, `invited` |

@@ -90,12 +90,12 @@ func (db *DB) uniqueSlug(base, excludeID string) string {
 }
 
 // EnsureAuthorSlugs gives every profile without an address one, derived from its
-// name. Run on every Open (cheap: a no-op once the backfill has happened) so a
+// name — except a visitor's, which has no profile page. Run on every Open (cheap: a no-op once the backfill has happened) so a
 // database upgraded from before 0016 has profile pages the moment the new
 // binary starts.
 func (db *DB) EnsureAuthorSlugs() error {
 	rows, err := db.Conn.Query(
-		`SELECT id, name FROM authors WHERE site_id = ? AND slug = '' ORDER BY created`, db.SiteID,
+		`SELECT id, name FROM authors WHERE site_id = ? AND slug = '' AND role != ? ORDER BY created`, db.SiteID, RoleVisitor,
 	)
 	if err != nil {
 		return err
@@ -153,7 +153,7 @@ func scanProfiles(rows *sql.Rows) ([]map[string]any, error) {
 
 // ProfileBySlug returns one profile by its address, or sql.ErrNoRows.
 func (db *DB) ProfileBySlug(slug string) (map[string]any, error) {
-	rows, err := db.Conn.Query(`SELECT `+profileCols+` FROM authors WHERE site_id = ? AND slug = ? LIMIT 1`, db.SiteID, slug)
+	rows, err := db.Conn.Query(`SELECT `+profileCols+` FROM authors WHERE site_id = ? AND slug = ? AND role != ? LIMIT 1`, db.SiteID, slug, RoleVisitor)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (db *DB) ProfileBySlug(slug string) (map[string]any, error) {
 
 // ProfileByID returns one profile by id, or sql.ErrNoRows.
 func (db *DB) ProfileByID(id string) (map[string]any, error) {
-	rows, err := db.Conn.Query(`SELECT `+profileCols+` FROM authors WHERE site_id = ? AND id = ? LIMIT 1`, db.SiteID, id)
+	rows, err := db.Conn.Query(`SELECT `+profileCols+` FROM authors WHERE site_id = ? AND id = ? AND role != ? LIMIT 1`, db.SiteID, id, RoleVisitor)
 	if err != nil {
 		return nil, err
 	}
@@ -183,10 +183,10 @@ func (db *DB) ProfileByID(id string) (map[string]any, error) {
 	return list[0], nil
 }
 
-// ListProfiles returns every profile on the site, by name — collections.profiles
+// ListProfiles returns every member profile on the site (visitors have none), by name — collections.profiles
 // in templates, GET /_/api/profiles, and the static export's profile pages.
 func (db *DB) ListProfiles() ([]map[string]any, error) {
-	rows, err := db.Conn.Query(`SELECT `+profileCols+` FROM authors WHERE site_id = ? ORDER BY name COLLATE NOCASE, created`, db.SiteID)
+	rows, err := db.Conn.Query(`SELECT `+profileCols+` FROM authors WHERE site_id = ? AND role != ? ORDER BY name COLLATE NOCASE, created`, db.SiteID, RoleVisitor)
 	if err != nil {
 		return nil, err
 	}

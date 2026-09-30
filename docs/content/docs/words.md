@@ -28,7 +28,7 @@ This page is the whole dictionary. If a word isn't here, it isn't a friendo word
 
 | Word | Meaning |
 |---|---|
-| **visitor** | Someone who isn't signed in. |
+| **visitor** | Someone who isn't signed in. When a site allows it, a visitor can react, vote or RSVP; their browser remembers what they did until they sign in, and then it's theirs. |
 | **member** | Anyone with an account on your site. Signing in with a code makes you one. |
 | **role** | Extra powers a member may have: contributor, moderator, editor, admin, owner. A member with no role can comment, react, vote and RSVP. |
 | **admin** | Runs the thing: settings, people, deleting. A site has admins; so does a group. |

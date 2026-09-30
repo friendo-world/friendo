@@ -164,11 +164,11 @@ func (db *DB) RSVPForUser(eventID, occurrence, userID string) string {
 
 // ListRSVPs lists who answered for one occurrence (organizer view), with each
 // author's display name and an email to reach them (the profile's, else the
-// account's — a pen name still has a person behind it).
+// account's — a pen name still has a person behind it). A visitor has no email.
 func (db *DB) ListRSVPs(eventID, occurrence string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
 		`SELECT r.id, r.occurrence, r.author_id, r.answer, r.created, r.updated,
-		        COALESCE(a.name, ''), COALESCE(NULLIF(a.email, ''), u.email, '')
+		        COALESCE(a.name, ''), COALESCE(NULLIF(a.email, ''), u.email, ''), COALESCE(a.role, '')
 		 FROM rsvps r LEFT JOIN authors a ON a.id = r.author_id
 		               LEFT JOIN users u ON u.id = a.user_id
 		 WHERE r.site_id = ? AND r.event_id = ? AND (? = '' OR r.occurrence = ?)
@@ -181,13 +181,23 @@ func (db *DB) ListRSVPs(eventID, occurrence string) ([]map[string]any, error) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, occ, authorID, answer, created, updated, name, email string
-		if err := rows.Scan(&id, &occ, &authorID, &answer, &created, &updated, &name, &email); err != nil {
+		var id, occ, authorID, answer, created, updated, name, email, role string
+		if err := rows.Scan(&id, &occ, &authorID, &answer, &created, &updated, &name, &email, &role); err != nil {
 			return nil, err
+		}
+		// A visitor's name is theirs to type, so it's marked: "Sam (visitor)"
+		// can't pass for the member Sam, on the page or in the CSV.
+		visitor := role == RoleVisitor
+		if visitor {
+			if name == "" {
+				name = "Visitor"
+			} else {
+				name += " (visitor)"
+			}
 		}
 		out = append(out, map[string]any{
 			"id": id, "date": occ, "author_id": authorID, "answer": answer,
-			"author_name": name, "author_email": email, "created": created, "updated": updated,
+			"author_name": name, "author_email": email, "visitor": visitor, "created": created, "updated": updated,
 		})
 	}
 	return out, rows.Err()

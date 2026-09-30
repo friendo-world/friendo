@@ -53,6 +53,7 @@
       // The site has this feature switched off (Settings → Features): a tag for
       // it renders nothing rather than an error.
       err.off = !!(body && body.off);
+      err.body = body;
       throw err;
     }
     return body;
@@ -108,9 +109,32 @@
     return mePromise;
   }
 
+  // What a visitor (not signed in) may do on this site, and whether this
+  // browser already is one: { visitor: {name} | null, can: {react, vote, rsvp} }.
+  // currentUser() stays null for a visitor — they aren't a member.
+  var visitorPromise = null;
+  function visitorState(force) {
+    if (force || !visitorPromise) {
+      visitorPromise = api("/visitor").then(
+        function (r) { return r || { visitor: null, can: {} }; },
+        function () { return { visitor: null, can: {} }; }
+      );
+    }
+    return visitorPromise;
+  }
+
+  // canAct reports whether the viewer may take an action: any member may, and
+  // a visitor may when the site turned that on (visitors_can_<action>).
+  async function canAct(action) {
+    if (await currentUser()) return true;
+    var v = await visitorState();
+    return !!(v.can && v.can[action]);
+  }
+
   // A logged-in/out change should refresh every component on the page.
   function broadcastAuth(user) {
     mePromise = Promise.resolve(user);
+    visitorPromise = null;
     document.dispatchEvent(new CustomEvent("friendo:signin", { detail: { user: user } }));
   }
 
@@ -981,7 +1005,8 @@
         "button{display:inline-flex;gap:.35em;align-items:center;padding:.3em .6em;border:1px solid #ddd;" +
         "border-radius:999px;background:#fafafa}" +
         'button[aria-pressed="true"]{background:#e8f0ff;border-color:#9db8ff}' +
-        ".count{font-variant-numeric:tabular-nums;opacity:.75}"
+        ".count{font-variant-numeric:tabular-nums;opacity:.75}" +
+        ".visitor{font-size:.85em;opacity:.7;margin-top:.4em}"
       );
     }
     async render() {
@@ -1024,13 +1049,18 @@
           );
         })
         .join("");
-      this.paint('<div class="row" part="row">' + html + "</div>");
+      // A visitor who reacted is reminded their browser is holding it.
+      var user = await currentUser();
+      var reacted = Object.keys(byEmoji).some(function (e) { return byEmoji[e].reacted; });
+      var hint = !user && reacted
+        ? '<div part="visitor" class="visitor">Sign in to keep your reactions.</div>'
+        : "";
+      this.paint('<div class="row" part="row">' + html + "</div>" + hint);
 
       var self = this;
       this.shadowRoot.querySelectorAll("button").forEach(function (btn) {
         btn.onclick = async function () {
-          var user = await currentUser();
-          if (!user) {
+          if (!(await canAct("react"))) {
             self.dispatchEvent(new CustomEvent("friendo:needs-auth", { bubbles: true }));
             return;
           }
@@ -1039,6 +1069,7 @@
               "/reactions",
               jsonBody("POST", postId ? { post_id: postId, emoji: btn.dataset.emoji } : { comment_id: commentId, emoji: btn.dataset.emoji })
             );
+            visitorPromise = null; // a first action may have made this browser a visitor
             self.render();
           } catch (err) {
             /* surface nothing; leave state as-is */
@@ -1054,8 +1085,10 @@
   // about the next date unless `date` (an RFC 3339 start) names another.
   // The signed-in viewer's answer is the pressed button. Organizers (the post's
   // author, or a moderator) also see who answered when `names` is present.
+  // When the site lets visitors RSVP (visitors_can_rsvp), someone who hasn't
+  // signed in can answer too, giving their name the first time.
   // Parts: question, when, row, button, count, mine, names, name, status,
-  // signed-out, error.
+  // signed-out, name-form, name-input, visitor, error.
   class FriendoRSVP extends FriendoElement {
     css() {
       return (
@@ -1067,6 +1100,8 @@
         ".count{font-variant-numeric:tabular-nums;opacity:.75}" +
         ".mine,.status,.signed-out{font-size:.9em;opacity:.75;margin-top:.5em}" +
         ".names{margin:.6em 0 0;padding:0;list-style:none;font-size:.9em}.names li{padding:.1em 0}" +
+        ".name{margin-top:.6em;display:flex;gap:.4em;flex-wrap:wrap;align-items:center}" +
+        ".name input{font:inherit;padding:.3em .5em;border:1px solid #ddd}" +
         ".names .a{opacity:.6;margin-left:.4em}"
       );
     }
@@ -1082,6 +1117,10 @@
         return;
       }
       var user = await currentUser();
+      // A visitor (not signed in) may answer when the site allows it, giving a
+      // name the first time so the organizer knows who's coming.
+      var vis = user ? null : await visitorState();
+      var visitorMay = !!(vis && vis.can && vis.can.rsvp);
       var answers = [
         { key: "going", label: this.getAttribute("going-label") || "Going" },
         { key: "maybe", label: this.getAttribute("maybe-label") || "Maybe" },
@@ -1097,12 +1136,17 @@
             esc(a.label) + '<span part="count" class="count">' + (counts[a.key] || 0) + "</span></button>";
         }).join("") +
         "</div>";
-      if (!user) {
+      if (!user && !visitorMay) {
         html += '<div part="signed-out" class="signed-out">Sign in to answer.</div>';
       } else if (data.mine === "invited") {
         html += '<div part="invited" class="mine">You\'re invited — are you coming?</div>';
       } else if (data.mine) {
-        html += '<div part="mine" class="mine">You said <b>' + esc(labelFor(answers, data.mine)) + '</b>. <button type="button" part="button" data-clear="1" style="padding:.1em .5em;font-size:.9em">Clear</button></div>';
+        html += '<div part="mine" class="mine">You said <b>' + esc(labelFor(answers, data.mine)) + '</b>. <button type="button" part="button" data-clear="1" style="padding:.1em .5em;font-size:.9em">Clear</button>' +
+          (user ? "" : ' <span part="visitor">Sign in to keep this.</span>') + "</div>";
+      }
+      if (!user && visitorMay) {
+        html += '<form part="name-form" class="name" hidden><label>Your name <input part="name-input" name="name" maxlength="60" autocomplete="name" required></label>' +
+          '<button part="button" type="submit">Answer</button></form>';
       }
       if (counts.invited) {
         html += '<div part="invited-count" class="status">' + counts.invited + " invited, no answer yet</div>";
@@ -1117,23 +1161,46 @@
 
       var self = this;
       var status = this.shadowRoot.querySelector('[part="status"]');
+      var nameForm = this.shadowRoot.querySelector('[part="name-form"]');
+      var pending = "";
+      var askName = function (answer) {
+        pending = answer;
+        nameForm.hidden = false;
+        nameForm.querySelector("input").focus();
+      };
+      var send = async function (answer, name) {
+        try {
+          var body = { date: data.date, answer: answer };
+          if (name) body.name = name;
+          await api("/posts/" + encodeURIComponent(postId) + "/rsvps", jsonBody("POST", body));
+          visitorPromise = null; // a first answer may have made this browser a visitor
+          self.dispatchEvent(new CustomEvent("friendo:rsvp", { bubbles: true, detail: { postId: postId, date: data.date, answer: answer } }));
+          self.render();
+        } catch (err) {
+          status.hidden = false;
+          status.textContent = err.message;
+          if (err.body && err.body.needs_name && nameForm) askName(answer);
+        }
+      };
       this.shadowRoot.querySelectorAll("button[data-answer]").forEach(function (btn) {
         btn.onclick = async function () {
-          if (!user) {
+          if (!user && !visitorMay) {
             self.dispatchEvent(new CustomEvent("friendo:needs-auth", { bubbles: true }));
             return;
           }
-          try {
-            await api("/posts/" + encodeURIComponent(postId) + "/rsvps",
-              jsonBody("POST", { date: data.date, answer: btn.dataset.answer }));
-            self.dispatchEvent(new CustomEvent("friendo:rsvp", { bubbles: true, detail: { postId: postId, date: data.date, answer: btn.dataset.answer } }));
-            self.render();
-          } catch (err) {
-            status.hidden = false;
-            status.textContent = err.message;
+          if (!user && !(vis.visitor && vis.visitor.name)) {
+            askName(btn.dataset.answer);
+            return;
           }
+          send(btn.dataset.answer);
         };
       });
+      if (nameForm) {
+        nameForm.onsubmit = function (e) {
+          e.preventDefault();
+          send(pending, nameForm.querySelector("input").value.trim());
+        };
+      }
       var clear = this.shadowRoot.querySelector("button[data-clear]");
       if (clear) {
         clear.onclick = async function () {
@@ -1390,7 +1457,8 @@
         ".bar{position:absolute;inset:0 auto 0 0;background:#e8f0ff;z-index:0}" +
         ".label{position:relative;z-index:1;display:flex;justify-content:space-between;gap:1em}" +
         '.opt[aria-pressed="true"] .label{font-weight:600}' +
-        ".total{margin-top:.4em;font-size:.85em;opacity:.7}"
+        ".total{margin-top:.4em;font-size:.85em;opacity:.7}" +
+        ".visitor{font-size:.85em;opacity:.7;margin-top:.2em}"
       );
     }
     async render() {
@@ -1444,20 +1512,23 @@
           '<div part="total" class="total">' +
           total +
           (total === 1 ? " vote" : " votes") +
-          "</div>"
+          "</div>" +
+          (voted && !(await currentUser())
+            ? '<div part="visitor" class="visitor">Sign in to keep your vote.</div>'
+            : "")
       );
 
       if (voted) return;
       var self = this;
       this.shadowRoot.querySelectorAll(".opt").forEach(function (btn) {
         btn.onclick = async function () {
-          var user = await currentUser();
-          if (!user) {
+          if (!(await canAct("vote"))) {
             self.dispatchEvent(new CustomEvent("friendo:needs-auth", { bubbles: true }));
             return;
           }
           try {
             await api("/polls/" + encodeURIComponent(pollId) + "/vote", jsonBody("POST", { option_index: Number(btn.dataset.index) }));
+            visitorPromise = null; // a first vote may have made this browser a visitor
             self.render();
           } catch (err) {
             /* already voted / closed — re-render to reflect server state */

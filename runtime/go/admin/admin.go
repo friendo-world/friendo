@@ -85,9 +85,11 @@ const sessionCookieName = "friendo_session"
 // Returns nil if not authenticated. Exported for use by the API.
 func GetSessionUser(r *http.Request, db *data.DB) *data.User {
 	// A real session always wins — a member who signed in on localhost is that
-	// member, not the open-mode owner.
+	// member, not the open-mode owner. A visitor's session is not a signed-in
+	// user: only the handlers that opt in (api.actorFor) ever see one, so every
+	// other check treats a visitor exactly like someone with no session.
 	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
-		if user, err := db.ValidateSession(cookie.Value); err == nil {
+		if user, err := db.ValidateSession(cookie.Value); err == nil && !user.IsVisitor() {
 			return user
 		}
 	}

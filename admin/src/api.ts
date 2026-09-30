@@ -98,6 +98,10 @@ export type SettingValues = {
   comments_need_review: boolean;
   password_login: boolean;
   members_can_start_groups: boolean;
+  // What a visitor (not signed in) may do; each is off by default.
+  visitors_can_react: boolean;
+  visitors_can_vote: boolean;
+  visitors_can_rsvp: boolean;
   profile_visibility: ProfileVisibility;
   // Which built-in collections show when friendo.toml lists no [content] collections.
   default_collections: string[];

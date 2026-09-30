@@ -48,11 +48,16 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 	contentTypes = withGroupFields(contentTypes)
 	// [profiles] fields — what a profile carries beyond name, avatar and bio.
 	profileFields := loadProfileFields(siteDir)
+	// viewer also knows a visitor who already has a session — for public reads
+	// that say what's yours. Never used to decide what someone may do.
+	viewer := viewerFunc(db, authFunc)
 	r.Route("/api", func(r chi.Router) {
 		// Public endpoints — used by the SPA to bootstrap and authenticate.
 		r.Get("/me", handleMe(db, authFunc))
 		// Which community features are on (Settings → Features).
 		r.Get("/features", handleFeatures(db))
+		// What a visitor (not signed in) may do here, and who this browser is.
+		r.Get("/visitor", handleVisitor(db, authFunc))
 
 		// Profiles: an account's author profiles. Any authenticated member may
 		// list/create their own and pick which one their comments/messages use.
@@ -103,8 +108,8 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// an authenticated member (any role), not admin.
 		r.Get("/posts/{id}/comments", featureGate(db, "comments", handleListComments(db, authFunc)))
 		r.Post("/posts/{id}/comments", featureGate(db, "comments", handlePostComment(db, authFunc)))
-		r.Get("/reactions", featureGate(db, "reactions", handleListReactions(db, authFunc)))
-		r.Post("/reactions", featureGate(db, "reactions", handleToggleReaction(db, authFunc)))
+		r.Get("/reactions", featureGate(db, "reactions", handleListReactions(db, viewer)))
+		r.Post("/reactions", featureGate(db, "reactions", visitorsMay(db, authFunc, "react", func(a authFn) http.HandlerFunc { return handleToggleReaction(db, a) })))
 
 		// Chats & messages (community feed): public reads, member-gated posts.
 		r.Get("/chats", featureGate(db, "chats", handleListChats(db)))
@@ -121,16 +126,17 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/groups/{id}/chats/{chat}/stream", featureGate(db, "chats", featureGate(db, "groups", handleGroupChatStream(db, authFunc))))
 		// RSVP: public counts; a signed-in member answers (going / not_going /
 		// maybe) for one date of a post's event. Names for organizers only.
-		r.Get("/posts/{id}/rsvps", featureGate(db, "rsvp", handleGetRSVPs(db, authFunc)))
-		r.Post("/posts/{id}/rsvps", featureGate(db, "rsvp", handleSetRSVP(db, authFunc)))
-		r.Delete("/posts/{id}/rsvps", featureGate(db, "rsvp", handleDeleteRSVP(db, authFunc)))
+		// A visitor may answer too when visitors_can_rsvp is on (see visitors.go).
+		r.Get("/posts/{id}/rsvps", featureGate(db, "rsvp", handleGetRSVPs(db, viewer)))
+		r.Post("/posts/{id}/rsvps", featureGate(db, "rsvp", visitorsMay(db, authFunc, "rsvp", func(a authFn) http.HandlerFunc { return handleSetRSVP(db, a) })))
+		r.Delete("/posts/{id}/rsvps", featureGate(db, "rsvp", handleDeleteRSVP(db, viewer)))
 		r.Get("/posts/{id}/rsvps/names", featureGate(db, "rsvp", handleRSVPNames(db, authFunc)))
 		// Invitations: the organizer asks people (by address, group, or followers);
 		// each becomes an RSVP row awaiting an answer, plus a notification.
 		r.Post("/posts/{id}/invites", featureGate(db, "rsvp", handleInviteToEvent(db, authFunc)))
-		r.Get("/polls/by-slug/{slug}", featureGate(db, "polls", handleGetPollBySlug(db, authFunc)))
-		r.Get("/polls/{id}", featureGate(db, "polls", handleGetPoll(db, authFunc)))
-		r.Post("/polls/{id}/vote", featureGate(db, "polls", handleVotePoll(db, authFunc)))
+		r.Get("/polls/by-slug/{slug}", featureGate(db, "polls", handleGetPollBySlug(db, viewer)))
+		r.Get("/polls/{id}", featureGate(db, "polls", handleGetPoll(db, viewer)))
+		r.Post("/polls/{id}/vote", featureGate(db, "polls", visitorsMay(db, authFunc, "vote", func(a authFn) http.HandlerFunc { return handleVotePoll(db, a) })))
 
 		// Locations (geo-tagging): public reads; contributor+ attaches/removes
 		// (own posts) or editor+ (any). Ownership is enforced inside the handler,
@@ -976,7 +982,8 @@ func handleGetRSVPs(db *data.DB, authFunc func(*http.Request) *data.User) http.H
 	}
 }
 
-// handleSetRSVP records the caller's answer for a date (any signed-in member).
+// handleSetRSVP records the caller's answer for a date (any signed-in member,
+// or a visitor with a name when visitors_can_rsvp is on).
 func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
@@ -987,6 +994,9 @@ func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.Ha
 		var in struct {
 			Occurrence string `json:"date"`
 			Answer     string `json:"answer"`
+			// A visitor's name: an organizer needs to tell who's coming, so a
+			// visitor gives one the first time they answer.
+			Name string `json:"name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
@@ -999,6 +1009,21 @@ func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.Ha
 		ev, key, ok := eventForPost(w, db, chi.URLParam(r, "id"), in.Occurrence)
 		if !ok {
 			return
+		}
+		if user.IsVisitor() {
+			if strings.TrimSpace(in.Name) != "" {
+				if err := db.SetVisitorName(user.ID, in.Name); err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "needs_name": true})
+					return
+				}
+			} else if db.VisitorName(user.ID) == "" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]any{"error": "add your name so the organizer knows who's coming", "needs_name": true})
+				return
+			}
 		}
 		if !db.RateLimitAllow("rsvp:"+user.ID, commentRateLimit, commentRateWindow) {
 			jsonError(w, "too many changes — slow down", http.StatusTooManyRequests)
@@ -1797,6 +1822,12 @@ const sessionCookieName = "friendo_session"
 // the session; every mutating API call is a JSON POST/PUT/DELETE from fetch, which
 // Lax never attaches cross-site, so the CSRF posture is unchanged.
 func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+	setCookieFor(w, r, token, 7*24*time.Hour)
+}
+
+// setCookieFor issues the session cookie with a lifetime to match its session
+// (a visitor's lasts much longer than a member's; see visitors.go).
+func setCookieFor(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
@@ -1806,7 +1837,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 		// which would break local `friendo serve` on http://localhost.
 		Secure:   requestIsHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400 * 7,
+		MaxAge:   int(ttl.Seconds()),
 	})
 }
 
@@ -1992,6 +2023,7 @@ func handleLogin(db *data.DB) http.HandlerFunc {
 			return
 		}
 		db.RateLimitClear(bucket)
+		carryVisitor(r, db, user)
 
 		token, err := db.CreateSession(user.ID, r.RemoteAddr, r.UserAgent())
 		if err != nil {
@@ -2681,8 +2713,10 @@ func generateOTP() string {
 	return fmt.Sprintf("%06d", n.Int64())
 }
 
-// handleRequestCode finds-or-creates a member account for the email and issues a
-// one-time login code.
+// handleRequestCode issues a one-time login code for an email. An email with
+// no account yet gets its code keyed on the email itself (data.SignupOTPKey):
+// the account is only made once the code checks out, in handleVerifyCode, so
+// asking for a code never leaves an unverified account behind.
 func handleRequestCode(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -2698,32 +2732,23 @@ func handleRequestCode(db *data.DB) http.HandlerFunc {
 			return
 		}
 
-		user, err := db.GetUserByEmail(email)
-		if err != nil {
+		key := data.SignupOTPKey(email)
+		if user, err := db.GetUserByEmail(email); err == nil {
+			key = user.ID
+		} else if !db.GetBoolSetting(settingOpenSignups, true) {
 			// New self-serve account. Honor the site's signup policy.
-			if !db.GetBoolSetting(settingOpenSignups, true) {
-				jsonError(w, "sign-ups are disabled for this site", http.StatusForbidden)
-				return
-			}
-			role := signupRole(db)
-			if role != "member" && role != "contributor" {
-				role = "member"
-			}
-			user, err = db.CreateMember(email, "", role)
-			if err != nil {
-				jsonError(w, "could not create account: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
+			jsonError(w, "sign-ups are disabled for this site", http.StatusForbidden)
+			return
 		}
 
-		// Rate limit: one live code at a time per account within the window.
-		if db.HasFreshOTP(user.ID, otpResendWindow) {
+		// Rate limit: one live code at a time per email within the window.
+		if db.HasFreshOTP(key, otpResendWindow) {
 			jsonError(w, "a code was already sent — please wait before requesting another", http.StatusTooManyRequests)
 			return
 		}
 
 		code := generateOTP()
-		if err := db.CreateOTP(user.ID, code, 10*time.Minute); err != nil {
+		if err := db.CreateOTP(key, code, 10*time.Minute); err != nil {
 			jsonError(w, "could not issue code", http.StatusInternalServerError)
 			return
 		}
@@ -2742,6 +2767,11 @@ func handleRequestCode(db *data.DB) http.HandlerFunc {
 // handleVerifyCode validates a one-time code and starts a session. Wrong
 // guesses are capped per account (same lockout as password login) so a
 // six-digit code can't be brute-forced inside its ten-minute life.
+//
+// A code for a new email makes the account now. If this browser was a visitor,
+// that visitor account becomes the new one (same account, so everything they
+// did stays theirs); signing in to an existing account instead moves the
+// visitor's activity onto it.
 func handleVerifyCode(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -2753,18 +2783,48 @@ func handleVerifyCode(db *data.DB) http.HandlerFunc {
 			return
 		}
 		email := data.NormalizeEmail(in.Email)
+		code := strings.TrimSpace(in.Code)
 		bucket := "otp-fail:" + email
 		if db.RateLimitExceeded(bucket, loginFailLimit, loginFailWindow) {
 			jsonError(w, "too many wrong codes — request a new one later", http.StatusTooManyRequests)
 			return
 		}
 		user, err := db.GetUserByEmail(email)
-		if err != nil || !db.VerifyOTP(user.ID, strings.TrimSpace(in.Code)) {
+		verified := false
+		if err == nil {
+			// An account made after the code was sent (an admin added it
+			// meanwhile) still honors the code sent to the bare email.
+			verified = db.VerifyOTP(user.ID, code) || db.VerifyOTP(data.SignupOTPKey(email), code)
+		} else if email != "" {
+			verified = db.VerifyOTP(data.SignupOTPKey(email), code)
+		}
+		if !verified {
 			db.RateLimitHit(bucket, loginFailWindow)
 			jsonError(w, "invalid or expired code", http.StatusUnauthorized)
 			return
 		}
 		db.RateLimitClear(bucket)
+		if user != nil {
+			carryVisitor(r, db, user)
+		} else {
+			if !db.GetBoolSetting(settingOpenSignups, true) {
+				jsonError(w, "sign-ups are disabled for this site", http.StatusForbidden)
+				return
+			}
+			role := signupRole(db)
+			if role != "member" && role != "contributor" {
+				role = "member"
+			}
+			if v, _ := sessionVisitor(r, db); v != nil {
+				user, err = db.PromoteVisitor(v.ID, email, role)
+			} else {
+				user, err = db.CreateMember(email, "", role)
+			}
+			if err != nil {
+				jsonError(w, "could not create account: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		token, err := db.CreateSession(user.ID, r.RemoteAddr, r.UserAgent())
 		if err != nil {
 			jsonError(w, "could not create session", http.StatusInternalServerError)
@@ -2789,9 +2849,26 @@ func canAssignRole(actorRole, targetRole string) bool {
 	return data.RoleCan(actorRole, data.CapUserManage)
 }
 
+// membersOnly drops visitor accounts from a user list: the admin's Users page
+// and its count are about people with accounts. (Export and pull keep them,
+// so a moved site keeps what its visitors did.)
+func membersOnly(users []*data.User, err error) []*data.User {
+	if err != nil {
+		return nil
+	}
+	out := users[:0:0]
+	for _, u := range users {
+		if !u.IsVisitor() {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
 func handleListUsers(db *data.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		users, err := db.ListUsers()
+		all, err := db.ListUsers()
+		users := membersOnly(all, err)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
@@ -2984,6 +3061,10 @@ type tomlSettingsConfig struct {
 		ProfileVisibility *string `toml:"profile_visibility"`
 		// Whether plain members may start groups (default off).
 		MembersCanStartGroups *bool `toml:"members_can_start_groups"`
+		// What a visitor (not signed in) may do (each default off).
+		VisitorsCanReact *bool `toml:"visitors_can_react"`
+		VisitorsCanVote  *bool `toml:"visitors_can_vote"`
+		VisitorsCanRSVP  *bool `toml:"visitors_can_rsvp"`
 		// Feature switches (see data.Features) and the built-in collections a
 		// site without [content] collections shows.
 		Comments           *bool    `toml:"comments"`
@@ -3027,6 +3108,8 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 		settingMembersCanPost: s.MembersCanPost, settingPostsNeedReview: s.PostsNeedReview,
 		settingCommentsNeedReview: s.CommentsNeedReview, settingPasswordLogin: s.PasswordLogin,
 		data.SettingMembersCanStartGroups: s.MembersCanStartGroups,
+		settingVisitorsCanReact: s.VisitorsCanReact, settingVisitorsCanVote: s.VisitorsCanVote,
+		settingVisitorsCanRSVP: s.VisitorsCanRSVP,
 	} {
 		if v != nil {
 			set(key, boolSetting(*v))
@@ -3065,6 +3148,9 @@ var boolSettings = []struct {
 	{settingCommentsNeedReview, true},
 	{settingPasswordLogin, false},
 	{data.SettingMembersCanStartGroups, false},
+	{settingVisitorsCanReact, false},
+	{settingVisitorsCanVote, false},
+	{settingVisitorsCanRSVP, false},
 }
 
 // managedList returns the managed setting keys in a stable order for the API, so the
@@ -3111,7 +3197,7 @@ func signupRole(db *data.DB) string {
 // setting by its one name, plus the site's counts, the feature switches and the
 // `managed` list naming the keys frozen by friendo.toml's [settings] block.
 func settingsPayload(db *data.DB, siteName string, managed map[string]bool, collectionsDeclared bool) map[string]any {
-	users, _ := db.ListUsers()
+	users := membersOnly(db.ListUsers())
 	counts, _ := db.CollectionCounts()
 	out := map[string]any{
 		"site":                 map[string]any{"name": siteName},

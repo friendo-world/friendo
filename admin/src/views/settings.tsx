@@ -239,6 +239,33 @@ export function SettingsView() {
               onToggle={() => patch({ members_can_start_groups: !s.members_can_start_groups })}
             />
           )}
+          {s && s.features.reactions && (
+            <Toggle
+              label="Visitors can react"
+              hint={managedHint("When on, someone who hasn't signed in can react. Their browser remembers them, and if they sign in later their reactions come with them.", "visitors_can_react")}
+              on={s.visitors_can_react}
+              disabled={saving || isManaged("visitors_can_react")}
+              onToggle={() => patch({ visitors_can_react: !s.visitors_can_react })}
+            />
+          )}
+          {s && s.features.polls && (
+            <Toggle
+              label="Visitors can vote"
+              hint={managedHint("When on, someone who hasn't signed in can vote in polls — one vote per browser, so a determined person can vote twice.", "visitors_can_vote")}
+              on={s.visitors_can_vote}
+              disabled={saving || isManaged("visitors_can_vote")}
+              onToggle={() => patch({ visitors_can_vote: !s.visitors_can_vote })}
+            />
+          )}
+          {s && s.features.rsvp && (
+            <Toggle
+              label="Visitors can RSVP"
+              hint={managedHint("When on, someone who hasn't signed in can answer an event, giving a name. Organizers see them marked \"(visitor)\".", "visitors_can_rsvp")}
+              on={s.visitors_can_rsvp}
+              disabled={saving || isManaged("visitors_can_rsvp")}
+              onToggle={() => patch({ visitors_can_rsvp: !s.visitors_can_rsvp })}
+            />
+          )}
           <label class="flex items-center justify-between gap-4">
             <span>
               <span class="text-sm font-bold">Profiles are visible to</span>

@@ -105,6 +105,9 @@ comments_need_review = true        # comments wait for review before they show
 password_login = false             # also allow signing in with a password
 profile_visibility = "members"     # who sees profiles: "members" or "public"
 members_can_start_groups = false   # any member can start a group (and is its admin)
+visitors_can_react = false         # someone who hasn't signed in can react
+visitors_can_vote = false          # ... vote in polls
+visitors_can_rsvp = false          # ... answer an event, giving a name
 comments = true                    # feature switches, see below
 default_collections = ["blog", "pages"]   # built-in collections shown while [content] collections is unset
 ```
@@ -119,6 +122,7 @@ default_collections = ["blog", "pages"]   # built-in collections shown while [co
 | `password_login` | Also allow signing in with a password. Everyone can always sign in with an emailed code. See [Signing in](/docs/signing-in) | `false` |
 | `profile_visibility` | Who may see [profiles](/docs/profiles): `members` (anyone signed in) or `public` | `members` |
 | `members_can_start_groups` | Any member can start a [group](/docs/groups) and is its admin. Off, contributors and up can | `false` |
+| `visitors_can_react`, `visitors_can_vote`, `visitors_can_rsvp` | Someone who hasn't signed in can react, vote or RSVP. Their browser remembers them, and signing in brings what they did along. See [Let visitors take part](/docs/visitors) | `false` |
 | `comments`, `reactions`, `polls`, `rsvp`, `locations`, `chats`, `follows`, `groups` | Feature switches (admin **Settings → Features**). Off, the feature's API refuses it, its `<friendo-*>` tag renders nothing, and `post.comments` (and so on) is empty. What people already wrote is kept | `true` |
 | `default_collections` | Which built-in collections (`blog`, `pages`) the admin lists while `[content] collections` is unset | both |
 
