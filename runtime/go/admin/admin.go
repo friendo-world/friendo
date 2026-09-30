@@ -105,6 +105,15 @@ func GetSessionUser(r *http.Request, db *data.DB) *data.User {
 	return nil
 }
 
+// OpenLocally reports whether this request gets the open admin: --open-admin,
+// or a request from this machine to a site with no email provider. Unlike
+// GetSessionUser it doesn't ask for the admin header — that header guards the
+// API's writes, while this is for viewing, like the review queue's thumbnails of
+// images still waiting for review (plain <img> requests can't carry it).
+func OpenLocally(r *http.Request) bool {
+	return openAdminMode || (localOpen && isLocalRequest(r) && !email.Configured())
+}
+
 // isLocalRequest reports whether a request could only have come from the same
 // machine: the peer is a loopback address, the Host header names localhost, and
 // no proxy header is present. A reverse proxy on the same box fails the Host

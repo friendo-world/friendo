@@ -45,8 +45,9 @@ in the admin.
 Open **Review** in the admin (`/_/review`). It has two parts:
 
 - **Posts to review**: each waiting post with its collection, author and, for an
-  event, its date. A post that came with images shows the first as a thumbnail;
-  click it for the full image. **Edit** opens it, **Publish** makes it live, **Delete**
+  event, its date, and the start of its body. A post that came with images shows
+  the first as a thumbnail; click it for the full image. A post from a
+  [drop box](/docs/visitors#drop-boxes) says *no name kept*. **Edit** opens it, **Publish** makes it live, **Delete**
   removes it.
 - **Comments**: tabs for *Pending*, *Approved* and *Rejected*. Each comment has
   **Approve**, **Reject** and **Delete**. A rejected comment can still be

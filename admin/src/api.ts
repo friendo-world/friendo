@@ -172,7 +172,16 @@ export type DeclaredField = {
 
 // `declared` marks a collection named in friendo.toml's [content] types; the rest
 // exist because they have records (or are the built-in defaults).
-export type Collection = { name: string; count: number; declared: boolean; fields: DeclaredField[] };
+export type Collection = {
+  name: string;
+  count: number;
+  declared: boolean;
+  fields: DeclaredField[];
+  // A form says drop-box: anyone posts, no one's name is kept.
+  drop_box?: boolean;
+  // It was a drop box until its drop-box form went away (dismissable).
+  drop_box_closed?: boolean;
+};
 
 // A post's time, as the API returns it (null for a post with no time).
 export type When = {
@@ -221,6 +230,8 @@ export type PendingRecord = {
   visitor?: boolean;
   // The first image uploaded with the post ("" if none), for a thumbnail.
   image?: string;
+  // The start of the body, for telling posts apart (and body-only ones at all).
+  excerpt?: string;
   status: string;
   created: string;
   when?: When | null;
@@ -362,6 +373,9 @@ export const api = {
     return req<{ file: FileRow }>("/files", { method: "POST", body: fd });
   },
   deleteFile: (id: string) => req<void>(`/files/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // Clear the "no longer a drop box" notice on a collection.
+  dismissDropBoxNotice: (collection: string) =>
+    req<void>(`/collections/${encodeURIComponent(collection)}/drop-box-notice`, { method: "DELETE" }),
 
   // The review queue (moderator+)
   recordsByStatus: (status: string) =>

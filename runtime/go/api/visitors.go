@@ -75,6 +75,13 @@ func sessionVisitor(r *http.Request, db *data.DB) (*data.User, string) {
 	return u, cookie.Value
 }
 
+// RequestVisitor is the visitor this request's session belongs to, or nil —
+// for the server's checks outside the API (a visitor's own pending image).
+func RequestVisitor(r *http.Request, db *data.DB) *data.User {
+	u, _ := sessionVisitor(r, db)
+	return u
+}
+
 // viewerFunc is authFunc that also recognizes a visitor who already has a
 // session. It never creates one. For public reads only: the answer tells a
 // visitor what's theirs, and a visitor holds no capabilities.
@@ -150,7 +157,8 @@ func carryVisitor(r *http.Request, db *data.DB, user *data.User) {
 
 // handleVisitor tells the SDK what a visitor may do here and, when this
 // browser is already a visitor, the name they gave. A signed-in member gets
-// visitor: null — they're a member.
+// visitor: null — they're a member. drop_boxes names the collections anyone
+// can post to with no name kept (dropbox.go), which is the same for everyone.
 func handleVisitor(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		can := map[string]bool{}
@@ -163,7 +171,11 @@ func handleVisitor(db *data.DB, authFunc func(*http.Request) *data.User) http.Ha
 				visitor = map[string]any{"name": db.VisitorName(v.ID)}
 			}
 		}
-		jsonResponse(w, map[string]any{"visitor": visitor, "can": can})
+		boxes := db.PageDropBoxes()
+		if boxes == nil {
+			boxes = []string{}
+		}
+		jsonResponse(w, map[string]any{"visitor": visitor, "can": can, "drop_boxes": boxes})
 	}
 }
 

@@ -46,6 +46,10 @@ unless you turn on **Members can add images** (`members_can_upload`) or
 **Visitors can add images** (`visitors_can_upload`). Then members or
 [visitors](/docs/visitors) can attach images to the post they're submitting, and
 the images wait for review with it. Anyone else sees a note instead of the picker.
+A [drop box](/docs/visitors#drop-boxes) takes images from anyone.
+
+Until its post is published, an uploaded image is private: it opens only for
+moderators, editors and whoever sent it, and `friendo export` leaves it out.
 
 Uploads from the admin and forms go through the [files API](/docs/api) and land
 in `assets/uploads/`. Only images are accepted (PNG, JPEG, GIF, WebP, SVG), up to

@@ -34,11 +34,21 @@ const maxSubmissionFiles = 10
 // can go straight into the post's fields.
 var fieldName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 
-// handleFiles routes an upload: contributors and up to the full handler, and
-// members or visitors (when allowed) to handleSubmissionUpload.
+// handleFiles routes an upload: one carrying a drop-box post's upload_key to
+// handleDropBoxUpload, contributors and up to the full handler, and members or
+// visitors (when allowed) to handleSubmissionUpload.
 func handleFiles(db *data.DB, siteDir string, store storage.Backend, authFunc, viewer authFn) http.HandlerFunc {
 	full := handleUploadFile(db, siteDir, store, authFunc)
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Parsed once here; the handlers below reuse the parsed form.
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			jsonError(w, "expected a multipart form upload", http.StatusBadRequest)
+			return
+		}
+		if r.FormValue("upload_key") != "" {
+			handleDropBoxUpload(w, r, db, siteDir, store, dropBoxNames(db))
+			return
+		}
 		user := viewer(r)
 		switch {
 		case user == nil:
@@ -59,26 +69,12 @@ func handleFiles(db *data.DB, siteDir string, store storage.Backend, authFunc, v
 // handleSubmissionUpload stores one image for a member's or visitor's own
 // pending post and writes its address into the post's fields.<field>.
 func handleSubmissionUpload(w http.ResponseWriter, r *http.Request, db *data.DB, siteDir string, store storage.Backend, user *data.User) {
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		jsonError(w, "expected a multipart form upload", http.StatusBadRequest)
-		return
-	}
-	postID, field := r.FormValue("post_id"), r.FormValue("field")
-	if !fieldName.MatchString(field) {
-		jsonError(w, "field must be a plain name", http.StatusBadRequest)
-		return
-	}
-	rec, err := db.GetRecordByID(postID)
-	if err != nil || !db.UserOwnsPost(user.ID, postID) {
+	postID := r.FormValue("post_id")
+	if !db.UserOwnsPost(user.ID, postID) {
 		jsonError(w, "post not found", http.StatusNotFound)
 		return
 	}
-	if rec["status"] != "pending" {
-		jsonError(w, "images can only be added while your post waits for review", http.StatusConflict)
-		return
-	}
-	if files, _ := db.ListFiles("post", postID); len(files) >= maxSubmissionFiles {
-		jsonError(w, fmt.Sprintf("a post can carry %d files at most", maxSubmissionFiles), http.StatusBadRequest)
+	if !submissionCanTakeFile(w, db, postID) {
 		return
 	}
 	if !db.RateLimitAllow("upload:"+user.ID, commentRateLimit, commentRateWindow) ||
@@ -86,7 +82,57 @@ func handleSubmissionUpload(w http.ResponseWriter, r *http.Request, db *data.DB,
 		jsonError(w, "you're uploading too fast — slow down", http.StatusTooManyRequests)
 		return
 	}
+	storeAndAttach(w, r, db, siteDir, store, postID)
+}
 
+// handleDropBoxUpload stores one image for a drop-box post. Nobody owns such a
+// post, so the proof is the upload_key its creation handed back — good for one
+// post, for UploadKeyTTL, and tied to no one.
+func handleDropBoxUpload(w http.ResponseWriter, r *http.Request, db *data.DB, siteDir string, store storage.Backend, boxes map[string]bool) {
+	postID := r.FormValue("post_id")
+	rec, err := db.GetRecordByID(postID)
+	if err != nil || !boxes[fmt.Sprint(rec["collection"])] || !db.UploadKeyValid(postID, r.FormValue("upload_key")) {
+		jsonError(w, "that upload key isn't good for this post (it may have expired)", http.StatusForbidden)
+		return
+	}
+	if !submissionCanTakeFile(w, db, postID) {
+		return
+	}
+	if !db.RateLimitAllow("dropbox-upload:"+clientIP(r), commentRateLimit, commentRateWindow) {
+		jsonError(w, "you're uploading too fast — slow down", http.StatusTooManyRequests)
+		return
+	}
+	storeAndAttach(w, r, db, siteDir, store, postID)
+}
+
+// submissionCanTakeFile checks what every submitted-post upload shares: the post
+// still waits for review, the field is a plain name, and it isn't full. It
+// answers the error itself and returns false when not.
+func submissionCanTakeFile(w http.ResponseWriter, db *data.DB, postID string) bool {
+	rec, err := db.GetRecordByID(postID)
+	if err != nil {
+		jsonError(w, "post not found", http.StatusNotFound)
+		return false
+	}
+	if rec["status"] != "pending" {
+		jsonError(w, "images can only be added while the post waits for review", http.StatusConflict)
+		return false
+	}
+	if files, _ := db.ListFiles("post", postID); len(files) >= maxSubmissionFiles {
+		jsonError(w, fmt.Sprintf("a post can carry %d files at most", maxSubmissionFiles), http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// storeAndAttach saves the request's image and writes its address into the
+// post's fields.<field>, answering the file (attached: true) or the error.
+func storeAndAttach(w http.ResponseWriter, r *http.Request, db *data.DB, siteDir string, store storage.Backend, postID string) {
+	field := r.FormValue("field")
+	if !fieldName.MatchString(field) {
+		jsonError(w, "field must be a plain name", http.StatusBadRequest)
+		return
+	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		jsonError(w, "a file field is required", http.StatusBadRequest)

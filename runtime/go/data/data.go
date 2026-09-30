@@ -81,6 +81,9 @@ func Open(siteDir string) (*DB, error) {
 	if err := db.ClearIdleVisitors(); err != nil {
 		fmt.Fprintln(os.Stderr, "Warning: clearing idle visitors:", err)
 	}
+	if err := db.ClearExpiredUploadKeys(); err != nil {
+		fmt.Fprintln(os.Stderr, "Warning: clearing upload keys:", err)
+	}
 	return db, nil
 }
 
@@ -277,7 +280,7 @@ func (db *DB) QueryCollectionOwnedBy(collection, userID string) ([]map[string]an
 // first image uploaded with it (image, "" if none) joined.
 func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
-		`SELECT p.id, p.collection, p.slug, p.title, p.author_id, p.status, p.created, a.name, a.role,
+		`SELECT p.id, p.collection, p.slug, p.title, p.author_id, p.status, p.created, a.name, a.role, p.body,
 		        COALESCE((SELECT f.r2_key FROM files f
 		                  WHERE f.site_id = p.site_id AND f.record_type = 'post' AND f.record_id = p.id
 		                    AND f.mime LIKE 'image/%' ORDER BY f.created LIMIT 1), '')
@@ -293,8 +296,8 @@ func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
 	for rows.Next() {
 		var id, collection, slug, title, authorID, st, created string
 		var authorName, authorRole sql.NullString
-		var imageKey string
-		if err := rows.Scan(&id, &collection, &slug, &title, &authorID, &st, &created, &authorName, &authorRole, &imageKey); err != nil {
+		var imageKey, body string
+		if err := rows.Scan(&id, &collection, &slug, &title, &authorID, &st, &created, &authorName, &authorRole, &body, &imageKey); err != nil {
 			return nil, err
 		}
 		// The first image uploaded with the post, so a reviewer sees what came with it.
@@ -306,10 +309,25 @@ func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
 			"id": id, "collection": collection, "slug": slug, "title": title,
 			"author_id": authorID, "author_name": AuthorDisplayName(authorName.String, authorRole.String),
 			"visitor": authorRole.String == RoleVisitor, "status": st, "created": created,
-			"image": image,
+			"image": image, "excerpt": excerpt(body, 200),
 		})
 	}
 	return out, rows.Err()
+}
+
+// excerpt is the start of a post's body on one line, cut at a word near max
+// runes — so a reviewer can tell posts apart when they have no title.
+func excerpt(body string, max int) string {
+	text := strings.Join(strings.Fields(body), " ")
+	r := []rune(text)
+	if len(r) <= max {
+		return text
+	}
+	cut := string(r[:max])
+	if i := strings.LastIndex(cut, " "); i > max/2 {
+		cut = cut[:i]
+	}
+	return cut + "…"
 }
 
 // SetRecordStatus changes only a post's status (used to publish/unpublish from

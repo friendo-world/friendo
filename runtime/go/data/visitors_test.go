@@ -169,3 +169,30 @@ func TestClearIdleVisitors(t *testing.T) {
 		t.Error("a new visitor must be kept")
 	}
 }
+
+// A collection that stops being a drop box is remembered as closed until it's
+// dismissed or becomes a drop box again.
+func TestPageDropBoxesClosed(t *testing.T) {
+	db := visitorSite(t)
+	if added, _ := db.SetPageDropBoxes([]string{"tips", "ideas"}); len(added) != 2 {
+		t.Fatalf("added = %v", added)
+	}
+	if a, r := db.SetPageDropBoxes([]string{"ideas", "tips"}); a != nil || r != nil {
+		t.Fatalf("no change should report nothing: %v %v", a, r)
+	}
+	if _, removed := db.SetPageDropBoxes([]string{"ideas"}); len(removed) != 1 || removed[0] != "tips" {
+		t.Fatalf("removed = %v", removed)
+	}
+	if c := db.ClosedDropBoxes(); len(c) != 1 || c[0] != "tips" {
+		t.Fatalf("closed = %v", c)
+	}
+	db.SetPageDropBoxes([]string{"ideas", "tips"})
+	if c := db.ClosedDropBoxes(); len(c) != 0 {
+		t.Fatalf("back to a drop box, no longer closed: %v", c)
+	}
+	db.SetPageDropBoxes(nil)
+	db.DismissClosedDropBox("tips")
+	if c := db.ClosedDropBoxes(); len(c) != 1 || c[0] != "ideas" {
+		t.Fatalf("after dismissing tips = %v", c)
+	}
+}

@@ -19,6 +19,7 @@ This page is the whole dictionary. If a word isn't here, it isn't a friendo word
 | **layout** | A file in `layouts/` that pages extend. |
 | **collection** | A folder of posts: `blog`, `events`, `groups`, `pages`. The folder under `content/` and the folder under `pages/` share its name. |
 | **post** | One thing in a collection. Every post has a title, a slug, a body and a status; anything else is a field. |
+| **drop box** | A collection anyone can post to, where no one's name is kept: `<friendo-form collection="tips" drop-box>`. See [Drop boxes](/docs/visitors#drop-boxes). |
 | **field** | An extra key on a post: from a content file's front matter, a form, or the admin. `{{ post.fields.mood }}`. |
 | **feature** | A switch in Settings → Features: comments, reactions, polls, chats, locations, RSVPs, follows, groups. Off, the feature disappears from the site. |
 | **network** | One friendo hosting many sites by subdomain. friendo.world is a network; you can run your own. |
@@ -28,7 +29,7 @@ This page is the whole dictionary. If a word isn't here, it isn't a friendo word
 
 | Word | Meaning |
 |---|---|
-| **visitor** | Someone who isn't signed in. When a site allows it, a visitor can react, vote or RSVP; their browser remembers what they did until they sign in, and then it's theirs. |
+| **visitor** | Someone who isn't signed in. When a site allows it, a visitor can react, vote, RSVP, comment or post; their browser remembers what they did until they sign in, and then it's theirs. |
 | **member** | Anyone with an account on your site. Signing in with a code makes you one. |
 | **role** | Extra powers a member may have: contributor, moderator, editor, admin, owner. A member with no role can comment, react, vote and RSVP. |
 | **admin** | Runs the thing: settings, people, deleting. A site has admins; so does a group. |

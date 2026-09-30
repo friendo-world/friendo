@@ -70,12 +70,14 @@ export function ReviewQueue() {
                 )}
                 <div class="min-w-0 flex-1">
                   <div class="mb-2 flex items-baseline justify-between gap-3">
-                    <span class="font-bold">{r.title || r.slug || "(untitled)"}</span>
+                    <span class="font-bold">{r.title || r.slug || (r.excerpt ? "" : "(untitled)")}</span>
                     <span class="text-xs text-dim">{r.collection}</span>
                   </div>
                   {r.when && <div class="mb-1 text-sm">📅 {formatWhen(r.when)}</div>}
+                  {r.excerpt && <p class="mb-1 text-sm text-dim">{r.excerpt}</p>}
                   <div class="mb-3 text-xs text-dim">
-                    by {r.author_name || "Anonymous"} · {r.created?.replace("T", " ").replace("Z", "")}
+                    {r.author_id ? `by ${r.author_name || "Anonymous"}` : "no name kept"} ·{" "}
+                    {r.created?.replace("T", " ").replace("Z", "")}
                   </div>
                 </div>
               </div>

@@ -151,11 +151,16 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		r.Get("/collections", capGate(authFunc, data.CapContentCreate, handleListCollections(db, contentTypes, typesDeclared, profileFields)))
 		// The [content] block that matches the site as it is (to copy, or for `friendo pull`).
 		r.Get("/content/toml", capGate(authFunc, data.CapSiteConfigure, handleContentToml(db, contentTypes)))
+		// Clear the "no longer a drop box" notice on a collection (dropbox.go).
+		r.Delete("/collections/{collection}/drop-box-notice", capGate(authFunc, data.CapSiteConfigure, handleDismissClosedDropBox(db)))
 		r.Get("/collections/{collection}/posts", capGate(authFunc, data.CapContentCreate, handleListRecords(db, authFunc)))
 		// Create self-gates: contributors+ (content.create) post directly; when the
 		// site opts in (content.accept_submissions), a signed-in member may submit a
 		// post that's forced into the pending review queue.
-		r.Post("/collections/{collection}/posts", visitorsMay(db, authFunc, "post", func(a authFn) http.HandlerFunc { return handleCreateRecord(db, a) }))
+		// A drop-box collection takes a post from anyone and keeps no name
+		// (dropbox.go); anything else goes the usual way.
+		r.Post("/collections/{collection}/posts", dropBoxOr(db,
+			visitorsMay(db, authFunc, "post", func(a authFn) http.HandlerFunc { return handleCreateRecord(db, a) })))
 		// Whoever submitted a post that's still waiting for review — a member
 		// or a visitor — can take it back.
 		r.Post("/posts/{id}/withdraw", handleWithdrawRecord(db, viewer, siteDir, store))
@@ -280,6 +285,16 @@ func handleListCollections(db *data.DB, types []ContentType, declared bool, prof
 			if !seen[c.Name] {
 				out = append(out, collectionInfo{Name: c.Name, Count: c.Count, Fields: []FieldDecl{}})
 			}
+		}
+		// Drop boxes as the templates say, and ones that just stopped being.
+		boxes := dropBoxNames(db)
+		closed := map[string]bool{}
+		for _, n := range db.ClosedDropBoxes() {
+			closed[n] = true
+		}
+		for i := range out {
+			out[i].DropBox = boxes[out[i].Name]
+			out[i].DropBoxClosed = closed[out[i].Name]
 		}
 		jsonResponse(w, map[string]any{"collections": out, "declared": declared, "profile_fields": profileFields})
 	}

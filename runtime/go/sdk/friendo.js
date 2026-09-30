@@ -2285,8 +2285,14 @@
       // allows it (members_can_upload), a visitor likewise (visitors_can_upload).
       // Everyone else sees a note instead of a picker.
       var user = await currentUser();
+      // A drop box takes images from anyone: they follow the post with the
+      // one-time key its creation hands back (see <friendo-form>).
+      var form = this.closest("friendo-form");
+      var boxes = (await visitorState()).drop_boxes || [];
       var canUpload = false;
-      if (user) {
+      if (form && boxes.indexOf(form.getAttribute("collection") || "posts") !== -1) {
+        canUpload = true;
+      } else if (user) {
         canUpload = !!user.can_upload;
       } else {
         var vis = await visitorState();
@@ -2352,9 +2358,11 @@
     }
   }
 
-  // --- <friendo-form collection [redirect] [status]> -------------------------
+  // --- <friendo-form collection [redirect] [status] [drop-box]> --------------
   // A visitor (not signed in) can use it too when the site allows it
-  // (visitors_can_post); an input named author_name carries their name.
+  // (visitors_can_post); an input named author_name carries their name. With
+  // drop-box the collection takes posts from anyone and keeps no name — the
+  // server reads that from the template itself.
   // Turns the author's own inputs into a created post, submitted from the page.
   // Unlike every other component this is a LIGHT-DOM controller — no shadow root —
   // so the author's inputs are its real children: their CSS applies, their
@@ -2385,7 +2393,30 @@
       this._onClick = this._onClick.bind(this);
       this._onKey = this._onKey.bind(this);
       this.addEventListener("click", this._onClick);
-      this.addEventListener("keydown", this._onKey);
+      this.addEventListener("keydown", this._onKey);      this._checkDropBox();
+    }
+    // drop-box is read by the server from the template files, so this form
+    // can't make it true — but it can say when markup and server disagree.
+    async _checkDropBox() {
+      var collection = this.getAttribute("collection") || "posts";
+      var boxes = (await visitorState()).drop_boxes || [];
+      var isBox = boxes.indexOf(collection) !== -1;
+      // Once per collection and kind per page, however often forms connect.
+      var said = (FriendoForm._dropBoxSaid = FriendoForm._dropBoxSaid || {});
+      var kind = collection + (this.hasAttribute("drop-box") ? ":marked" : ":plain");
+      if (said[kind]) return;
+      said[kind] = true;
+      if (this.hasAttribute("drop-box") && !isBox) {
+        console.warn(
+          '<friendo-form collection="' + collection + '" drop-box>: the server doesn\'t treat "' + collection +
+          '" as a drop box yet. Write the collection out plainly (not {{ … }}), and make sure the site has reloaded its templates.'
+        );
+      } else if (!this.hasAttribute("drop-box") && isBox) {
+        console.info(
+          '<friendo-form collection="' + collection + '">: "' + collection +
+          '" is a drop box (another form says drop-box), so posts from this form keep no name either.'
+        );
+      }
     }
     disconnectedCallback() {
       this.removeEventListener("click", this._onClick);
@@ -2507,6 +2538,8 @@
           var fd = new FormData();
           fd.append("post_id", record.id);
           fd.append("field", media[i].name);
+          // A drop-box post has no owner; its one-time key stands in.
+          if (record.upload_key) fd.append("upload_key", record.upload_key);
           fd.append("file", file);
           var up = await api("/files", { method: "POST", body: fd });
           // Write back what was submitted plus the asset — not only the server's
@@ -2536,6 +2569,7 @@
 
       this._busy = false;
       this._status.textContent = "";
+      delete record.upload_key; // spent; listeners don't need it
       this.dispatchEvent(new CustomEvent("friendo:submitted", { bubbles: true, detail: { post: record } }));
       // An image that didn't make it keeps us on the page (even with a
       // redirect set) so the note is seen.
@@ -2548,6 +2582,11 @@
       }
       this._reset();
       this._error.textContent = uploadError;
+      if (record.drop_box) {
+        // A drop box keeps no name, so there's no one to take it back.
+        this._status.textContent = "Sent. No name was kept; it waits for review.";
+        return;
+      }
       if (record.status !== "pending") {
         this._status.textContent = "Submitted.";
         return;

@@ -137,6 +137,29 @@ export function CollectionsArea({ collection, id }: { collection?: string; id?: 
             <div class="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h1 class="text-xl font-bold">{name}</h1>
+                {collections?.find((c) => c.name === name)?.drop_box && (
+                  <p class="mt-1 text-xs text-dim" data-drop-box>
+                    A drop box: anyone can post here, and no one's name is kept, even for posts made
+                    from the admin. Everything waits in Review.
+                  </p>
+                )}
+                {collections?.find((c) => c.name === name)?.drop_box_closed && (
+                  <p class="mt-1 border border-crimson px-2 py-1 text-xs text-crimson" data-drop-box-closed>
+                    This was a drop box until its <code>drop-box</code> form went away. Posts sent here now keep
+                    their sender's name. Put <code>drop-box</code> back on the form to make it one again.{" "}
+                    {can(user.role, "site.configure") && (
+                      <button
+                        class="font-bold underline"
+                        onClick={async () => {
+                          await api.dismissDropBoxNotice(name);
+                          setCollections((cs) => cs && cs.map((c) => (c.name === name ? { ...c, drop_box_closed: false } : c)));
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                  </p>
+                )}
                 {unsynced && (
                   <p class="mt-1 text-xs text-dim" data-unsynced>
                     ✱ Not in your <code>friendo.toml</code> yet.{" "}

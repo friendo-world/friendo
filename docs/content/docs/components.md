@@ -170,6 +170,7 @@ The one tag that stays in your page's DOM, so its parts are styled by attribute:
 | `collection` | Where the post goes (default `posts`) |
 | `redirect` | Where to go after, with `{slug}` and `{id}` filled in |
 | `status` | The status to ask for (`published`, the default, or `draft`) |
+| `drop-box` | Make the collection a [drop box](/docs/visitors#drop-boxes): anyone can post, no name is kept. Applies to the whole collection; write `collection` out plainly |
 
 An input named `author_name` is a [visitor's](/docs/visitors) name for their
 post; it's used only when the person posting isn't signed in.

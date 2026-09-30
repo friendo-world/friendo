@@ -125,6 +125,8 @@ type BuiltSite struct {
 	Handler  http.Handler
 	table    *routeTable
 	pagesDir string
+	siteDir  string
+	db       *data.DB
 }
 
 // Reload rebuilds the route table from pages/. Called after a templates push
@@ -137,6 +139,8 @@ func (s *BuiltSite) Reload() {
 	if err := s.table.Reload(); err != nil {
 		log.Printf("Rebuilding routes: %v", err)
 	}
+	// Forms marked drop-box may have come or gone with the templates.
+	scanDropBoxes(s.siteDir, s.db)
 }
 
 // HasPage reports whether the site's pages/ folder defines urlPath — either a
@@ -221,7 +225,8 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 	if err != nil {
 		return nil, fmt.Errorf("building routes: %w", err)
 	}
-	built := &BuiltSite{table: table, pagesDir: pagesDir}
+	built := &BuiltSite{table: table, pagesDir: pagesDir, siteDir: siteDir, db: db}
+	scanDropBoxes(siteDir, db)
 
 	r := chi.NewRouter()
 
@@ -269,11 +274,14 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 
 	// Serve static files from assets/ at /assets/. With a media backend, uploads
 	// stream from object storage while static assets still come from disk.
+	// An upload on a post that isn't published yet (waiting for review, or a
+	// draft) is shown only to whoever may review or edit that post, or sent it.
+	// The route is there even before assets/ exists: the first upload makes it.
 	assetsDir := filepath.Join(siteDir, "assets")
 	if store != nil {
-		r.Handle("/assets/*", freshAssets(assetHandler(assetsDir, store)))
-	} else if _, err := os.Stat(assetsDir); err == nil {
-		r.Handle("/assets/*", freshAssets(http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir)))))
+		r.Handle("/assets/*", freshAssets(unpublishedMedia(db, assetHandler(assetsDir, store))))
+	} else {
+		r.Handle("/assets/*", freshAssets(unpublishedMedia(db, http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir))))))
 	}
 
 	// Catch-all: template rendering.
@@ -301,6 +309,53 @@ func freshAssets(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// unpublishedMedia keeps an uploaded file private while its post isn't
+// published. Anyone could otherwise share the link to an image nobody has
+// reviewed — a drop box would become free anonymous image hosting. Such a file
+// is served, never cached by a shared cache, only to someone who may review or
+// edit the post, or to the member or visitor who sent it; everyone else gets a
+// 404. Files that aren't uploads (the site's own assets) pass straight through.
+func unpublishedMedia(db *data.DB, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(r.URL.Path, "/assets/")
+		if !strings.HasPrefix(rel, "uploads/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		recordType, postID := db.FileByKey("assets/" + rel)
+		if recordType != "post" || postID == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if rec, err := db.GetRecordByID(postID); err == nil && rec["status"] == "published" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !mayViewUnpublished(r, db, postID) {
+			http.NotFound(w, r)
+			return
+		}
+		// Set after freshAssets' public policy, so this one wins.
+		w.Header().Set("Cache-Control", "private, no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// mayViewUnpublished: a reviewer, an editor, or whoever sent the post — or the
+// open admin on this machine, whose thumbnails load without a session.
+func mayViewUnpublished(r *http.Request, db *data.DB, postID string) bool {
+	if admin.OpenLocally(r) {
+		return true
+	}
+	if u := admin.GetSessionUser(r, db); u != nil {
+		return u.Can(data.CapReviewPosts) || u.Can(data.CapContentEditAny) || db.UserOwnsPost(u.ID, postID)
+	}
+	if v := api.RequestVisitor(r, db); v != nil {
+		return db.UserOwnsPost(v.ID, postID)
+	}
+	return false
 }
 
 // assetHandler serves /assets/*: managed media (assets/uploads/* + galleries/*)
@@ -429,7 +484,9 @@ func watchForChanges(siteDir string, db *data.DB, reloadRoutes func()) {
 					log.Printf("File changed: %s", changed)
 					// A pages/ change may add or remove a route (a new folder, a
 					// new [slug].html): rebuild the table so it serves right away.
-					if reloadRoutes != nil && strings.Contains(filepath.ToSlash(changed), "/pages/") {
+					// Either kind of template may add or drop a drop-box form.
+					if reloadRoutes != nil && (strings.Contains(filepath.ToSlash(changed), "/pages/") ||
+						strings.Contains(filepath.ToSlash(changed), "/layouts/")) {
 						reloadRoutes()
 					}
 					// A content/ change means a markdown edit — recompile into the DB

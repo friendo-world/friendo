@@ -106,6 +106,12 @@ func exportStatic() error {
 	}
 	defer db.Close()
 
+	// Uploads on posts that aren't published (waiting for review, drafts) stay
+	// out of the public copy, as they're private on the live site.
+	for _, key := range db.UnpublishedUploadKeys() {
+		os.Remove(filepath.Join(distDir, filepath.FromSlash(key)))
+	}
+
 	loader := pongo2.MustNewLocalFileSystemLoader(siteDir)
 	tplSet := pongo2.NewSet("friendo", loader)
 	cfg := loadExportConfig(siteDir)

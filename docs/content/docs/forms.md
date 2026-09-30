@@ -84,6 +84,9 @@ tag (or put a field named `status` in the form).
   `author_name` if you'd like them to give a name. With it off, the form tells
   them *Please sign in before posting.* See [Let visitors take part](/docs/visitors).
 
+To take posts from anyone with no name kept, add `drop-box` to the form. That
+makes the collection a [drop box](/docs/visitors#drop-boxes).
+
 While a post waits for review, the form shows **Take it back**, so whoever sent
 it, member or visitor, can withdraw it, along with any images sent with it.
 

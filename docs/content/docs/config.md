@@ -70,6 +70,12 @@ This describes the fields; it doesn't restrict them. A post can still carry any
 other key, from a content file, a `<friendo-form>` or the admin's *Add a field*,
 and the admin shows those after the declared ones.
 
+### Drop boxes
+
+A collection becomes a **drop box**, where anyone can post and no one's name is
+kept, from its form, not from this file: `<friendo-form collection="tips" drop-box>`.
+See [Let visitors take part](/docs/visitors#drop-boxes).
+
 ## `[profiles]`
 
 The fields a member's [profile](/docs/profiles) carries beyond its

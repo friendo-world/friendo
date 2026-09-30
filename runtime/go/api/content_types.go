@@ -118,10 +118,15 @@ func loadContentTypes(siteDir string) ([]ContentType, bool) {
 		ct := ContentType{Name: name}
 		if prim, ok := raw.Content[name]; ok {
 			var section struct {
-				Fields map[string]toml.Primitive `toml:"fields"`
+				Fields  map[string]toml.Primitive `toml:"fields"`
+				DropBox bool                      `toml:"drop_box"`
 			}
 			if err := md.PrimitiveDecode(prim, &section); err != nil {
 				log.Printf("friendo.toml: [content.%s] could not be read: %v", name, err)
+			}
+			if section.DropBox {
+				// A drop box is said on the form, where the posts come from.
+				log.Printf("friendo.toml: [content.%s] drop_box isn't read — put drop-box on the form instead: <friendo-form collection=%q drop-box>", name, name)
 			}
 			for _, fname := range order[name] {
 				fprim, ok := section.Fields[fname]
@@ -204,6 +209,9 @@ type collectionInfo struct {
 	Count    int         `json:"count"`
 	Declared bool        `json:"declared"` // named in friendo.toml's [content] collections
 	Fields   []FieldDecl `json:"fields"`
+	DropBox  bool        `json:"drop_box,omitempty"` // anyone posts, no name kept (dropbox.go)
+	// It was a drop box until its drop-box form went away: new posts keep names.
+	DropBoxClosed bool `json:"drop_box_closed,omitempty"`
 }
 
 // --- The [content] block, written back from the site as it is ---
