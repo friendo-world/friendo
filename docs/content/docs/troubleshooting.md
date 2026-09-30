@@ -199,4 +199,20 @@ variable, or with `<friendo-add-to-calendar subscribe>`:
 Members see members-only events through their private calendar link. See
 [Calendar](/docs/calendar#subscribe-calendarics).
 
+## Proton Calendar won't subscribe
+
+**Cause.** One of these:
+
+- **The site isn't online.** Proton fetches the feed from its own servers, like
+  Google.
+- **It was given the `webcal://` address.** Proton wants the `https://` one.
+- **The feed is over 1 MB.** Proton shows *Calendar too big*.
+- **It hasn't refreshed yet.** Proton checks subscribed feeds every 4 to 16 hours.
+
+**Fix.** Deploy the site, and give Proton the `https://…/calendar.ics` address:
+*Proton Calendar* in `<friendo-add-to-calendar subscribe>` copies the right one.
+If the feed is too big, subscribe to one collection instead
+(`/calendar.ics?collection=events`). See
+[Calendar](/docs/calendar#proton-calendar).
+
 **Next:** [Upgrade friendo](/docs/upgrade) · [Environment variables](/docs/env)

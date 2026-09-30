@@ -8,8 +8,8 @@ description: Add a weekly event, list what's coming up, show a month calendar, t
 
 In this tutorial you build the events side of a site: a repeating **event**, a
 list of what's coming up, a month calendar, RSVPs, and a calendar feed that
-Google Calendar, Apple Calendar and Outlook can subscribe to. You need a site from
-[Your first site](/docs/first-site) running with `friendo serve`. It helps to have
+Google Calendar, Apple Calendar, Outlook and Proton Calendar can subscribe to. You
+need a site from [Your first site](/docs/first-site) running with `friendo serve`. It helps to have
 done [Add sign-in and comments](/docs/add-a-community) first, since RSVPs need a
 signed-in member.
 
@@ -173,11 +173,11 @@ them:
 ```
 
 Reload and press **Subscribe ▾**: *Google Calendar*, *Apple Calendar*,
-*Outlook* and *Copy the feed address*.
+*Outlook*, *Proton Calendar* and *Copy the feed address*.
 
-> **Note:** Google Calendar fetches the feed from its own servers, so subscribing
-> with Google only works once the site is online. Apple Calendar and Outlook can
-> try it now.
+> **Note:** Google Calendar and Proton Calendar fetch the feed from their own
+> servers, so subscribing with them only works once the site is online. Apple
+> Calendar and Outlook can try it now.
 
 ## 8. Check the feed
 

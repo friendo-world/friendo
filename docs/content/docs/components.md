@@ -246,7 +246,10 @@ Parts: `form`, `input`, `group`, `followers`, `send`, `result`. Fires
 
 ## `<friendo-add-to-calendar>`
 
-A menu of calendar apps (Google Calendar, Apple Calendar, Outlook, download).
+A menu of calendar apps (Google Calendar, Apple Calendar, Outlook, Proton Calendar,
+download). Proton has no add-by-link, so its item copies the address or downloads
+the `.ics` and says where it goes in Proton (see
+[Calendar](/docs/calendar#proton-calendar)).
 
 ```html
 <friendo-add-to-calendar post-id="{{ post.id }}"></friendo-add-to-calendar>

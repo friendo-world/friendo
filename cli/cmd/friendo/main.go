@@ -281,7 +281,7 @@ claims the subdomain, and pushes your content.
 	}
 	openAdminCmd.Flags().StringVar(&openAdminNet, "network", "", "Network URL (defaults to friendo.world)")
 
-	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, pushCmd, pullCmd, loginCmd, whoamiCmd, logoutCmd, openAdminCmd, newNetworkCommand(), newDomainCommand())
+	rootCmd.AddCommand(initCmd, serveCmd, exportCmd, buildCmd, deployCmd, pushCmd, pullCmd, loginCmd, whoamiCmd, logoutCmd, openAdminCmd, newNetworkCommand(), newDomainCommand(), newUpgradeCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

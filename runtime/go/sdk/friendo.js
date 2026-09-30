@@ -1216,9 +1216,12 @@
 
   // --- <friendo-add-to-calendar [post-id] [date] | [subscribe] [collection]> --------
   // A small menu of calendar apps. With `post-id`, "add this event": Google
-  // Calendar's pre-filled form, and an .ics file for Apple Calendar, Outlook and
-  // the rest (one date of a repeating event with `date`). With `subscribe`,
-  // the whole feed: Google (add by URL), Apple/Outlook (webcal://), the plain URL.
+  // Calendar's pre-filled form, and an .ics file for Apple Calendar, Outlook,
+  // Proton Calendar and the rest (one date of a repeating event with `date`).
+  // With `subscribe`, the whole feed: Google (add by URL), Apple/Outlook
+  // (webcal://), Proton, the plain URL. Proton Calendar has no link that adds
+  // an event or a calendar, so its items hand over the file or the address and
+  // say where it goes in Proton.
   // Reads /calendar.json — public, and a plain file in a static export. Parts:
   // button, menu, item, copy, status, error.
   class FriendoAddToCalendar extends FriendoElement {
@@ -1261,6 +1264,8 @@
             { text: "Google Calendar", href: "https://calendar.google.com/calendar/r?cid=" + encodeURIComponent(feed) },
             { text: "Apple Calendar", href: feed.replace(/^https?:\/\//, "webcal://") },
             { text: "Outlook", href: feed.replace(/^https?:\/\//, "webcal://") },
+            // Proton wants the https:// address, pasted by hand.
+            { text: "Proton Calendar", proton: feed },
             { text: "Copy the feed address", copy: feed },
           ];
         };
@@ -1292,6 +1297,7 @@
           { text: "Google Calendar", href: google },
           { text: "Apple Calendar", href: ics },
           { text: "Outlook", href: ics },
+          { text: "Proton Calendar", href: ics, download: true, protonFile: true },
           { text: "Download .ics", href: ics, download: true },
         ];
       }
@@ -1302,7 +1308,9 @@
           if (it.heading) return '<li part="heading" class="status"><b>' + esc(it.heading) + "</b> — includes what only you can see</li>";
           if (it.reset) return '<li><button part="reset" type="button" data-reset="1">' + esc(it.text) + "</button></li>";
           if (it.copy) return '<li><button part="copy" type="button" data-copy="' + esc(it.copy) + '">' + esc(it.text) + "</button></li>";
-          return '<li><a part="item" href="' + esc(it.href) + '"' + (it.download ? " download" : ' target="_blank" rel="noopener"') + ">" + esc(it.text) + "</a></li>";
+          if (it.proton) return '<li><button part="item" type="button" data-proton="' + esc(it.proton) + '">' + esc(it.text) + "</button></li>";
+          return '<li><a part="item" href="' + esc(it.href) + '"' + (it.protonFile ? " data-proton-file" : "") +
+            (it.download ? " download" : ' target="_blank" rel="noopener"') + ">" + esc(it.text) + "</a></li>";
         }).join("") +
         '</ul><div part="status" class="status" hidden></div>'
       );
@@ -1323,6 +1331,31 @@
           catch (e) { status.textContent = copy.dataset.copy; }
           status.hidden = false;
         };
+      }
+      // Proton, subscribe: open Proton Calendar (before any await, so it isn't
+      // blocked as a pop-up), copy the address, and say where to paste it.
+      var PROTON = "https://calendar.proton.me/";
+      var closeMenu = function () { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+      var proton = this.shadowRoot.querySelector("[data-proton]");
+      if (proton) {
+        proton.onclick = async function () {
+          window.open(PROTON, "_blank", "noopener");
+          closeMenu();
+          var how = "In Proton Calendar, press + beside My calendars, choose Add calendar from URL, and paste";
+          status.hidden = false;
+          try { await navigator.clipboard.writeText(proton.dataset.proton); status.textContent = "Copied the feed address. " + how + " it."; }
+          catch (e) { status.textContent = how + " this address: " + proton.dataset.proton; }
+        };
+      }
+      // Proton, one event: the link downloads the .ics; say where it goes.
+      var protonFile = this.shadowRoot.querySelector("[data-proton-file]");
+      if (protonFile) {
+        protonFile.addEventListener("click", function () {
+          closeMenu();
+          status.hidden = false;
+          status.innerHTML = 'Saved the .ics. In <a href="' + PROTON + '" target="_blank" rel="noopener">Proton Calendar</a>, ' +
+            "go to Settings → Import/export → Import from ICS and pick the file. On Android, open the file with Proton Calendar.";
+        });
       }
       // The private link is a secret: if it got shared, reset it. Apps
       // subscribed to the old address stop updating until re-added.

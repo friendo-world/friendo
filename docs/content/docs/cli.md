@@ -37,6 +37,16 @@ Write the site as [static files](/docs/static-export).
 |---|---|---|
 | `--mode` | `static` | `static` HTML, or a self-contained `bundle` |
 
+### `friendo upgrade [version]`
+Replace this `friendo` with the latest release, or the version you name
+(`friendo upgrade v0.7.0`). It downloads the build for your computer, checks it
+against the release's checksums, and swaps it in. Run in a site folder, it first copies
+`data/friendo.db` to `data/friendo-before-<version>.db`. See [Upgrade friendo](/docs/upgrade).
+
+| Flag | What |
+|---|---|
+| `--check` | Only say whether a newer release exists |
+
 ## Deploying & syncing
 
 ### `friendo deploy [subdomain]`

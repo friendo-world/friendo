@@ -10,7 +10,8 @@ description: Give a post a when and it has a date, a page, repeats, RSVPs and a 
 An **event is a post with a `when`**. Give any post a time and it becomes an
 event: it shows up in listings sorted by date, it has a page like any other post,
 and it goes out in your site's calendar feed, which anyone can subscribe to from
-Google Calendar, Apple Calendar or Outlook. Repeating events are built in.
+Google Calendar, Apple Calendar, Outlook or Proton Calendar. Repeating events are
+built in.
 
 ## Write an event
 
@@ -113,7 +114,8 @@ On an event's page the event is `event` (and also `post`). `event.when` is:
 
 Every site serves its published events at **`/calendar.ics`**. Paste that URL
 into Google Calendar (*Other calendars → From URL*), Apple Calendar (*File → New
-Calendar Subscription*) or Outlook, and the calendar stays in sync as you add and
+Calendar Subscription*), Outlook or Proton Calendar (*+ beside My calendars → Add
+calendar from URL*), and the calendar stays in sync as you add and
 edit events, repeating ones included: the feed carries the rule and the calendar
 app does the repeating.
 
@@ -131,7 +133,7 @@ page, and its [location](/docs/locations) as the place. Only **published** posts
 go out, and a collection whose page is [members-only](/docs/members-only)
 is left out, since the feed is public. A page of yours at `/calendar.ics` wins.
 
-### Google Calendar, Apple Calendar, Outlook
+### Google Calendar, Apple Calendar, Outlook, Proton Calendar
 
 A link to `/calendar.ics` downloads a file, which Apple Calendar and desktop
 Outlook want but Google Calendar doesn't. Every page has a `calendar` variable
@@ -157,6 +159,25 @@ Two things to know about Google: it fetches the feed from its own servers, so
 subscribing only works once the site is online, and it refreshes subscribed feeds
 slowly, often once or twice a day. Apple Calendar and Outlook let the reader pick.
 
+### Proton Calendar
+
+Proton Calendar has no link that adds an event or a calendar for you, so there's
+no `calendar.proton` variable. The reader brings the address or the file to Proton
+themselves, and the menu walks them through it:
+
+- **Subscribe.** *Proton Calendar* copies the feed address, opens Proton Calendar
+  in a new tab, and says where to paste it: **+** beside *My calendars* → *Add
+  calendar from URL*. In a template without the menu, point readers at
+  `{{ calendar.ics }}`. Proton wants that `https://` address, not `webcal://`.
+- **Add one event.** *Proton Calendar* downloads the event's `.ics` and says where
+  it goes: *Settings → Import/export → Import from ICS* on the web, or open the file
+  with Proton Calendar on Android.
+
+Like Google, Proton fetches the feed from its own servers, so the site has to be
+online, and it refreshes every 4 to 16 hours. It won't subscribe to a feed over
+1 MB. That's roughly a few hundred events with long descriptions, so a big site
+should offer one collection's feed (`?collection=`) instead of the whole site's.
+
 A [static export](/docs/static-export) writes `calendar.ics` and `calendar.json`
 into `dist/`, so a static site is subscribable too.
 
@@ -171,7 +192,8 @@ https://my-site.friendo.world/calendar.ics?token=…
 ```
 
 `<friendo-add-to-calendar subscribe>` shows it to whoever is signed in: a *Your
-calendar* menu with Google Calendar, Apple Calendar, Outlook and a copy button,
+calendar* menu with Google Calendar, Apple Calendar, Outlook, Proton Calendar and
+a copy button,
 beside a *Reset link*. The feed is computed as that member. Add `mine` to the tag
 for just the events they answered *going* or *maybe* to, or were invited to;
 `group="board"` for one group's.

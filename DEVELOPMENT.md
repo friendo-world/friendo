@@ -108,6 +108,7 @@ Media offloads to R2/S3 when `FRIENDO_S3_*` is set (disk by default). See
 | `friendo push --users` | Also push accounts and profiles |
 | `friendo pull --posts` | Pull posts from deployed site |
 | `friendo pull --users` | Pull accounts and profiles |
+| `friendo upgrade [version]` | Replace this binary with the latest release (or the one named); backs up `data/friendo.db` first when run in a site folder. `--check` only reports |
 
 ### `friendo network *` — run or manage a network
 

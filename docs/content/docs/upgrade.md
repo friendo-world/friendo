@@ -7,8 +7,16 @@ weight: 60
 description: Replace the friendo binary with a newer one, and what happens to your site's database when you do.
 ---
 
-To upgrade friendo, back up your data, install the new binary the same way you
-installed the old one, and restart. Your site's database updates itself on start.
+To upgrade friendo, run `friendo upgrade` in your site folder and restart. It backs
+up your database, then replaces the binary; the database updates itself on start.
+
+```bash
+friendo upgrade           # the latest release
+friendo upgrade --check   # just see whether there's a newer one
+```
+
+`friendo upgrade` arrived in v0.7. On an older friendo, or one you installed with
+`go install`, follow the steps below.
 
 ## 1. Check your version
 
