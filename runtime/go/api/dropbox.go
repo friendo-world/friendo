@@ -18,7 +18,7 @@ import (
 //	<friendo-form collection="tips" drop-box>
 //
 // The server reads that from the template files when the site loads (see
-// server/dropboxes.go). It makes the whole collection a drop box, whichever
+// server/template_scan.go). It makes the whole collection a drop box, whichever
 // form a post comes from. It's for a tip line, anonymous feedback, a suggestion box. A post there is
 // made with no author, always waits for review, and leaves nothing that ties it
 // to a person: no visitor account is started and a signed-in member's account

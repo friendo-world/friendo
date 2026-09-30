@@ -1601,6 +1601,8 @@
         "li.mine [part=body]{background:var(--chat-mine,#0b84ff);color:#fff}" +
         ".del{font:inherit;font-size:.9em;cursor:pointer;border:0;background:none;opacity:.7;padding:0}" +
         "form{display:flex;gap:.5em;align-items:flex-end;padding:.6em .75em;border-top:1px solid var(--chat-border,#d9d9de)}" +
+        "[part=name-input]{font:inherit;width:9em;padding:.4em .5em;border:1px solid var(--chat-border,#d9d9de);border-radius:8px}" +
+        ".trap{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}" +
         "textarea{font:inherit;flex:1;box-sizing:border-box;padding:.5em .8em;border:1px solid var(--chat-border,#d9d9de);border-radius:18px;resize:none}" +
         "button[type=submit]{font:inherit;border:0;border-radius:999px;padding:.5em 1.1em;background:var(--chat-mine,#0b84ff);color:#fff;cursor:pointer}" +
         "[part=status]{font-size:.8em;opacity:.65;padding:0 .75em .5em}" +
@@ -1706,13 +1708,26 @@
         : !!user && ["moderator", "editor", "admin", "owner"].includes(user.role);
       var messages = (data && data.messages) || [];
       var self = this;
+      // A visitor's own messages: the server marks them mine; remember their
+      // author id so ones arriving over the stream count as theirs too.
+      messages.forEach(function (m) {
+        if (m.mine && self._myAuthors.indexOf(m.author_id) === -1) self._myAuthors.push(m.author_id);
+      });
 
       var items = messages.length
         ? this.rows(messages)
         : '<li part="empty" class="empty">No messages yet.</li>';
 
-      var composer = user
-        ? '<form part="form"><textarea part="input" required placeholder="Message…" rows="1"></textarea>' +
+      // A visitor may write here when the chat's tag says visitors-can-chat;
+      // they give a name the first time. The trap field is for bots.
+      var visitorMay = !user && data && data.visitors_can_chat;
+      var visitorFields = visitorMay
+        ? '<input part="name-input" name="name" maxlength="60" autocomplete="name" placeholder="Your name"' +
+          (data.visitor_name ? " hidden" : "") + ">" +
+          '<span class="trap" aria-hidden="true"><input name="homepage" tabindex="-1" autocomplete="off"></span>'
+        : "";
+      var composer = user || visitorMay
+        ? '<form part="form">' + visitorFields + '<textarea part="input" required placeholder="Message…" rows="1"></textarea>' +
           '<button part="submit" type="submit">Send</button></form><div part="status"></div>'
         : '<p part="signed-out" class="empty">Sign in to join the conversation.</p>';
 
@@ -1807,15 +1822,40 @@
           var body = input.value.trim();
           if (!body) return;
           status.textContent = "Sending…";
+          var payload = { body: body };
+          var nameInput = this.shadowRoot.querySelector('[part="name-input"]');
+          if (nameInput) {
+            if (!nameInput.hidden) payload.name = nameInput.value.trim();
+            payload.trap = this.shadowRoot.querySelector('[name="homepage"]').value;
+          }
           try {
-            await api(self.base() + "/messages", jsonBody("POST", { body: body }));
+            var res = await api(self.base() + "/messages", jsonBody("POST", payload));
+            // A visitor's first message made them one: it's theirs from here on.
+            if (res && res.message && self._myAuthors.indexOf(res.message.author_id) === -1) {
+              self._myAuthors.push(res.message.author_id);
+              // The stream may have shown it already, before we knew it was ours.
+              var shown = self.shadowRoot.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(res.message.id) : res.message.id) + '"]');
+              if (shown && !shown.classList.contains("mine")) {
+                shown.outerHTML = self.messageLi(Object.assign({}, res.message, { mine: true }));
+                self.wireActions(chatId);
+              }
+            }
+            if (nameInput) nameInput.hidden = true;
+            visitorPromise = null;
             input.value = "";
             status.textContent = "";
             self._followNext = true;
             // The message arrives back over the SSE stream and is appended there;
             // if streaming is unavailable, re-render to show it.
             if (!self._streaming) self.render();
-          } catch (err) { status.textContent = err.message; }
+          } catch (err) {
+            status.textContent = err.message;
+            // The server wants a visitor's name first: show the box again.
+            if (err.body && err.body.needs_name && nameInput) {
+              nameInput.hidden = false;
+              nameInput.focus();
+            }
+          }
         };
         // Enter sends, like a chat; Shift+Enter makes a new line.
         var input = this.shadowRoot.querySelector('[part="input"]');

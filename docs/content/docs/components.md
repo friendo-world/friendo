@@ -129,13 +129,14 @@ A realtime message feed. See [Chats](/docs/chats).
 |---|---|
 | `chat-id` | The chat's id; naming one makes it |
 | `group` | A group's slug: one of its chats, for its members only |
+| `visitors-can-chat` | [Visitors](/docs/visitors) may write here too, giving a name first. Read from your template file; see [Let visitors chat](/docs/chats#let-visitors-chat) |
 
 Custom properties: `--chat-mine`, `--chat-theirs`, `--chat-border`,
 `--chat-background`, `--chat-height`.
 
 Parts: `chat`, `list`, `message` (and `mine` on your own), `author`, `body`,
 `meta`, `sent`, `time`, `delete`, `form`, `input`, `submit`, `status`, `empty`,
-`signed-out`, `locked`.
+`signed-out`, `locked`, and `name-input` (a visitor's name box).
 
 ## `<friendo-map>`
 

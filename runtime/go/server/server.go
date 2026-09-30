@@ -140,7 +140,7 @@ func (s *BuiltSite) Reload() {
 		log.Printf("Rebuilding routes: %v", err)
 	}
 	// Forms marked drop-box may have come or gone with the templates.
-	scanDropBoxes(s.siteDir, s.db)
+	scanTemplates(s.siteDir, s.db)
 }
 
 // HasPage reports whether the site's pages/ folder defines urlPath — either a
@@ -226,7 +226,7 @@ func BuildSite(siteDir string, db *data.DB, openAdmin bool) (*BuiltSite, error) 
 		return nil, fmt.Errorf("building routes: %w", err)
 	}
 	built := &BuiltSite{table: table, pagesDir: pagesDir, siteDir: siteDir, db: db}
-	scanDropBoxes(siteDir, db)
+	scanTemplates(siteDir, db)
 
 	r := chi.NewRouter()
 

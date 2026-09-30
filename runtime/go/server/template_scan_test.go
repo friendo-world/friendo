@@ -19,7 +19,8 @@ func TestDropBoxFromMarkup(t *testing.T) {
 	os.MkdirAll(filepath.Join(pages, "blog"), 0o755)
 	os.MkdirAll(filepath.Join(siteDir, "layouts"), 0o755)
 	tips := filepath.Join(pages, "tips.html")
-	os.WriteFile(tips, []byte(`<friendo-form collection="tips" drop-box><textarea name="body"></textarea></friendo-form>`), 0o644)
+	os.WriteFile(tips, []byte(`<friendo-form collection="tips" drop-box><textarea name="body"></textarea></friendo-form>
+<friendo-chat chat-id="tips-chat" visitors-can-chat></friendo-chat>`), 0o644)
 	os.WriteFile(filepath.Join(siteDir, "layouts", "base.html"), []byte(`<footer><friendo-form collection="feedback" drop-box></friendo-form><friendo-form collection="groups" drop-box></friendo-form></footer>`), 0o644)
 	os.WriteFile(filepath.Join(pages, "blog", "[slug].html"), []byte(`{{ post.body|safe }}`), 0o644)
 
@@ -49,6 +50,9 @@ func TestDropBoxFromMarkup(t *testing.T) {
 		t.Fatalf("rendering the post = %d", get.Code)
 	}
 
+	if got := db.VisitorChatPatterns(); len(got) != 1 || got[0] != "tips-chat" {
+		t.Fatalf("visitor chats = %v", got)
+	}
 	if code := post("tips"); code != http.StatusCreated {
 		t.Fatalf("tips (a page's form) = %d, want 201", code)
 	}
@@ -66,6 +70,9 @@ func TestDropBoxFromMarkup(t *testing.T) {
 	}
 	if got := db.PageDropBoxes(); len(got) != 1 || got[0] != "feedback" {
 		t.Fatalf("page drop boxes = %v (groups can never be one)", got)
+	}
+	if got := db.VisitorChatPatterns(); len(got) != 0 {
+		t.Fatalf("the chat's attribute went with the page's rewrite: %v", got)
 	}
 	if got := db.ClosedDropBoxes(); len(got) != 1 || got[0] != "tips" {
 		t.Fatalf("tips should be remembered as no longer a drop box: %v", got)

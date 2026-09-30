@@ -113,10 +113,14 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 
 		// Chats & messages (community feed): public reads, member-gated posts.
 		r.Get("/chats", featureGate(db, "chats", handleListChats(db)))
-		r.Get("/chats/{id}/messages", featureGate(db, "chats", handleListMessages(db, authFunc)))
+		r.Get("/chats/{id}/messages", featureGate(db, "chats", handleListMessages(db, viewer)))
 		r.Get("/chats/{id}/stream", featureGate(db, "chats", handleChatStream(db))) // SSE: live new messages
-		r.Post("/chats/{id}/messages", featureGate(db, "chats", handlePostMessage(db, authFunc)))
-		r.Delete("/messages/{id}", featureGate(db, "chats", handleDeleteMessage(db, authFunc)))
+		// A visitor may write in a chat whose tag says visitors-can-chat
+		// (visitor_chats.go), and delete their own messages.
+		r.Post("/chats/{id}/messages", featureGate(db, "chats", visitorsMayWhen(db, authFunc, "chat",
+			func(r *http.Request) bool { return chatOpenToVisitors(db, chi.URLParam(r, "id")) },
+			func(a authFn) http.HandlerFunc { return handlePostMessage(db, a) })))
+		r.Delete("/messages/{id}", featureGate(db, "chats", handleDeleteMessage(db, viewer)))
 		// A group's chats: its members' rooms (see group_chats.go).
 		r.Get("/groups/{id}/chats", featureGate(db, "chats", featureGate(db, "groups", handleListGroupChats(db, authFunc))))
 		r.Post("/groups/{id}/chats", featureGate(db, "chats", featureGate(db, "groups", handleCreateGroupChat(db, authFunc))))
@@ -1722,13 +1726,20 @@ func handleListMessages(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			jsonError(w, "chat not found", http.StatusNotFound) // a group's chat lives under its group
 			return
 		}
-		serveMessages(db, w, user, chatID, chatAccessFor(db, user, chat))
+		access := chatAccessFor(db, user, chat)
+		// A site chat whose tag says visitors-can-chat: a visitor may write,
+		// once they give a name.
+		open := chatOpenToVisitors(db, chatID)
+		if (user == nil || user.IsVisitor()) && open {
+			access.canPost = true
+		}
+		serveMessages(db, w, user, chatID, access, open)
 	}
 }
 
 // serveMessages answers a chat's messages with what the viewer may do there
 // (`can_moderate`, so the tag shows delete on the right bubbles).
-func serveMessages(db *data.DB, w http.ResponseWriter, user *data.User, chatID string, access chatAccess) {
+func serveMessages(db *data.DB, w http.ResponseWriter, user *data.User, chatID string, access chatAccess, visitorsCanChat bool) {
 	viewerID := ""
 	if user != nil {
 		viewerID = user.ID
@@ -1738,7 +1749,12 @@ func serveMessages(db *data.DB, w http.ResponseWriter, user *data.User, chatID s
 		jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, map[string]any{"messages": messages, "can_moderate": access.canModerate, "can_post": access.canPost})
+	out := map[string]any{"messages": messages, "can_moderate": access.canModerate, "can_post": access.canPost, "visitors_can_chat": visitorsCanChat}
+	// A visitor writing here: the name they gave, so the box can skip asking.
+	if user.IsVisitor() {
+		out["visitor_name"] = db.VisitorName(user.ID)
+	}
+	jsonResponse(w, out)
 }
 
 // handlePostMessage posts a message to a chat. Member-gated + rate-limited.
@@ -1770,9 +1786,15 @@ func postMessage(db *data.DB, w http.ResponseWriter, r *http.Request, user *data
 		var in struct {
 			Body     string `json:"body"`
 			ParentID string `json:"parent_id"`
+			// A visitor's name, and the hidden field only bots fill.
+			Name string `json:"name"`
+			Trap string `json:"trap"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if !visitorMessageChecks(w, db, user, in.Name, in.Trap) {
 			return
 		}
 		if strings.TrimSpace(in.Body) == "" {

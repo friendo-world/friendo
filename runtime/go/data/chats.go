@@ -278,26 +278,28 @@ func (db *DB) DeleteChat(id string) error {
 
 // messageSelect joins the author profile's display fields, like comments.
 const messageSelect = `SELECT m.id, m.chat_id, m.parent_id, m.author_id, m.body, m.created,
-       a.name, a.avatar
+       a.name, a.avatar, a.role
 FROM messages m LEFT JOIN authors a ON a.id = m.author_id`
 
 func scanMessage(scan func(dest ...any) error) (map[string]any, error) {
 	var id, chatID, parentID, authorID, body, created string
-	var authorName, authorAvatar sql.NullString
-	if err := scan(&id, &chatID, &parentID, &authorID, &body, &created, &authorName, &authorAvatar); err != nil {
+	var authorName, authorAvatar, authorRole sql.NullString
+	if err := scan(&id, &chatID, &parentID, &authorID, &body, &created, &authorName, &authorAvatar, &authorRole); err != nil {
 		return nil, err
 	}
 	return map[string]any{
 		"id": id, "chat_id": chatID, "parent_id": parentID, "author_id": authorID,
 		"body": body, "created": created,
-		"author_name": authorName.String, "author_avatar": authorAvatar.String,
+		// A visitor's name is marked, as everywhere: "Robin (visitor)".
+		"author_name": AuthorDisplayName(authorName.String, authorRole.String), "author_avatar": authorAvatar.String,
+		"visitor": authorRole.String == RoleVisitor,
 	}, nil
 }
 
 // ListMessages returns a chat's messages, oldest first. Each row carries a
 // `mine` flag for the viewer (false for a visitor).
 func (db *DB) ListMessages(chatID, viewerUserID string) ([]map[string]any, error) {
-	q := `SELECT m.id, m.chat_id, m.parent_id, m.author_id, m.body, m.created, a.name, a.avatar,
+	q := `SELECT m.id, m.chat_id, m.parent_id, m.author_id, m.body, m.created, a.name, a.avatar, a.role,
 	             CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
 	      FROM messages m LEFT JOIN authors a ON a.id = m.author_id
 	      WHERE m.site_id = ? AND m.chat_id = ? ORDER BY m.created ASC`
@@ -309,15 +311,16 @@ func (db *DB) ListMessages(chatID, viewerUserID string) ([]map[string]any, error
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, chatID, parentID, authorID, body, created string
-		var authorName, authorAvatar sql.NullString
+		var authorName, authorAvatar, authorRole sql.NullString
 		var mine bool
-		if err := rows.Scan(&id, &chatID, &parentID, &authorID, &body, &created, &authorName, &authorAvatar, &mine); err != nil {
+		if err := rows.Scan(&id, &chatID, &parentID, &authorID, &body, &created, &authorName, &authorAvatar, &authorRole, &mine); err != nil {
 			return nil, err
 		}
 		out = append(out, map[string]any{
 			"id": id, "chat_id": chatID, "parent_id": parentID, "author_id": authorID,
 			"body": body, "created": created, "mine": mine,
-			"author_name": authorName.String, "author_avatar": authorAvatar.String,
+			"author_name":   AuthorDisplayName(authorName.String, authorRole.String),
+			"author_avatar": authorAvatar.String, "visitor": authorRole.String == RoleVisitor,
 		})
 	}
 	return out, rows.Err()

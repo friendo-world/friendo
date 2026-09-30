@@ -113,7 +113,8 @@ service (Cloudflare, a hosting proxy), that service may keep its own request log
 
 ## Keeping it fair
 
-- Following, chat and groups still need a member.
+- Following and groups still need a member. A chat does too, unless its tag
+  says `visitors-can-chat`; see [Let visitors chat](/docs/chats#let-visitors-chat).
 - Everything a visitor writes waits for a moderator. In admin **Review**, tick
   **Only from visitors** to look at just those.
 - A visitor gets one vote per browser, so someone determined can vote twice with

@@ -60,6 +60,30 @@ Only what your own templates render counts, so a visitor can't make chats by
 posting a comment (unless a template renders their text unescaped with `|safe`,
 which it shouldn't).
 
+## Let visitors chat
+
+By default only members write; visitors read along. To let anyone write in a
+chat, add `visitors-can-chat` to its tag:
+
+```html
+<friendo-chat chat-id="general" visitors-can-chat></friendo-chat>
+```
+
+A [visitor](/docs/visitors) gives a name before their first message. Their
+messages show as "Robin (visitor)", so they can't pass for a member, and they go
+live like everyone's. A visitor can delete their own messages, moderators can
+delete any, and if the visitor signs in later their messages become theirs.
+
+- **It's read from your template file, not the page.** friendo looks for
+  `visitors-can-chat` in `pages/` and `layouts/` when the site loads, so nothing
+  someone writes on a page can open a chat. Take the attribute out and the chat
+  is members-only again.
+- **Per-post chats work too.** In `chat-id="event-{{ event.slug }}"`, the
+  `{{ … }}` part stands for any id there, so every event's chat is open. Some of
+  the id has to be written out: `chat-id="{{ event.slug }}"` alone would open every
+  chat on the site, so it's ignored, and the log says why.
+- **Group chats** are always for the group's members.
+
 ## Group chats
 
 A [group](/docs/groups) can have chats of its own, and they're **for its members

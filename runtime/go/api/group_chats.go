@@ -38,7 +38,8 @@ type chatAccess struct {
 func chatAccessFor(db *data.DB, user *data.User, chat map[string]any) chatAccess {
 	groupID, _ := chat["group_id"].(string)
 	if groupID == "" {
-		return chatAccess{canRead: true, canPost: user != nil, canModerate: user != nil && user.Can(data.CapReviewAny)}
+		// A visitor posts only where the chat's tag lets them (visitor_chats.go).
+		return chatAccess{canRead: true, canPost: user != nil && !user.IsVisitor(), canModerate: user != nil && user.Can(data.CapReviewAny)}
 	}
 	if user == nil {
 		return chatAccess{}
@@ -173,7 +174,7 @@ func handleListGroupChatMessages(db *data.DB, authFunc func(*http.Request) *data
 		if !ok {
 			return
 		}
-		serveMessages(db, w, user, data.ChatRowID(chat), access)
+		serveMessages(db, w, user, data.ChatRowID(chat), access, false)
 	}
 }
 

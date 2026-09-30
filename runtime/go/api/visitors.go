@@ -101,6 +101,13 @@ func viewerFunc(db *data.DB, authFunc func(*http.Request) *data.User) func(*http
 // returns the visitor. Members pass straight through, and with the setting
 // off nothing changes — the handler answers 401 as it always has.
 func visitorsMay(db *data.DB, authFunc authFn, action string, h func(authFn) http.HandlerFunc) http.HandlerFunc {
+	return visitorsMayWhen(db, authFunc, action, func(*http.Request) bool { return visitorsCan(db, action) }, h)
+}
+
+// visitorsMayWhen is visitorsMay with the permission decided per request —
+// for a chat, whether its tag says visitors-can-chat (visitor_chats.go).
+// action names the per-address rate-limit bucket.
+func visitorsMayWhen(db *data.DB, authFunc authFn, action string, allowed func(*http.Request) bool, h func(authFn) http.HandlerFunc) http.HandlerFunc {
 	actor := func(r *http.Request) *data.User {
 		if u := authFunc(r); u != nil {
 			return u
@@ -110,7 +117,7 @@ func visitorsMay(db *data.DB, authFunc authFn, action string, h func(authFn) htt
 	}
 	next := h(actor)
 	return func(w http.ResponseWriter, r *http.Request) {
-		if authFunc(r) != nil || !visitorsCan(db, action) {
+		if authFunc(r) != nil || !allowed(r) {
 			next(w, r)
 			return
 		}
