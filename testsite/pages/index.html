@@ -12,7 +12,7 @@ from the browser. The social graph: <a href="/profiles/">people</a> (profiles yo
 <article>
     <h2><a href="/blog/{{ post.slug }}">{{ post.title }}</a></h2>
     <p class="post-meta">
-        {% if post.author %}by <a href="{{ post.author.url }}">{{ post.author.name }}</a>{% endif %}
+        {% if post.author %}by <a href="{{ post.author.url }}">{{ post.author.name }}</a>{% elif post.anonymous %}by Anonymous{% endif %}
         {% if post.group %}<span class="tag">in <a href="/groups/{{ post.group.slug }}">{{ post.group.title }}</a></span>{% endif %}
     </p>
     <friendo-reactions post-id="{{ post.id }}" emojis="👍,❤️"></friendo-reactions>

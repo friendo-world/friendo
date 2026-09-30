@@ -228,6 +228,8 @@ func (db *DB) AttachAuthors(records []map[string]any) {
 			r["author"] = nil
 		}
 	}
+	// A post whose author chose not to show their name shows none here.
+	db.HideAnonymousAuthors(records)
 }
 
 // ProfileUpdate is what a member may change about one of their profiles. nil
@@ -334,7 +336,7 @@ func (db *DB) DeleteProfile(userID, authorID string) error {
 func (db *DB) PostsByAuthor(authorID string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
 		`SELECT id, collection, slug, title, body, author_id, status, published_at, created, updated, data
-		 FROM posts WHERE site_id = ? AND author_id = ? AND status = 'published' ORDER BY created DESC`,
+		 FROM posts WHERE site_id = ? AND author_id = ? AND status = 'published' AND anonymous = 0 ORDER BY created DESC`,
 		db.SiteID, authorID,
 	)
 	if err != nil {
@@ -363,7 +365,7 @@ func (db *DB) CommentsByAuthor(authorID string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
 		`SELECT c.id, c.post_id, c.body, c.created, p.title, p.slug, p.collection
 		 FROM comments c JOIN posts p ON p.id = c.post_id
-		 WHERE c.site_id = ? AND c.author_id = ? AND c.status = 'approved' AND p.status = 'published'
+		 WHERE c.site_id = ? AND c.author_id = ? AND c.status = 'approved' AND p.status = 'published' AND c.anonymous = 0
 		 ORDER BY c.created DESC`,
 		db.SiteID, authorID,
 	)

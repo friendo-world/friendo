@@ -84,6 +84,10 @@ tag (or put a field named `status` in the form).
   `author_name` if you'd like them to give a name. With it off, the form tells
   them *Please sign in before posting.* See [Let visitors take part](/docs/visitors).
 
+To let members post without their name, turn on **Members can be anonymous**
+and add a checkbox: `<label><input type="checkbox" name="anonymous"> Post without my name</label>`.
+Moderators still see who wrote it.
+
 To take posts from anyone with no name kept, add `drop-box` to the form. That
 makes the collection a [drop box](/docs/visitors#drop-boxes).
 

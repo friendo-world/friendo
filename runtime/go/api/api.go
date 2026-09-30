@@ -463,6 +463,8 @@ type recordInput struct {
 	// bots fill (see visitors.go).
 	AuthorName string `json:"author_name"`
 	Trap       string `json:"trap"`
+	// Post as "Anonymous" (members_can_be_anonymous); nil leaves it as it is.
+	Anonymous *bool `json:"anonymous"`
 }
 
 func (in recordInput) status() string {
@@ -520,7 +522,17 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
 			return
 		}
-		if trapped(w, user, in.Trap) || !setVisitorName(w, db, user, in.AuthorName) {
+		wantsAnonymous := in.Anonymous != nil && *in.Anonymous
+		if trapped(w, user, in.Trap) {
+			return
+		}
+		// Asked to leave the name off: a visitor simply isn't named; a member
+		// must be allowed, or nothing is posted — never their name by surprise.
+		if wantsAnonymous && !user.IsVisitor() && !mayPostAnonymously(db, user, collection) {
+			jsonError(w, "this site doesn't let you post here without your name", http.StatusForbidden)
+			return
+		}
+		if !(wantsAnonymous && user.IsVisitor()) && !setVisitorName(w, db, user, in.AuthorName) {
 			return
 		}
 		authorID := db.DefaultAuthorID(user.ID)
@@ -541,12 +553,16 @@ func handleCreateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			db.SetRecordData(id, string(cleaned))
 			autoGeotag(db, id, in.Title, cleaned)
 		}
+		if wantsAnonymous && !user.IsVisitor() {
+			db.SetPostAnonymous(id, true)
+		}
 		// Whoever makes a group is its first admin.
 		if collection == data.GroupsCollection && authorID != "" {
 			db.SetMembership(id, authorID, data.GroupRoleAdmin, data.MembershipMember)
 		}
 		record, _ := db.GetRecordByID(id)
 		attachWhen(db, record)
+		record["anonymous"] = db.PostIsAnonymous(id)
 		w.WriteHeader(http.StatusCreated)
 		jsonResponse(w, map[string]any{"post": record})
 	}
@@ -709,8 +725,15 @@ func handleUpdateRecord(db *data.DB, authFunc func(*http.Request) *data.User) ht
 		if len(in.Data) > 0 && string(in.Data) != "null" {
 			db.SetRecordData(id, string(liftWhen(db, id, in.Data)))
 		}
+		// Only the post's own author says whether their name shows.
+		if in.Anonymous != nil && db.UserOwnsPost(user.ID, id) {
+			if !*in.Anonymous || mayPostAnonymously(db, user, fmt.Sprint(current["collection"])) {
+				db.SetPostAnonymous(id, *in.Anonymous)
+			}
+		}
 		record, _ := db.GetRecordByID(id)
 		attachWhen(db, record)
+		record["anonymous"] = db.PostIsAnonymous(id)
 		jsonResponse(w, map[string]any{"post": record})
 	}
 }
@@ -764,7 +787,7 @@ func handleListComments(db *data.DB, authFunc func(*http.Request) *data.User) ht
 			// that was approved.
 			canModerate = !u.IsVisitor() && (u.Can(data.CapReviewAny) || db.UserOwnsPost(u.ID, postID))
 		}
-		comments, err := db.ListCommentsForViewer(postID, viewerID, canModerate)
+		comments, err := db.ListCommentsForViewer(postID, viewerID, canModerate, seesAnonymousAuthors(authFunc(r)))
 		if err != nil {
 			jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 			return
@@ -788,6 +811,8 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			// A visitor's optional name, and the hidden field only bots fill.
 			Name string `json:"name"`
 			Trap string `json:"trap"`
+			// Show "Anonymous" instead of their name (members_can_be_anonymous).
+			Anonymous bool `json:"anonymous"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
@@ -800,7 +825,13 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 			jsonError(w, "body is required", http.StatusBadRequest)
 			return
 		}
-		if !setVisitorName(w, db, user, in.Name) {
+		// Asked to leave the name off: a visitor simply isn't named; a member
+		// must be allowed, or nothing is posted — never their name by surprise.
+		if in.Anonymous && !user.IsVisitor() && !mayBeAnonymous(db, user) {
+			jsonError(w, "this site doesn't let you comment without your name", http.StatusForbidden)
+			return
+		}
+		if !(in.Anonymous && user.IsVisitor()) && !setVisitorName(w, db, user, in.Name) {
 			return
 		}
 		if !db.RateLimitAllow("comment:"+user.ID, commentRateLimit, commentRateWindow) {
@@ -817,6 +848,9 @@ func handlePostComment(db *data.DB, authFunc func(*http.Request) *data.User) htt
 		if err != nil {
 			jsonError(w, fmt.Sprintf("create error: %v", err), http.StatusInternalServerError)
 			return
+		}
+		if in.Anonymous && mayBeAnonymous(db, user) {
+			db.SetCommentAnonymous(id, true)
 		}
 		if status == "approved" {
 			notifyCommentOnPost(db, id)
@@ -893,6 +927,10 @@ func handleUpdateComment(db *data.DB, authFunc func(*http.Request) *data.User) h
 			notifyCommentOnPost(db, id)
 		}
 		comment, _ := db.GetComment(id)
+		// A post's author reviewing comments on it doesn't get to unmask one.
+		if comment != nil && !seesAnonymousAuthors(authFunc(r)) {
+			data.HideCommentAuthor(comment)
+		}
 		jsonResponse(w, map[string]any{"comment": comment})
 	}
 }
@@ -2009,6 +2047,8 @@ func handleMe(db *data.DB, authFunc func(*http.Request) *data.User) http.Handler
 		me["profile_id"] = authorID
 		// Whether a <friendo-form>'s image picker is for them (see uploads.go).
 		me["can_upload"] = user.Can(data.CapContentCreate) || db.GetBoolSetting(settingMembersCanUpload, false)
+		// Whether they may post or comment as "Anonymous".
+		me["can_be_anonymous"] = mayBeAnonymous(db, user)
 		// Who they follow (author ids), so a page of follow buttons paints its
 		// pressed state without a call per button. Empty while follows is off.
 		me["following"] = []string{}
@@ -3159,6 +3199,9 @@ const (
 	// Password sign-in is allowed too. Off by default: everyone can always
 	// sign in with a code emailed to them.
 	settingPasswordLogin = "password_login"
+	// Members may post and comment as "Anonymous"; moderators and editors
+	// still see who (see data/anonymous.go).
+	settingMembersCanBeAnonymous = "members_can_be_anonymous"
 )
 
 // tomlSettingsConfig mirrors the [settings] block of friendo.toml. Pointer fields
@@ -3177,8 +3220,10 @@ type tomlSettingsConfig struct {
 		// Whether plain members may start groups (default off).
 		MembersCanStartGroups *bool `toml:"members_can_start_groups"`
 		// Members (and visitors) may add images to what they post.
-		MembersCanUpload  *bool `toml:"members_can_upload"`
-		VisitorsCanUpload *bool `toml:"visitors_can_upload"`
+		MembersCanUpload *bool `toml:"members_can_upload"`
+		// Members may post and comment as "Anonymous" (default off).
+		MembersCanBeAnonymous *bool `toml:"members_can_be_anonymous"`
+		VisitorsCanUpload     *bool `toml:"visitors_can_upload"`
 		// What a visitor (not signed in) may do (each default off).
 		VisitorsCanReact *bool `toml:"visitors_can_react"`
 		VisitorsCanVote  *bool `toml:"visitors_can_vote"`
@@ -3235,6 +3280,7 @@ func applyManagedSettings(db *data.DB, siteDir string) map[string]bool {
 		settingVisitorsCanComment:         s.VisitorsCanComment,
 		settingVisitorsCanPost:            s.VisitorsCanPost,
 		settingMembersCanUpload:           s.MembersCanUpload,
+		settingMembersCanBeAnonymous:      s.MembersCanBeAnonymous,
 		settingVisitorsCanUpload:          s.VisitorsCanUpload,
 	} {
 		if v != nil {
@@ -3275,6 +3321,7 @@ var boolSettings = []struct {
 	{settingPasswordLogin, false},
 	{data.SettingMembersCanStartGroups, false},
 	{settingMembersCanUpload, false},
+	{settingMembersCanBeAnonymous, false},
 	{settingVisitorsCanReact, false},
 	{settingVisitorsCanVote, false},
 	{settingVisitorsCanRSVP, false},

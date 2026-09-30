@@ -84,13 +84,14 @@ collection.
 | `post.published_at` | Its published date |
 | `post.created`, `post.updated` | When it was made and last changed |
 | `post.fields.<name>` | One of its [fields](/docs/posts): `{{ post.fields.mood }}` |
-| `post.author_id` | The id of the profile that wrote it |
-| `post.author` | That [profile](#profile): `name`, `slug`, `avatar`, `bio`, `url`, `fields`. Empty if the profile is gone |
+| `post.author_id` | The id of the profile that wrote it. Empty for an anonymous post |
+| `post.author` | That [profile](#profile): `name`, `slug`, `avatar`, `bio`, `url`, `fields`. Empty if the profile is gone, or the post is anonymous |
+| `post.anonymous` | Its author chose not to show their name: `{% if post.anonymous %}by Anonymous{% endif %}` |
 | `post.when` | Its time, if it's an event. See [post.when](#postwhen). Empty otherwise |
 | `post.location` | Its place, if it has one. See [post.location](#postlocation) |
 | `post.group` | The [group](#group) it's filed under (`group: board`), or empty |
 | `post.collection` | The collection's name. Own page only |
-| `post.comments` | Its approved comments, oldest first: `author_name`, `author_avatar`, `body`, `created`. Own page only |
+| `post.comments` | Its approved comments, oldest first: `author_name`, `author_avatar`, `body`, `created`. An anonymous one's `author_name` is "Anonymous". Own page only |
 | `post.reactions` | Reaction tallies: `emoji`, `count`. Own page only |
 | `post.poll` | Its poll, if its front matter declares one: `question`, `options` (each `text`, `votes`), `total_votes`, `closes_at`. Own page only |
 | `post.gallery` | Images from the post's folder, each with a `url`. Own page only |

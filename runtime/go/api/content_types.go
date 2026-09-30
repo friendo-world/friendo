@@ -55,7 +55,7 @@ var fieldKinds = map[string]bool{
 // columnNames are a record's own fields, which a declared field may not shadow.
 var columnNames = map[string]bool{
 	"title": true, "slug": true, "body": true, "status": true, "id": true, "collection": true,
-	"created": true, "updated": true, "published_at": true, "author_id": true,
+	"created": true, "updated": true, "published_at": true, "author_id": true, "anonymous": true,
 }
 
 // fieldTable is the long form of a field declaration.

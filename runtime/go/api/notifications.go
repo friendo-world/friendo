@@ -134,6 +134,10 @@ func notifyCommentOnPost(db *data.DB, commentID string) {
 	}
 	postID, _ := c["post_id"].(string)
 	actor, _ := c["author_id"].(string)
+	// An anonymous comment tells the post's author that someone commented, not who.
+	if c["anonymous"] == true {
+		actor = ""
+	}
 	record, err := db.GetRecordByID(postID)
 	if err != nil {
 		return

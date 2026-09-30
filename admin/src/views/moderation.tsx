@@ -78,6 +78,7 @@ export function CommentsQueue() {
             <li key={c.id} class="bg-white p-4 border border-ink">
               <div class="mb-2 flex items-center gap-2 text-sm text-dim">
                 <span class="font-bold text-ink">{c.author_name || "Anonymous"}</span>
+                {c.anonymous && c.author_name !== "Anonymous" && <span>(shows as Anonymous)</span>}
                 <span>·</span>
                 <span>{c.created?.replace("T", " ").replace("Z", "")}</span>
               </div>

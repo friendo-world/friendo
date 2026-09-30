@@ -101,6 +101,8 @@ export type SettingValues = {
   // Members (and visitors) can add images to what they post.
   members_can_upload: boolean;
   visitors_can_upload: boolean;
+  // Members may post and comment as "Anonymous"; moderators still see who.
+  members_can_be_anonymous: boolean;
   // What a visitor (not signed in) may do; each is off by default.
   visitors_can_react: boolean;
   visitors_can_vote: boolean;
@@ -232,6 +234,8 @@ export type PendingRecord = {
   image?: string;
   // The start of the body, for telling posts apart (and body-only ones at all).
   excerpt?: string;
+  // The author chose "Anonymous": only moderators and editors see the name.
+  anonymous?: boolean;
   status: string;
   created: string;
   when?: When | null;
@@ -297,6 +301,7 @@ export type Comment = {
   author_name: string;
   author_avatar: string;
   visitor?: boolean;
+  anonymous?: boolean;
   body: string;
   status: CommentStatus;
   created: string;

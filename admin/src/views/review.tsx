@@ -76,7 +76,8 @@ export function ReviewQueue() {
                   {r.when && <div class="mb-1 text-sm">📅 {formatWhen(r.when)}</div>}
                   {r.excerpt && <p class="mb-1 text-sm text-dim">{r.excerpt}</p>}
                   <div class="mb-3 text-xs text-dim">
-                    {r.author_id ? `by ${r.author_name || "Anonymous"}` : "no name kept"} ·{" "}
+                    {r.author_id ? `by ${r.author_name || "Anonymous"}` : "no name kept"}
+                    {r.anonymous && " (shows as Anonymous)"} ·{" "}
                     {r.created?.replace("T", " ").replace("Z", "")}
                   </div>
                 </div>

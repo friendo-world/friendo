@@ -280,7 +280,7 @@ func (db *DB) QueryCollectionOwnedBy(collection, userID string) ([]map[string]an
 // first image uploaded with it (image, "" if none) joined.
 func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
-		`SELECT p.id, p.collection, p.slug, p.title, p.author_id, p.status, p.created, a.name, a.role, p.body,
+		`SELECT p.id, p.collection, p.slug, p.title, p.author_id, p.status, p.created, a.name, a.role, p.body, p.anonymous,
 		        COALESCE((SELECT f.r2_key FROM files f
 		                  WHERE f.site_id = p.site_id AND f.record_type = 'post' AND f.record_id = p.id
 		                    AND f.mime LIKE 'image/%' ORDER BY f.created LIMIT 1), '')
@@ -297,7 +297,8 @@ func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
 		var id, collection, slug, title, authorID, st, created string
 		var authorName, authorRole sql.NullString
 		var imageKey, body string
-		if err := rows.Scan(&id, &collection, &slug, &title, &authorID, &st, &created, &authorName, &authorRole, &body, &imageKey); err != nil {
+		var anonymous int
+		if err := rows.Scan(&id, &collection, &slug, &title, &authorID, &st, &created, &authorName, &authorRole, &body, &anonymous, &imageKey); err != nil {
 			return nil, err
 		}
 		// The first image uploaded with the post, so a reviewer sees what came with it.
@@ -310,6 +311,8 @@ func (db *DB) ListRecordsByStatus(status string) ([]map[string]any, error) {
 			"author_id": authorID, "author_name": AuthorDisplayName(authorName.String, authorRole.String),
 			"visitor": authorRole.String == RoleVisitor, "status": st, "created": created,
 			"image": image, "excerpt": excerpt(body, 200),
+			// Anonymous to everyone else; moderators see who, marked so.
+			"anonymous": anonymous == 1,
 		})
 	}
 	return out, rows.Err()
@@ -562,11 +565,13 @@ func (db *DB) DeleteRecord(id string) error {
 func scanComment(scan func(dest ...any) error) (map[string]any, error) {
 	var id, postID, parentID, authorID, body, status, created string
 	var authorName, authorAvatar, authorRole sql.NullString
-	if err := scan(&id, &postID, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar, &authorRole); err != nil {
+	var anonymous int
+	if err := scan(&id, &postID, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar, &authorRole, &anonymous); err != nil {
 		return nil, err
 	}
 	visitor := authorRole.String == RoleVisitor
 	return map[string]any{
+		"anonymous":     anonymous == 1,
 		"id":            id,
 		"post_id":       postID,
 		"parent_id":     parentID,
@@ -581,7 +586,7 @@ func scanComment(scan func(dest ...any) error) (map[string]any, error) {
 }
 
 const commentSelect = `SELECT c.id, c.post_id, c.parent_id, c.author_id, c.body, c.status, c.created,
-       a.name, a.avatar, a.role
+       a.name, a.avatar, a.role, c.anonymous
 FROM comments c LEFT JOIN authors a ON a.id = c.author_id`
 
 // ListCommentsByPost returns a post's comments, oldest first. When
@@ -604,6 +609,7 @@ func (db *DB) ListCommentsByPost(postID string, includeUnapproved bool) ([]map[s
 		if err != nil {
 			return nil, err
 		}
+		HideCommentAuthor(c) // the public page
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -612,10 +618,12 @@ func (db *DB) ListCommentsByPost(postID string, includeUnapproved bool) ([]map[s
 // ListCommentsForViewer returns a post's comments as seen by a given viewer.
 // Everyone sees approved comments; a moderator (canModerate) also sees pending/
 // rejected; an authenticated author also sees their own unapproved comments. Each
-// row carries a `mine` flag (the viewer wrote it) for inline self-delete.
-func (db *DB) ListCommentsForViewer(postID, viewerUserID string, canModerate bool) ([]map[string]any, error) {
+// row carries a `mine` flag (the viewer wrote it) for inline self-delete. An
+// anonymous comment shows its author only to its writer and to seeAuthors (a
+// site moderator or editor) — not to a post's author reviewing their comments.
+func (db *DB) ListCommentsForViewer(postID, viewerUserID string, canModerate, seeAuthors bool) ([]map[string]any, error) {
 	q := `SELECT c.id, c.post_id, c.parent_id, c.author_id, c.body, c.status, c.created,
-	             a.name, a.avatar, a.role, CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
+	             a.name, a.avatar, a.role, c.anonymous, CASE WHEN ? != '' AND a.user_id = ? THEN 1 ELSE 0 END AS mine
 	      FROM comments c LEFT JOIN authors a ON a.id = c.author_id
 	      WHERE c.site_id = ? AND c.post_id = ?`
 	args := []any{viewerUserID, viewerUserID, db.SiteID, postID}
@@ -634,16 +642,21 @@ func (db *DB) ListCommentsForViewer(postID, viewerUserID string, canModerate boo
 	for rows.Next() {
 		var id, pid, parentID, authorID, body, status, created string
 		var authorName, authorAvatar, authorRole sql.NullString
-		var mine int
-		if err := rows.Scan(&id, &pid, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar, &authorRole, &mine); err != nil {
+		var mine, anonymous int
+		if err := rows.Scan(&id, &pid, &parentID, &authorID, &body, &status, &created, &authorName, &authorAvatar, &authorRole, &anonymous, &mine); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{
-			"id": id, "post_id": pid, "parent_id": parentID, "author_id": authorID,
+		c := map[string]any{
+			"anonymous": anonymous == 1,
+			"id":        id, "post_id": pid, "parent_id": parentID, "author_id": authorID,
 			"author_name":   AuthorDisplayName(authorName.String, authorRole.String),
 			"author_avatar": authorAvatar.String, "visitor": authorRole.String == RoleVisitor,
 			"body": body, "status": status, "created": created, "mine": mine == 1,
-		})
+		}
+		if mine != 1 && !seeAuthors {
+			HideCommentAuthor(c)
+		}
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }
@@ -698,6 +711,7 @@ func (db *DB) ListCommentsByStatusForOwner(status, userID string) ([]map[string]
 		if err != nil {
 			return nil, err
 		}
+		HideCommentAuthor(c) // a post's author reviews, but doesn't unmask
 		out = append(out, c)
 	}
 	return out, rows.Err()

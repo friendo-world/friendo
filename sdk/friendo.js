@@ -949,6 +949,10 @@
               var badge = c.status !== "approved"
                 ? '<span part="badge" class="badge">' + esc(c.status) + "</span>"
                 : "";
+              // Shown with its name only to its writer and moderators, and marked.
+              if (c.anonymous && c.author_name !== "Anonymous") {
+                badge += '<span part="badge" class="badge">anonymous</span>';
+              }
               return (
                 '<li part="comment" data-status="' + esc(c.status) + '"><div part="author" class="meta">' +
                 esc(c.author_name || "Anonymous") + badge +
@@ -965,9 +969,14 @@
           esc((vis.visitor && vis.visitor.name) || "") + '">' +
           '<div class="trap" aria-hidden="true"><input name="homepage" tabindex="-1" autocomplete="off"></div>'
         : "";
+      // A member may leave their name off, when the site allows it.
+      var anonymousField = user && user.can_be_anonymous
+        ? '<label part="anonymous" class="meta"><input type="checkbox" name="anonymous"> Post without my name</label>'
+        : "";
       var composer = user || visitorMay
         ? '<form part="form">' + visitorFields +
           '<textarea part="input" required placeholder="Add a comment…" rows="3"></textarea>' +
+          anonymousField +
           '<button part="submit" type="submit">Post comment</button>' +
           '<span part="status" class="meta"></span></form>'
         : '<p part="signed-out" class="empty">Sign in to join the conversation.</p>';
@@ -1002,6 +1011,8 @@
           if (!body) return;
           status.textContent = "Posting…";
           var payload = { body: body };
+          var anon = this.shadowRoot.querySelector('[name="anonymous"]');
+          if (anon && anon.checked) payload.anonymous = true;
           var nameInput = this.shadowRoot.querySelector('[part="name-input"]');
           if (nameInput) {
             payload.name = nameInput.value.trim();
@@ -2444,8 +2455,9 @@
     async submit() {
       if (this._busy) return;
       this._error.textContent = "";
-      // author_name is a visitor's name for their post (optional); it isn't a field.
-      var reserved = { title: 1, body: 1, slug: 1, status: 1, author_name: 1 };
+      // author_name is a visitor's name for their post (optional), and a checkbox
+      // named anonymous leaves a member's name off; neither is a field.
+      var reserved = { title: 1, body: 1, slug: 1, status: 1, author_name: 1, anonymous: 1 };
       var columns = {};
       var data = {};
       var whenParts = {};
@@ -2495,6 +2507,7 @@
         status: columns.status || this.getAttribute("status") || "published",
         fields: data,
         author_name: columns.author_name || "",
+        anonymous: columns.anonymous === true,
         trap: this.querySelector("[data-friendo-trap]").value,
       };
 

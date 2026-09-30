@@ -99,6 +99,11 @@ func handleInviteToEvent(db *data.DB, authFunc func(*http.Request) *data.User) h
 			}
 		}
 
+		// An anonymous event's organizer invites without their name on it.
+		from := organizer
+		if db.PostIsAnonymous(ev.TargetID) {
+			from = ""
+		}
 		invited, skipped := 0, 0
 		for _, id := range want {
 			wrote, err := db.InviteRSVP(ev.ID, key, id)
@@ -111,7 +116,7 @@ func handleInviteToEvent(db *data.DB, authFunc func(*http.Request) *data.User) h
 				continue
 			}
 			invited++
-			db.Notify(id, data.NotifyEventInvite, "post", ev.TargetID, organizer)
+			db.Notify(id, data.NotifyEventInvite, "post", ev.TargetID, from)
 		}
 		out := rsvpPayload(db, user, ev, key)
 		out["invited"], out["skipped"], out["unknown"] = invited, skipped, unknown

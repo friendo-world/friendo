@@ -239,6 +239,15 @@ export function SettingsView() {
               onToggle={() => patch({ members_can_upload: !s.members_can_upload })}
             />
           )}
+          {s && (
+            <Toggle
+              label="Members can be anonymous"
+              hint={managedHint("When on, a member can post or comment as \"Anonymous\". Moderators and editors still see who wrote it.", "members_can_be_anonymous")}
+              on={s.members_can_be_anonymous}
+              disabled={saving || isManaged("members_can_be_anonymous")}
+              onToggle={() => patch({ members_can_be_anonymous: !s.members_can_be_anonymous })}
+            />
+          )}
           {s && s.features.groups && (
             <Toggle
               label="Members can start groups"

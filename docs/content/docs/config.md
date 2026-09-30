@@ -112,6 +112,7 @@ password_login = false             # also allow signing in with a password
 profile_visibility = "members"     # who sees profiles: "members" or "public"
 members_can_start_groups = false   # any member can start a group (and is its admin)
 members_can_upload = false         # members can add images to what they post
+members_can_be_anonymous = false   # members can post and comment as "Anonymous"
 visitors_can_react = false         # someone who hasn't signed in can react
 visitors_can_vote = false          # ... vote in polls
 visitors_can_rsvp = false          # ... answer an event, giving a name
@@ -132,6 +133,7 @@ default_collections = ["blog", "pages"]   # built-in collections shown while [co
 | `password_login` | Also allow signing in with a password. Everyone can always sign in with an emailed code. See [Signing in](/docs/signing-in) | `false` |
 | `profile_visibility` | Who may see [profiles](/docs/profiles): `members` (anyone signed in) or `public` | `members` |
 | `members_can_start_groups` | Any member can start a [group](/docs/groups) and is its admin. Off, contributors and up can | `false` |
+| `members_can_be_anonymous` | A member can post or comment as "Anonymous". Moderators and editors still see who wrote it. See [Anonymous posts and comments](/docs/review#anonymous-posts-and-comments) | `false` |
 | `members_can_upload` | A member posting from a [`<friendo-form>`](/docs/forms) can add images; they wait for review with the post. Contributors and up always can | `false` |
 | `visitors_can_react`, `visitors_can_vote`, `visitors_can_rsvp`, `visitors_can_comment`, `visitors_can_post`, `visitors_can_upload` | Someone who hasn't signed in can react, vote, RSVP, comment, post, or add images to their post (comments and posts always wait for review). Their browser remembers them, and signing in brings what they did along. See [Let visitors take part](/docs/visitors) | `false` |
 | `comments`, `reactions`, `polls`, `rsvp`, `locations`, `chats`, `follows`, `groups` | Feature switches (admin **Settings → Features**). Off, the feature's API refuses it, its `<friendo-*>` tag renders nothing, and `post.comments` (and so on) is empty. What people already wrote is kept | `true` |

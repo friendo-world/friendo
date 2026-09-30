@@ -14,7 +14,7 @@ them (empty for a visitor when profiles are members-only — this demo makes the
 <h2>From people you follow</h2>
 <ul>
 {% for p in collections.blog|by_following:user %}
-  <li><a href="/blog/{{ p.slug }}">{{ p.title }}</a> by <a href="{{ p.author.url }}">{{ p.author.name }}</a></li>
+  <li><a href="/blog/{{ p.slug }}">{{ p.title }}</a> {% if p.author %}by <a href="{{ p.author.url }}">{{ p.author.name }}</a>{% else %}by Anonymous{% endif %}</li>
 {% empty %}
   <li>Follow someone and their posts land here.</li>
 {% endfor %}

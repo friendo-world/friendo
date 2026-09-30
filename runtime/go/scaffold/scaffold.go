@@ -303,7 +303,7 @@ const groupPageHTML = `{% extends "layouts/base.html" %}
   <h2>Posts</h2>
   <ul>
   {% for p in collections.blog|in_group:group.slug %}
-    <li><a href="/blog/{{ p.slug }}">{{ p.title }}</a> by {{ p.author.name }}</li>
+    <li><a href="/blog/{{ p.slug }}">{{ p.title }}</a> by {{ p.author.name|default:"Anonymous" }}</li>
   {% empty %}
     <li>Nothing filed here yet. Add <code>group: {{ group.slug }}</code> to a post's front matter.</li>
   {% endfor %}

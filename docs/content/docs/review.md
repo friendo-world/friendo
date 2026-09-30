@@ -63,6 +63,25 @@ shows waiting comments too, each with **Approve**, **Reject** and **Delete**
 buttons. A member sees their own waiting comment marked as such, and can delete
 anything they wrote.
 
+## Anonymous posts and comments
+
+Turn on **Members can be anonymous** (`members_can_be_anonymous`) and members
+can post or comment as "Anonymous": `<friendo-comments>` shows a *Post without my
+name* checkbox, and a `<friendo-form>` takes one named `anonymous`.
+
+- **Everyone else sees "Anonymous"**, with no profile, no avatar, no link. The
+  post or comment isn't listed on its author's profile page. A template can't
+  find the author either: `post.author` is empty and `by_author` passes it over.
+- **Moderators and editors see who wrote it.** In **Review** the name shows with
+  *(shows as Anonymous)*. The author of the post an anonymous comment is on
+  doesn't see who, even while reviewing it, and the inbox says only that
+  someone commented.
+- **It's still theirs.** The member can edit or delete it, and put their name back
+  on a post.
+
+Where nobody's name should be kept at all, not even for moderators, use a
+[drop box](/docs/visitors#drop-boxes) instead.
+
 ## Who reviews what
 
 | Role | Reviews |

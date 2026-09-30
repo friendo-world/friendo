@@ -81,8 +81,9 @@ and site moderators see waiting comments with approve / reject / delete.
 | `post-id` | The post |
 
 Parts: `list`, `comment`, `author`, `badge`, `body`, `actions`, `approve`, `reject`,
-`delete`, `form`, `input`, `submit`, `status`, `empty`, `signed-out`, and
-`name-input` (the optional name box a [visitor](/docs/visitors) sees).
+`delete`, `form`, `input`, `submit`, `status`, `empty`, `signed-out`,
+`name-input` (the optional name box a [visitor](/docs/visitors) sees), and
+`anonymous` (the *Post without my name* checkbox, when the site allows it).
 
 ## `<friendo-reactions>`
 
@@ -173,7 +174,9 @@ The one tag that stays in your page's DOM, so its parts are styled by attribute:
 | `drop-box` | Make the collection a [drop box](/docs/visitors#drop-boxes): anyone can post, no name is kept. Applies to the whole collection; write `collection` out plainly |
 
 An input named `author_name` is a [visitor's](/docs/visitors) name for their
-post; it's used only when the person posting isn't signed in.
+post; it's used only when the person posting isn't signed in. A checkbox named
+`anonymous` posts it as "Anonymous" where the site allows that
+(`members_can_be_anonymous`); where it doesn't, the post isn't sent.
 
 Parts: `status`, `error`, `withdraw` (the *Take it back* button shown while a
 post waits for review). Fires `friendo:submitted` with `detail.post`, and

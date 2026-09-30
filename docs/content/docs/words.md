@@ -19,6 +19,7 @@ This page is the whole dictionary. If a word isn't here, it isn't a friendo word
 | **layout** | A file in `layouts/` that pages extend. |
 | **collection** | A folder of posts: `blog`, `events`, `groups`, `pages`. The folder under `content/` and the folder under `pages/` share its name. |
 | **post** | One thing in a collection. Every post has a title, a slug, a body and a status; anything else is a field. |
+| **anonymous** | A post or comment whose member chose not to show their name. It says "Anonymous"; moderators and editors still see who. (Nobody's name at all is a **drop box**.) |
 | **drop box** | A collection anyone can post to, where no one's name is kept: `<friendo-form collection="tips" drop-box>`. See [Drop boxes](/docs/visitors#drop-boxes). |
 | **field** | An extra key on a post: from a content file's front matter, a form, or the admin. `{{ post.fields.mood }}`. |
 | **feature** | A switch in Settings → Features: comments, reactions, polls, chats, locations, RSVPs, follows, groups. Off, the feature disappears from the site. |

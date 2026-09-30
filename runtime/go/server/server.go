@@ -685,6 +685,8 @@ func memberVisibility(current func() []route, siteCfg siteConfig, db *data.DB, u
 					rec[k] = v
 				}
 				rec["collection"] = collection
+				// A gate mustn't tell who wrote an anonymous post by letting it through.
+				db.HideAnonymousAuthors([]map[string]any{rec})
 				rec["group"] = nil
 				if slug := data.GroupSlugOf(record); slug != "" {
 					if g, seen := groupOf[slug]; seen {
