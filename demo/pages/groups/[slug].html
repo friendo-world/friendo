@@ -1,0 +1,52 @@
+{% extends "layouts/base.html" %}
+{% block title %}{{ group.title }} — {{ site.name }}{% endblock %}
+{% block content %}
+<article class="box group">
+    <h1>{{ group.title }}</h1>
+    <p class="small">{{ group.member_count }} members &middot; {{ group.settings.visibility }} &middot; join: {{ group.settings.join }}
+        {% if group.moderators %}&middot; run by {% for m in group.moderators %}<a href="{{ m.url }}">{{ m.name }}</a>{% if not forloop.Last %}, {% endif %}{% endfor %}{% endif %}</p>
+    <div class="body">{{ group.body|markdown }}</div>
+</article>
+
+<section class="box">
+    <h2>Membership</h2>
+    <!-- Join / ask / leave, the member list, and the moderators' levers. -->
+    <friendo-group post-id="{{ group.id }}"></friendo-group>
+</section>
+
+<section class="box">
+    <h2>Posts</h2>
+    <ul class="plain">
+    {% for p in collections.blog|in_group:group.slug %}
+        <li><a href="/blog/{{ p.slug }}">{{ p.title }}</a> by {{ p.author.name|default:"Anonymous" }}</li>
+    {% empty %}
+        <li>Nothing filed here yet.</li>
+    {% endfor %}
+    </ul>
+</section>
+
+<section class="box">
+    <h2>Chat</h2>
+    <!-- A group's chats are its members' only. "general" is made the first time
+         this page is served; moderators add more from <friendo-group>. -->
+    <friendo-chat chat-id="general" group="{{ group.slug }}"></friendo-chat>
+    {% for c in group.chats %}{% if c.id != "general" %}
+    <h3>{{ c.name }}</h3>
+    <friendo-chat chat-id="{{ c.id }}" group="{{ group.slug }}"></friendo-chat>
+    {% endif %}{% endfor %}
+</section>
+{% endblock %}
+
+{% block side %}
+<section class="box">
+    <h2>Events</h2>
+    <ul class="plain">
+    {% for e in collections.events|in_group:group.slug|upcoming:5 %}
+        <li><a href="/events/{{ e.slug }}">{{ e.title }}</a><br><span class="small">{{ e.when|when }}</span></li>
+    {% empty %}
+        <li>Nothing coming up.</li>
+    {% endfor %}
+    </ul>
+    <friendo-add-to-calendar subscribe group="{{ group.slug }}" label="Subscribe to this group's calendar"></friendo-add-to-calendar>
+</section>
+{% endblock %}

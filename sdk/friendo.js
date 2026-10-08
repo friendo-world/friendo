@@ -1071,11 +1071,13 @@
         if (choices.indexOf(e) === -1) choices.push(e);
       });
 
+      // Each button is also "odd" or "even", so a stylesheet can treat every
+      // other one differently (::part() can't be followed by :nth-child()).
       var html = choices
-        .map(function (emoji) {
+        .map(function (emoji, i) {
           var r = byEmoji[emoji] || { count: 0, reacted: false };
           return (
-            '<button part="button" data-emoji="' +
+            '<button part="button ' + (i % 2 ? "even" : "odd") + '" data-emoji="' +
             esc(emoji) +
             '" aria-pressed="' +
             (r.reacted ? "true" : "false") +
@@ -1665,10 +1667,29 @@
         "p.empty{margin:0;padding:.6em .75em;border-top:1px solid var(--chat-border,#d9d9de)}"
       );
     }
+    // The live stream is held only while the tab is visible. A browser allows
+    // about six connections to one host, and an open stream takes one for as
+    // long as the tab lives — a few background tabs with a chat on them and the
+    // next page can't load. A hidden tab closes its stream; on coming back it
+    // fetches what was said meanwhile and streams again.
+    connectedCallback() {
+      if (!this._onVisibility) this._onVisibility = this._visibility.bind(this);
+      document.addEventListener("visibilitychange", this._onVisibility);
+      super.connectedCallback();
+    }
     disconnectedCallback() {
       super.disconnectedCallback();
-      if (this._es) { this._es.close(); this._es = null; }
+      document.removeEventListener("visibilitychange", this._onVisibility);
+      this.closeStream();
       if (this._ticker) { clearInterval(this._ticker); this._ticker = null; }
+    }
+    closeStream() {
+      if (this._es) { this._es.close(); this._es = null; }
+      this._streaming = false;
+    }
+    _visibility() {
+      if (document.hidden) this.closeStream();
+      else if (!this._es) this.render();
     }
     // messageLi builds one message row. Times aren't on every bubble: a stamp
     // (stampLi) sits above a batch; tapping a bubble shows its exact time.
@@ -2740,7 +2761,7 @@
         ".nav h2{font-size:1.1em;margin:0;flex:1}" +
         ".nav button{font:inherit;padding:.25em .7em;border:1px solid #ccc;border-radius:6px;background:#fafafa;cursor:pointer}" +
         '.nav button[aria-pressed="true"]{background:#e8f0ff;border-color:#9db8ff}' +
-        ".grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#ddd;border:1px solid #ddd}" +
+        ".grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:#ddd;border:1px solid #ddd}" +
         ".wd{background:#f4f4f6;font-size:.8em;text-align:center;padding:.3em;opacity:.8}" +
         ".day{background:#fff;min-height:5.5em;padding:.3em;font-size:.85em;display:flex;flex-direction:column;gap:.15em}" +
         ".day.outside{background:#fafafa;opacity:.55}" +

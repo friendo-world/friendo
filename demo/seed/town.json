@@ -1,0 +1,100 @@
+{
+  "_comment": "Who lives in Hollowbrook, and what they've done to each other. demo.mjs reads this (and posts/**.md) once, on a fresh database. Every account signs in with the password below, or with the emailed code (echoed in the form in local dev).",
+  "password": "hollowbrook",
+  "people": [
+    {
+      "name": "Dana Whitfield", "email": "dana@hollowbrook.test", "role": "owner",
+      "bio": "I run the site. Librarian by day. If something's broken, it's probably my fault.",
+      "fields": { "pronouns": "she/her", "website": "https://friendo.world", "headline": "your friendly neighbourhood webmaster", "mood": "caffeinated" }
+    },
+    {
+      "name": "Marcus Bell", "email": "marcus@hollowbrook.test", "role": "moderator",
+      "bio": "Moderator. Coaches the under-12s. Will approve your post faster if it has a photo.",
+      "fields": { "pronouns": "he/him", "headline": "keeping it civil since 2003", "mood": "patient" }
+    },
+    {
+      "name": "Priya Raman", "email": "priya@hollowbrook.test", "role": "member",
+      "bio": "Bakes too much. Runs the book club. Currently reading three things at once.",
+      "fields": { "pronouns": "she/her", "headline": "one more chapter", "mood": "cosy", "accent": "#3b5998" }
+    },
+    {
+      "name": "Sam Okafor", "email": "sam@hollowbrook.test", "role": "member",
+      "bio": "skate. music. hollowbrook high class of '07. my page my rules!!!",
+      "fields": { "pronouns": "they/them", "headline": "~*~ live loud ~*~", "mood": "hyper", "background": "hotpink", "accent": "lime", "font": "Comic Sans MS" }
+    },
+    {
+      "name": "Jordan Ellis", "email": "jordan@hollowbrook.test", "role": "member",
+      "bio": "Garage sale hunter. If you're selling a lamp, I've already seen it.",
+      "fields": { "pronouns": "he/him", "headline": "everything must go", "mood": "bargain-hunting", "background": "#000", "accent": "orange", "font": "Impact" }
+    },
+    {
+      "name": "Ruth Kowalski", "email": "ruth@hollowbrook.test", "role": "member",
+      "bio": "Retired. On the town council. I will read your whole post.",
+      "fields": { "pronouns": "she/her", "headline": "ask me about zoning", "mood": "thorough", "accent": "darkgreen", "font": "Times New Roman" }
+    }
+  ],
+  "follows": [
+    ["sam-okafor", "priya-raman"], ["priya-raman", "sam-okafor"],
+    ["jordan-ellis", "priya-raman"], ["ruth-kowalski", "dana-whitfield"],
+    ["dana-whitfield", "ruth-kowalski"], ["marcus-bell", "dana-whitfield"],
+    ["sam-okafor", "jordan-ellis"], ["priya-raman", "dana-whitfield"]
+  ],
+  "groups": {
+    "book-club": { "members": ["priya-raman", "ruth-kowalski", "dana-whitfield"], "moderator": "priya-raman" },
+    "garage-sale-hunters": { "members": ["jordan-ellis", "sam-okafor"], "moderator": "jordan-ellis" },
+    "town-council": { "members": ["ruth-kowalski", "dana-whitfield"], "moderator": "ruth-kowalski" }
+  },
+  "comments": [
+    { "post": "welcome-to-hollowbrook-online", "by": "ruth-kowalski", "body": "Lovely to see the town online. Will the council minutes be posted here?" },
+    { "post": "welcome-to-hollowbrook-online", "by": "sam-okafor", "body": "FIRST!!! lol. nice site dana" },
+    { "post": "october-book-pick", "by": "ruth-kowalski", "body": "I read it in 1998. It holds up." },
+    { "post": "october-book-pick", "by": "dana-whitfield", "body": "We have four copies at the library, two are out." },
+    { "post": "new-deck-at-the-skate-spot", "by": "jordan-ellis", "body": "saw the old one at a yard sale on Elm for $5 lol" },
+    { "post": "saturday-haul", "by": "priya-raman", "body": "That lamp is going to haunt you." },
+    { "post": "schwinn-10-speed", "by": "sam-okafor", "body": "does it have the original seat?" }
+  ],
+  "reactions": [
+    { "post": "welcome-to-hollowbrook-online", "by": "sam-okafor", "emoji": "🎉" },
+    { "post": "welcome-to-hollowbrook-online", "by": "priya-raman", "emoji": "❤️" },
+    { "post": "welcome-to-hollowbrook-online", "by": "marcus-bell", "emoji": "👍" },
+    { "post": "october-book-pick", "by": "dana-whitfield", "emoji": "❤️" },
+    { "post": "new-deck-at-the-skate-spot", "by": "jordan-ellis", "emoji": "🤯" },
+    { "post": "new-deck-at-the-skate-spot", "by": "priya-raman", "emoji": "👍" },
+    { "post": "saturday-haul", "by": "sam-okafor", "emoji": "😂" },
+    { "post": "block-party-photos", "by": "ruth-kowalski", "emoji": "❤️" }
+  ],
+  "votes": [
+    { "post": "chili-cook-off-poll", "by": "sam-okafor", "option": 2 },
+    { "post": "chili-cook-off-poll", "by": "priya-raman", "option": 0 },
+    { "post": "chili-cook-off-poll", "by": "ruth-kowalski", "option": 0 },
+    { "post": "chili-cook-off-poll", "by": "jordan-ellis", "option": 1 }
+  ],
+  "chats": {
+    "town-square": [
+      { "by": "dana-whitfield", "body": "Welcome to the town square! Be nice." },
+      { "by": "sam-okafor", "body": "anyone going to the fall festival??" },
+      { "by": "priya-raman", "body": "Bringing a pie. Possibly two." },
+      { "by": "jordan-ellis", "body": "garage sale on Birch St saturday, 7am, they have TOOLS" }
+    ],
+    "event-fall-festival": [
+      { "by": "marcus-bell", "body": "Band's on at noon. Chili judging at 2." }
+    ]
+  },
+  "groupChats": {
+    "book-club": [
+      { "by": "priya-raman", "body": "Pick for October is up on the blog. Snacks are on me this week." },
+      { "by": "ruth-kowalski", "body": "I'll bring the good chairs." }
+    ],
+    "town-council": [
+      { "by": "ruth-kowalski", "body": "Agenda for the 14th: the depot lot, the pool budget, the sign ordinance (again)." }
+    ]
+  },
+  "rsvps": [
+    { "event": "fall-festival", "by": "sam-okafor", "answer": "going" },
+    { "event": "fall-festival", "by": "priya-raman", "answer": "going" },
+    { "event": "fall-festival", "by": "jordan-ellis", "answer": "maybe" },
+    { "event": "fall-festival", "by": "ruth-kowalski", "answer": "going" },
+    { "event": "book-club", "by": "ruth-kowalski", "answer": "going" },
+    { "event": "book-club", "by": "dana-whitfield", "answer": "maybe" }
+  ]
+}

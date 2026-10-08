@@ -1,0 +1,44 @@
+{% extends "layouts/base.html" %}
+{% block title %}Post an ad — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Post a classified</h1>
+<p>Sign in first (on the right). The field names below match <code>[content.classifieds.fields]</code>
+in friendo.toml, so the admin shows the same form. Members' ads wait for a moderator;
+contributors and up publish right away.</p>
+
+<!-- <friendo-form> is a light-DOM controller: the inputs are yours to write and
+     style; <friendo-input> adds the rich kinds (map pick, photo, markdown). -->
+<friendo-form collection="classifieds" class="box">
+    <label class="field"><span>What is it?</span>
+        <input name="title" placeholder="Schwinn 10-speed, barely used" required></label>
+    <label class="field"><span>Category</span>
+        <select name="category" required>
+            <option>for sale</option><option>wanted</option><option>housing</option>
+            <option>jobs</option><option>free</option><option>lost &amp; found</option>
+        </select></label>
+    <label class="field"><span>Price</span>
+        <input name="price" placeholder="$40, or 'free', or 'make an offer'"></label>
+    <label class="field"><span>Details</span>
+        <friendo-input name="body" type="richtext" placeholder="Condition, size, pickup…"></friendo-input></label>
+    <label class="field"><span>Photo</span>
+        <friendo-input name="photo" type="media" accept="image/*"></friendo-input></label>
+    <label class="field"><span>Where to pick it up</span>
+        <friendo-input name="where" type="location"></friendo-input></label>
+    <label class="field"><span>How to reach you</span>
+        <input name="contact" placeholder="555-0134, or 'message me'"></label>
+    <button type="submit">Post it</button>
+</friendo-form>
+
+<p id="result" class="box result" hidden></p>
+<script>
+    document.querySelector("friendo-form").addEventListener("friendo:submitted", function (e) {
+        var r = e.detail.post, out = document.getElementById("result");
+        out.hidden = false;
+        if (r.status === "published") {
+            out.innerHTML = "Posted! <a href=\"/classifieds/" + encodeURIComponent(r.slug) + "\">See your ad &rarr;</a>";
+        } else {
+            out.textContent = "Thanks — your ad is waiting for a moderator and will show up once it's approved.";
+        }
+    });
+</script>
+{% endblock %}

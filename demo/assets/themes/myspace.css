@@ -1,0 +1,241 @@
+/* MySpace, 2006. Verdana at 10px, the navy header, orange headings, table-ish
+   blue section bars, "a place for friends". The point of this one is the profile
+   page: every member's own background, colour and font come through, the way a
+   pasted-in stylesheet used to. (Hollowbrook offers a few fields instead of raw
+   CSS; see friendo.toml [profiles.fields].) */
+
+:root {
+    --navy: #003399;
+    --navy-dark: #001f6b;
+    --sky: #6699cc;
+    --sky-pale: #b1d0f0;
+    --sky-paler: #e5eefa;
+    --orange: #ff6600;
+    --ink: #000000;
+    --muted: #666666;
+    --line: #999999;
+    --accent: var(--profile-accent, var(--navy));
+    --font: var(--profile-font, Verdana, Arial, sans-serif);
+}
+html { background: #fff; }
+/* Full-height page, footer at the bottom: the body is a column and .columns takes the slack. */
+body {
+    margin: 0; min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column;
+    font: 10px/1.5 var(--font); color: var(--ink);
+    background: var(--profile-background, #fff);
+    background-image: var(--profile-background-image, none);
+    background-attachment: fixed; background-size: cover;
+}
+a { color: var(--accent); text-decoration: underline; }
+h1, h2, h3 { margin: 0 0 .5em; font-family: var(--font); color: var(--orange); }
+h1 { font-size: 15px; } h2 { font-size: 12px; } h3 { font-size: 11px; }
+p { margin: 0 0 .8em; }
+img { max-width: 100%; height: auto; }
+code { font: 10px "Courier New", monospace; background: #eee; padding: 0 2px; }
+.small { font-size: 9px; color: var(--muted); }
+ul.plain, ol.plain { list-style: none; margin: 0; padding: 0; }
+ul.plain li, ol.plain li { margin: 0 0 .3em; }
+button, input, select, textarea { font: 10px var(--font); }
+button, input[type=submit] { background: #fff; color: var(--ink); border: 1px solid #000; padding: 1px 6px; cursor: pointer; }
+input, select, textarea { border: 1px solid #000; padding: 1px 2px; }
+
+/* ---- header: navy bar, orange tagline, then the | separated menu ------------------ */
+.masthead { background: var(--navy) linear-gradient(#2f58b8, var(--navy)); color: #fff; padding: 8px 14px; position: relative; max-width: 800px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.masthead .brand { color: #fff; font: bold 22px/1 Arial, Helvetica, sans-serif; text-decoration: none; letter-spacing: -1px; }
+.masthead .brand-mark { color: #ff9900; }
+.masthead .tagline { margin: 0; color: #fff; font-size: 10px; }
+.masthead .tagline::after { content: " · a place for friends"; color: #ff9900; }
+.masthead .whoami { position: absolute; right: 14px; top: 8px; margin: 0; background: #ff9900; color: #000; padding: 2px 8px; font-size: 10px; }
+.masthead .whoami a { color: #000; font-weight: bold; }
+.masthead .unread { background: #c00; color: #fff; padding: 0 4px; text-decoration: none; margin-left: 4px; }
+
+.menu { max-width: 800px; margin: 0 auto; width: 100%; box-sizing: border-box; background: #fff; border-bottom: 1px solid var(--line); padding: 3px 10px; }
+.menu ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; }
+.menu li + li::before { content: "|"; color: var(--line); margin: 0 6px; }
+.menu a { color: var(--navy); font-weight: bold; text-decoration: none; }
+.menu a:hover, .menu a[aria-current] { color: var(--orange); }
+.menu .menu-admin a { color: var(--orange); }
+.menu .badge { background: #c00; color: #fff; padding: 0 3px; font-size: 9px; }
+
+/* ---- the two-column profile table --------------------------------------------------- */
+.columns { display: grid; grid-template-columns: 300px 1fr; gap: 10px; padding: 10px; max-width: 800px; margin: 0 auto; width: 100%; box-sizing: border-box; background: rgba(255,255,255,.88); flex: 1; align-content: start; }
+.content { order: 2; } .sidebar { order: 1; }
+.box { border: 1px solid var(--sky-pale); background: #fff; margin: 0 0 10px; padding: 6px 8px 4px; }
+.box > h1, .box > h2 {
+    margin: -6px -8px 6px; padding: 2px 8px; background: var(--sky-pale); color: var(--accent);
+    font-size: 11px; font-weight: bold;
+}
+.box > h1 { font-size: 13px; }
+.box > h1 a, .box > h2 a, .box > h1 a:visited, .box > h2 a:visited { color: inherit; text-decoration: none; }
+.box > h1 a:hover, .box > h2 a:hover { text-decoration: underline; }
+.sidebar .box > h2 { background: var(--sky); color: #fff; }
+.welcome { border-color: var(--orange); }
+.welcome > h1 { background: #ffe0c0; color: var(--orange); }
+.footer { max-width: 800px; margin: auto auto 0; width: 100%; box-sizing: border-box; padding: 8px 10px 60px; font-size: 9px; color: var(--muted); text-align: center; background: rgba(255,255,255,.88); }
+.hit-counter { font: bold 14px "Courier New", monospace; background: #000; color: #0f0; display: inline-block; padding: 1px 6px; margin: 0; }
+
+/* ---- posts, lists, people ------------------------------------------------------------ */
+.post-meta { color: var(--muted); font-size: 9px; margin: 0 0 .5em; }
+.mood { color: var(--orange); font-weight: bold; } .tag { color: var(--muted); }
+.post-title { font-weight: bold; }
+.post-list, .event-list, .ad-list { list-style: none; padding: 0; margin: 0; }
+.post-list li, .event-list li, .ad-list li { padding: 3px 0; border-bottom: 1px dotted var(--sky-pale); }
+.post-list .post-meta { display: inline; margin-left: 4px; }
+.post-list friendo-reactions { display: inline-block; vertical-align: middle; margin-left: 6px; }
+.event-list .when { color: var(--orange); font-weight: bold; }
+.cover { display: block; margin: 6px 0; border: 1px solid var(--line); }
+.gallery { display: flex; gap: 4px; flex-wrap: wrap; }
+.gallery img { width: 130px; border: 1px solid var(--line); }
+.body { font-size: 10px; }
+.category { display: inline-block; background: var(--orange); color: #fff; padding: 0 4px; font-size: 9px; }
+.price { color: var(--navy); font-weight: bold; }
+table.ads { width: 100%; border: 1px solid var(--sky-pale); }
+table.ads th { background: var(--sky); color: #fff; text-align: left; padding: 2px 5px; font-size: 10px; }
+table.ads td { padding: 2px 5px; border-bottom: 1px dotted var(--sky-pale); vertical-align: top; }
+.ad-facts th { text-align: left; color: var(--muted); font-weight: normal; padding: 1px 12px 1px 0; }
+
+.people { list-style: none; margin: 0; padding: 0; }
+.person { display: flex; gap: 8px; }
+.person .name { font-weight: bold; font-size: 11px; }
+.person .headline { display: block; color: var(--orange); }
+.person p { margin: 2px 0; }
+.avatar-blank { display: inline-flex; align-items: center; justify-content: center; width: 64px; height: 64px; background: var(--sky-paler); color: var(--navy); font: bold 20px Arial, sans-serif; border: 1px solid var(--line); }
+.people-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
+.people-grid a { font-size: 9px; display: block; text-decoration: none; }
+.people-grid img, .people-grid .avatar-blank { width: 50px; height: 50px; font-size: 16px; display: flex; margin: 0 auto 2px; }
+.people-grid .name { display: block; line-height: 1.2; overflow-wrap: anywhere; }
+
+/* The profile page proper: name in orange, headline in quotes, the facts table,
+   "About me", the blog, and in the left column the friend space. */
+.profile-page {
+    /* The member's colour and font. Redefined here, not on :root: their
+       properties sit on <body>, and a var() fallback resolves where declared. */
+    --accent: var(--profile-accent, var(--navy));
+    --font: var(--profile-font, Verdana, Arial, sans-serif);
+    font-family: var(--font);
+}
+.profile-page .columns { background: transparent; }
+.profile-page .box { background: rgba(255,255,255,.92); }
+.profile-head { display: flex; gap: 12px; }
+.profile-head .avatar { width: 120px; height: 120px; font-size: 36px; flex: none; }
+.profile-head h1 { color: var(--accent); font-size: 18px; margin-bottom: 0; }
+.profile .headline { color: var(--orange); font-weight: bold; margin: 0 0 6px; }
+.profile-facts { background: var(--sky-paler); border: 1px solid var(--sky-pale); }
+.profile-facts th { text-align: left; color: var(--navy); font-weight: bold; padding: 1px 10px 1px 4px; background: var(--sky-pale); }
+.profile-facts td { padding: 1px 6px; }
+.profile-actions { margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.profile .bio { border-top: 1px solid var(--sky-pale); margin-top: 10px; padding-top: 6px; }
+.profile .bio h2 { color: var(--orange); }
+.friends > h2::after { content: " ★"; }
+.groups { list-style: none; margin: 0; padding: 0; }
+
+/* ---- forms --------------------------------------------------------------------- */
+friendo-form { display: grid; gap: 6px; }
+.field > span { display: block; font-weight: bold; color: var(--navy); margin-bottom: 1px; }
+.field input:not([type=checkbox]), .field select { width: 100%; max-width: 380px; box-sizing: border-box; }
+friendo-form button[type=submit] { justify-self: start; background: var(--orange); color: #fff; border-color: #c40; font-weight: bold; }
+friendo-form [part=status] { color: var(--muted); }
+friendo-form [part=error] { color: #c00; }
+.result { background: #ffe0c0; border-color: var(--orange); }
+
+/* ---- the tags ------------------------------------------------------------------ */
+friendo-signin::part(form), friendo-comments::part(form), friendo-chat::part(form) { display: flex; gap: 3px; flex-wrap: wrap; align-items: center; }
+friendo-signin::part(input), friendo-signin::part(email), friendo-signin::part(code),
+friendo-comments::part(input), friendo-chat::part(input), friendo-invite::part(input), friendo-groups::part(input), friendo-group::part(input),
+friendo-comments::part(name-input), friendo-chat::part(name-input), friendo-rsvp::part(name-input), friendo-rsvp::part(reminder-input) {
+    font: 10px var(--font); border: 1px solid #000; padding: 1px 2px; background: #fff;
+}
+friendo-signin::part(button), friendo-signin::part(signout), friendo-signin::part(save), friendo-signin::part(cancel), friendo-signin::part(add), friendo-signin::part(edit-profile), friendo-signin::part(profiles-toggle),
+friendo-comments::part(submit), friendo-chat::part(submit), friendo-rsvp::part(button), friendo-rsvp::part(signin),
+friendo-follow::part(button), friendo-profile::part(edit), friendo-invite::part(send), friendo-groups::part(submit),
+friendo-group::part(join), friendo-group::part(leave), friendo-group::part(approve), friendo-group::part(decline), friendo-group::part(add), friendo-group::part(add-chat),
+friendo-add-to-calendar::part(button), friendo-calendar::part(button), friendo-inbox::part(mark), friendo-inbox::part(mark-all),
+friendo-comments::part(approve), friendo-comments::part(reject), friendo-comments::part(delete), friendo-form::part(withdraw), friendo-input::part(tool) {
+    font: 10px var(--font); background: #fff; color: var(--ink); border: 1px solid #000; padding: 0 6px; cursor: pointer;
+}
+friendo-follow::part(button), friendo-signin::part(button), friendo-rsvp::part(button), friendo-group::part(join) { background: var(--orange); color: #fff; border-color: #c40; font-weight: bold; }
+friendo-follow::part(button)::before { content: "+ "; }
+friendo-rsvp::part(button)[aria-pressed="true"], friendo-reactions::part(button)[aria-pressed="true"], friendo-follow::part(button)[aria-pressed="true"] { background: var(--navy); color: #fff; border-color: var(--navy-dark); }
+friendo-signin::part(status), friendo-comments::part(status), friendo-chat::part(status), friendo-rsvp::part(status), friendo-group::part(status), friendo-groups::part(status), friendo-follow::part(status) { color: var(--muted); font-size: 9px; }
+friendo-signin::part(error), friendo-comments::part(error), friendo-chat::part(error), friendo-calendar::part(error), friendo-add-to-calendar::part(error) { color: #c00; }
+friendo-signin::part(signed-in) { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+friendo-signin::part(name) { font-weight: bold; color: var(--orange); }
+friendo-signin::part(badge), friendo-comments::part(badge) { background: var(--sky); color: #fff; font-size: 9px; padding: 0 3px; }
+friendo-signin::part(profile-editor) { border-top: 1px solid var(--sky-pale); margin-top: 6px; padding-top: 6px; display: grid; gap: 3px; }
+friendo-signin::part(label), friendo-profile::part(label) { font-weight: bold; color: var(--navy); }
+friendo-signin::part(profiles) { list-style: none; margin: 4px 0; padding: 0; }
+
+friendo-comments::part(list) { display: grid; gap: 3px; margin: 0 0 6px; }
+friendo-comments::part(comment) { background: var(--sky-paler); border: 1px solid var(--sky-pale); padding: 3px 5px; }
+friendo-comments::part(author), friendo-chat::part(author) { color: var(--navy); font-weight: bold; }
+friendo-comments::part(empty), friendo-chat::part(empty), friendo-inbox::part(empty), friendo-groups::part(empty), friendo-map::part(empty), friendo-calendar::part(empty) { color: var(--muted); }
+friendo-comments::part(signed-out), friendo-chat::part(signed-out), friendo-rsvp::part(signed-out), friendo-inbox::part(signed-out), friendo-group::part(signed-out), friendo-profile::part(signed-out) { color: var(--muted); font-size: 9px; }
+
+friendo-reactions::part(row) { display: flex; gap: 3px; flex-wrap: wrap; }
+friendo-reactions::part(button) { font: 10px var(--font); background: #fff; border: 1px solid var(--sky-pale); padding: 0 4px; cursor: pointer; color: var(--ink); }
+friendo-reactions::part(count) { color: var(--muted); margin-left: 2px; }
+
+friendo-poll::part(question) { font-weight: bold; color: var(--navy); }
+friendo-poll::part(option) { display: block; margin: 2px 0; }
+friendo-poll::part(bar) { background: var(--orange); height: 8px; }
+friendo-poll::part(total) { color: var(--muted); font-size: 9px; }
+
+friendo-chat { --chat-mine: var(--orange); --chat-theirs: var(--sky-paler); --chat-border: var(--sky-pale); --chat-background: #fff; --chat-height: 220px; }
+friendo-chat.big-chat { --chat-height: 60vh; }
+friendo-chat::part(time), friendo-chat::part(meta) { color: var(--muted); font-size: 9px; }
+
+friendo-map::part(map) { height: 240px; border: 1px solid var(--line); }
+friendo-map.town-map::part(map) { height: 460px; }
+
+friendo-calendar { display: block; margin: 0 0 10px; border: 1px solid var(--sky-pale); background: #fff; }
+friendo-calendar::part(nav) { display: flex; gap: 6px; align-items: center; background: var(--sky); color: #fff; padding: 3px 6px; }
+friendo-calendar::part(title) { font-weight: bold; color: #fff; }
+friendo-calendar::part(grid) { border-collapse: collapse; width: 100%; }
+friendo-calendar::part(weekday) { background: var(--sky-pale); color: var(--navy); font-size: 9px; padding: 2px; }
+friendo-calendar::part(day) { border: 1px solid var(--sky-paler); vertical-align: top; height: 56px; padding: 2px; font-size: 9px; }
+friendo-calendar::part(today) { background: #ffe0c0; }
+friendo-calendar::part(outside) { color: #bbb; }
+friendo-calendar::part(event) { display: block; background: var(--orange); color: #fff; text-decoration: none; padding: 0 2px; margin: 1px 0; font-size: 9px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+friendo-calendar::part(list) { padding: 6px; }
+friendo-calendar::part(heading) { font-weight: bold; color: var(--orange); margin: 6px 0 2px; }
+
+friendo-rsvp::part(question) { font-weight: bold; color: var(--navy); }
+friendo-rsvp::part(row) { display: flex; gap: 3px; flex-wrap: wrap; align-items: center; margin: 4px 0; }
+friendo-rsvp::part(count) { color: var(--muted); }
+friendo-rsvp::part(visitor-form) { display: grid; gap: 3px; margin-top: 4px; }
+friendo-invite { display: block; margin-top: 8px; border-top: 1px solid var(--sky-pale); padding-top: 6px; }
+friendo-invite::part(form) { display: flex; gap: 3px; flex-wrap: wrap; }
+friendo-follow { display: inline-block; }
+friendo-follow::part(count) { color: var(--muted); margin-left: 4px; }
+friendo-add-to-calendar { display: inline-block; position: relative; }
+friendo-add-to-calendar::part(menu) { background: #fff; border: 1px solid #000; padding: 3px 0; }
+friendo-add-to-calendar::part(item) { display: block; padding: 2px 8px; color: var(--navy); }
+friendo-add-to-calendar::part(heading) { padding: 2px 8px; color: var(--muted); font-size: 9px; }
+friendo-inbox::part(list) { list-style: none; margin: 0; padding: 0; }
+friendo-inbox::part(item) { border-bottom: 1px dotted var(--sky-pale); padding: 3px 0; }
+friendo-inbox::part(unread) { background: #ffe0c0; }
+friendo-inbox::part(time) { color: var(--muted); font-size: 9px; }
+friendo-group::part(row), friendo-groups::part(item) { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 2px 0; }
+friendo-group::part(members), friendo-group::part(requests), friendo-group::part(chats) { list-style: none; margin: 4px 0; padding: 0; }
+friendo-group::part(member), friendo-group::part(request), friendo-group::part(chat-row) { display: flex; gap: 6px; align-items: center; padding: 2px 0; border-bottom: 1px dotted var(--sky-pale); }
+friendo-group::part(role) { color: var(--orange); font-size: 9px; }
+friendo-group::part(settings) { border-top: 1px solid var(--sky-pale); margin-top: 6px; padding-top: 6px; }
+friendo-groups::part(list) { list-style: none; margin: 0 0 6px; padding: 0; }
+friendo-groups::part(create) { display: flex; gap: 3px; flex-wrap: wrap; border-top: 1px solid var(--sky-pale); padding-top: 6px; }
+friendo-profile::part(editor) { display: grid; gap: 3px; margin-top: 6px; }
+friendo-input::part(editor) { border: 1px solid #000; background: #fff; min-height: 90px; font: 10px var(--font); padding: 3px; }
+friendo-input::part(toolbar) { display: flex; gap: 2px; margin-bottom: 2px; }
+friendo-input::part(map) { height: 220px; border: 1px solid var(--line); }
+friendo-input::part(chips) { display: flex; gap: 3px; flex-wrap: wrap; }
+friendo-input::part(chip) { background: var(--sky-paler); border: 1px solid var(--sky-pale); padding: 0 4px; font-size: 9px; }
+friendo-input::part(preview) { max-width: 200px; border: 1px solid var(--line); }
+friendo-input::part(note) { color: var(--muted); font-size: 9px; }
+friendo-input::part(when) { display: grid; gap: 3px; }
+friendo-input::part(select), friendo-input::part(input) { font: 10px var(--font); border: 1px solid #000; padding: 1px 2px; }
+
+@media (max-width: 700px) {
+    .columns { grid-template-columns: 1fr; padding: 8px; }
+    .content { order: 1; } .sidebar { order: 2; }
+    .masthead .whoami { position: static; display: inline-block; margin-top: 4px; }
+    .people-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}

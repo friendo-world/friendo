@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{{ site.name }}{% endblock %}</title>
+
+    <!-- The friendo community SDK, served by the runtime at /friendo.js. It defines
+         every <friendo-*> tag used on this site. -->
+    <script src="/friendo.js" defer></script>
+
+    <!-- THE LOOK. One stylesheet, picked by the switcher in the corner of every
+         page and remembered in this browser. Each file under assets/themes/ is a
+         complete skin: the page chrome and the ::part() rules for every tag.
+           none      — no stylesheet at all: browser defaults + what friendo ships
+           board     — Hollowbrook's own look, a community board circa 2003 (default)
+           facebook  — thefacebook, 2005
+           myspace   — MySpace, 2006
+         A profile page keeps the visitor's pick too; what its owner decorates
+         (background, colours, font) rides on top, see pages/profiles/[slug].html. -->
+    <link id="theme" rel="stylesheet" href="/assets/themes/board.css">
+    <script>
+        (function () {
+            var THEMES = ["none", "board", "facebook", "myspace"];
+            var link = document.getElementById("theme");
+            var saved = null;
+            try { saved = localStorage.getItem("hollowbrook-theme"); } catch (e) {}
+            var theme = THEMES.indexOf(saved) >= 0 ? saved : "board";
+            // This runs before <body> exists, so swapping now never flashes.
+            if (theme === "none") link.disabled = true;
+            else link.href = "/assets/themes/" + theme + ".css";
+            document.documentElement.setAttribute("data-theme", theme);
+            window.hollowbrookTheme = { current: theme };
+        })();
+    </script>
+</head>
+<body class="{% block bodyclass %}page{% endblock %}"{% block bodyattrs %}{% endblock %}>
+
+<header class="masthead">
+    <a class="brand" href="/"><span class="brand-mark">✿</span> {{ site.name }}</a>
+    <p class="tagline">Hollowbrook's own corner of the web &mdash; est. 2003</p>
+    <p class="whoami">
+        {% if user %}Hi, <a href="/profiles/">{{ user.name }}</a>!
+            {% if user.unread %}<a class="unread" href="/inbox">{{ user.unread }} new</a>{% endif %}
+        {% else %}You're browsing as a guest. <a href="#signin">Sign in</a>{% endif %}
+    </p>
+</header>
+
+<nav class="menu" aria-label="Site">
+    <ul>
+        <li><a href="/"{% if request.path == "/" %} aria-current="page"{% endif %}>Home</a></li>
+        <li><a href="/blog/">Blogs</a></li>
+        <li><a href="/classifieds/">Classifieds</a></li>
+        <li><a href="/profiles/">People</a></li>
+        <li><a href="/groups/">Groups</a></li>
+        <li><a href="/events/">Events</a></li>
+        <li><a href="/calendar">Calendar</a></li>
+        <li><a href="/map">Map</a></li>
+        <li><a href="/chat">Chat</a></li>
+        {% if user %}<li><a href="/inbox">Inbox{% if user.unread %} <span class="badge">{{ user.unread }}</span>{% endif %}</a></li>{% endif %}
+        <li><a href="/write">Write</a></li>
+        <li class="menu-admin"><a href="/_/">Admin</a></li>
+    </ul>
+</nav>
+
+<div class="columns">
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <aside class="sidebar">
+        <section class="box signin" id="signin">
+            <h2>{% if user %}Your account{% else %}Sign in{% endif %}</h2>
+            <!-- One sign-in box on every page. Reloads on sign-in so the pages that
+                 render {{ user }} catch up. In local dev the emailed code is shown
+                 right in the form. -->
+            <friendo-signin reload></friendo-signin>
+        </section>
+        {% block side %}{% endblock %}
+        <section class="box">
+            <h2>Around town</h2>
+            <ul class="plain">
+                <li><a href="/classifieds/">{{ collections.classifieds|length }} classifieds</a></li>
+                <li><a href="/profiles/">{{ collections.profiles|length }} people</a></li>
+                <li><a href="/groups/">{{ collections.groups|length }} groups</a></li>
+                <li><a href="/events/">{{ collections.events|upcoming:5|length }} events coming up</a></li>
+            </ul>
+        </section>
+        <section class="box counter">
+            <h2>Visitors</h2>
+            <p class="hit-counter" aria-label="hit counter">000{{ collections.blog|length }}{{ collections.classifieds|length }}{{ collections.profiles|length }}</p>
+            <p class="small">since 2003</p>
+        </section>
+    </aside>
+</div>
+
+<footer class="footer">
+    <p>{{ site.name }} is a <a href="https://friendo.world">friendo</a> demo site. Everything here is made up.
+       Best viewed at 800&times;600.</p>
+</footer>
+
+<!-- THE SWITCHER. Deliberately styled inline and only enough to sit in the corner,
+     so it stays usable when the page has no stylesheet. -->
+<form class="theme-switcher" style="position:fixed;right:12px;bottom:12px;z-index:9999;margin:0;background:#fff;border:1px solid #888;padding:4px 6px">
+    <label style="font:12px/1 Verdana,sans-serif">Look:
+        <select id="theme-switcher" aria-label="Site look">
+            <option value="none">Unstyled</option>
+            <option value="board">Hollowbrook (2003)</option>
+            <option value="facebook">thefacebook (2005)</option>
+            <option value="myspace">MySpace (2006)</option>
+        </select>
+    </label>
+</form>
+<script>
+    (function () {
+        var sel = document.getElementById("theme-switcher");
+        var link = document.getElementById("theme");
+        sel.value = window.hollowbrookTheme.current;
+        sel.addEventListener("change", function () {
+            var theme = sel.value;
+            try { localStorage.setItem("hollowbrook-theme", theme); } catch (e) {}
+            if (theme === "none") { link.disabled = true; }
+            else { link.disabled = false; link.href = "/assets/themes/" + theme + ".css"; }
+            document.documentElement.setAttribute("data-theme", theme);
+        });
+    })();
+</script>
+</body>
+</html>

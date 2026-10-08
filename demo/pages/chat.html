@@ -1,0 +1,10 @@
+{% extends "layouts/base.html" %}
+{% block title %}Chat — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Town square chat</h1>
+<p>Naming a chat is making it: this page says <code>chat-id="town-square"</code>, the same
+room as the box on the home page. Sign in to post; messages stream in live.</p>
+<section class="box">
+    <friendo-chat chat-id="town-square" class="big-chat"></friendo-chat>
+</section>
+{% endblock %}

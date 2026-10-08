@@ -1,0 +1,77 @@
+{% extends "layouts/base.html" %}
+{% block title %}{{ profile.name }} — {{ site.name }}{% endblock %}
+{% block bodyclass %}page profile-page{% endblock %}
+{% comment %}PER-PROFILE THEMING. The member's choices (profile.fields, set through the
+   profile editor) become custom properties on <body>; every theme's stylesheet
+   reads them on .profile-page, in whatever look the visitor picked. A colour or
+   an image address both work for the background: anything with a slash is
+   treated as an address.{% endcomment %}
+{% block bodyattrs %} style="{% if profile.fields.background %}{% if "/" in profile.fields.background %}--profile-background-image:url('{{ profile.fields.background }}');{% else %}--profile-background:{{ profile.fields.background }};{% endif %}{% endif %}{% if profile.fields.accent %}--profile-accent:{{ profile.fields.accent }};{% endif %}{% if profile.fields.font and profile.fields.font != "default" %}--profile-font:'{{ profile.fields.font }}';{% endif %}"{% endblock %}
+{% block content %}
+<article class="box profile">
+    <div class="profile-head">
+        {% if profile.avatar %}<img class="avatar" src="{{ profile.avatar }}" alt="" width="120" height="120">{% else %}<span class="avatar avatar-blank">{{ profile.name|slice:":1" }}</span>{% endif %}
+        <div>
+            <h1>{{ profile.name }}</h1>
+            {% if profile.fields.headline %}<p class="headline">&ldquo;{{ profile.fields.headline }}&rdquo;</p>{% endif %}
+            <table class="profile-facts">
+                {% if profile.fields.pronouns %}<tr><th>Pronouns</th><td>{{ profile.fields.pronouns }}</td></tr>{% endif %}
+                {% if profile.fields.mood %}<tr><th>Mood</th><td>{{ profile.fields.mood }}</td></tr>{% endif %}
+                {% if profile.fields.website %}<tr><th>Web</th><td><a href="{{ profile.fields.website }}">{{ profile.fields.website }}</a></td></tr>{% endif %}
+                <tr><th>Friends</th><td>{{ profile.follower_count }} followers &middot; {{ profile.following_count }} following</td></tr>
+            </table>
+            <p class="profile-actions">
+                <friendo-follow profile-id="{{ profile.id }}"></friendo-follow>
+                <!-- Shows an "Edit profile" button only on your own page. The editor is
+                     where the background, accent and font fields are set. -->
+                <friendo-profile slug="{{ profile.slug }}" edit-only></friendo-profile>
+            </p>
+        </div>
+    </div>
+    {% if profile.bio %}<div class="bio"><h2>About me</h2><p>{{ profile.bio }}</p></div>{% endif %}
+</article>
+
+<section class="box blog">
+    <h2>{{ profile.name }}'s blog</h2>
+    {% for p in collections.blog|by_author:profile.slug %}
+    <article class="post-summary">
+        <h3><a href="/blog/{{ p.slug }}">{{ p.title }}</a></h3>
+        <p class="post-meta">{{ p.published_at|date:"January 2, 2006" }}{% if p.fields.mood %} &middot; feeling {{ p.fields.mood }}{% endif %}</p>
+    </article>
+    {% empty %}
+    <p>No posts yet.</p>
+    {% endfor %}
+</section>
+
+<section class="box">
+    <h2>Classifieds by {{ profile.name }}</h2>
+    <ul class="plain">
+    {% for ad in collections.classifieds|by_author:profile.slug %}
+        <li><a href="/classifieds/{{ ad.slug }}">{{ ad.title }}</a>{% if ad.fields.price %} &mdash; {{ ad.fields.price }}{% endif %}</li>
+    {% empty %}
+        <li>Nothing for sale.</li>
+    {% endfor %}
+    </ul>
+</section>
+{% endblock %}
+
+{% block side %}
+<section class="box friends">
+    <h2>{{ profile.name }}'s friends</h2>
+    {% if profile.followers %}
+    <ul class="people-grid">
+    {% for f in profile.followers %}<li><a href="{{ f.url }}">{% if f.avatar %}<img src="{{ f.avatar }}" alt="" width="40" height="40">{% else %}<span class="avatar-blank">{{ f.name|slice:":1" }}</span>{% endif %} <span class="name">{{ f.name }}</span></a></li>{% endfor %}
+    </ul>
+    {% else %}<p class="small">No followers yet.</p>{% endif %}
+    {% if profile.following %}
+    <h3>Following</h3>
+    <p class="small">{% for f in profile.following %}<a href="{{ f.url }}">{{ f.name }}</a>{% if not forloop.Last %}, {% endif %}{% endfor %}</p>
+    {% endif %}
+</section>
+<section class="box">
+    <h2>Recent comments</h2>
+    <ul class="plain">
+    {% for c in profile.comments %}{% if forloop.Counter <= 5 %}<li class="small">&ldquo;{{ c.body }}&rdquo;</li>{% endif %}{% empty %}<li class="small">Nothing yet.</li>{% endfor %}
+    </ul>
+</section>
+{% endblock %}

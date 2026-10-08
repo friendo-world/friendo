@@ -1,0 +1,24 @@
+{% extends "layouts/base.html" %}
+{% block title %}Classifieds — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Classifieds</h1>
+<p>Buy, sell, swap, find. A classified is a post in the <code>classifieds</code> collection with a
+category, a price and a way to reach the seller (declared in friendo.toml).
+<a href="/sell">Post an ad &rarr;</a></p>
+
+<table class="ads">
+    <thead><tr><th>Category</th><th>Item</th><th>Price</th><th>Posted</th></tr></thead>
+    <tbody>
+    {% for ad in collections.classifieds|sort_by:"-published_at" %}
+    <tr>
+        <td><span class="category">{{ ad.fields.category|default:"misc" }}</span></td>
+        <td><a href="/classifieds/{{ ad.slug }}">{{ ad.title }}</a>{% if ad.fields.photo %} <span class="has-photo" title="has a photo">📷</span>{% endif %}</td>
+        <td class="price">{{ ad.fields.price|default:"—" }}</td>
+        <td class="small">{{ ad.published_at|date:"Jan 2" }}{% if ad.author %} by <a href="{{ ad.author.url }}">{{ ad.author.name }}</a>{% endif %}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="4">Nothing listed. <a href="/sell">Be the first.</a></td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

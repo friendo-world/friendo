@@ -1,0 +1,26 @@
+{% extends "layouts/base.html" %}
+{% block title %}{{ post.title }} — Classifieds — {{ site.name }}{% endblock %}
+{% block content %}
+<article class="box ad">
+    <p class="small"><a href="/classifieds/">&larr; All classifieds</a></p>
+    <h1>{{ post.title }}</h1>
+    <table class="ad-facts">
+        <tr><th>Category</th><td>{{ post.fields.category|default:"misc" }}</td></tr>
+        <tr><th>Price</th><td class="price">{{ post.fields.price|default:"—" }}</td></tr>
+        <tr><th>Contact</th><td>{{ post.fields.contact|default:"message the seller" }}</td></tr>
+        <tr><th>Posted</th><td>{{ post.published_at|date:"January 2, 2006" }}{% if post.author %} by <a href="{{ post.author.url }}">{{ post.author.name }}</a>{% elif post.anonymous %} anonymously{% endif %}</td></tr>
+    </table>
+    {% if post.fields.photo %}<img class="cover" src="{{ post.fields.photo }}" alt="">{% endif %}
+    <div class="body">{{ post.body|markdown }}</div>
+</article>
+
+<section class="box">
+    <h2>Questions? Ask here</h2>
+    <friendo-comments post-id="{{ post.id }}"></friendo-comments>
+</section>
+
+<section class="box">
+    <h2>Where it is</h2>
+    <friendo-map post-id="{{ post.id }}"></friendo-map>
+</section>
+{% endblock %}

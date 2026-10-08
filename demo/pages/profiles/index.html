@@ -1,0 +1,36 @@
+{% extends "layouts/base.html" %}
+{% block title %}People — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>People</h1>
+<p>Everyone on {{ site.name }}. Each profile is also that person's blog, and each one
+looks however its owner decided (try a few).</p>
+
+<ul class="people">
+{% for p in collections.profiles %}
+    <li class="box person">
+        <a href="{{ p.url }}" class="avatar-link">{% if p.avatar %}<img src="{{ p.avatar }}" alt="" width="64" height="64">{% else %}<span class="avatar-blank">{{ p.name|slice:":1" }}</span>{% endif %}</a>
+        <div>
+            <a class="name" href="{{ p.url }}">{{ p.name }}</a>
+            {% if p.fields.headline %}<span class="headline">&ldquo;{{ p.fields.headline }}&rdquo;</span>{% endif %}
+            {% if p.bio %}<p class="small">{{ p.bio }}</p>{% endif %}
+            {% if p.fields.mood %}<p class="small mood">Mood: {{ p.fields.mood }}</p>{% endif %}
+        </div>
+    </li>
+{% empty %}
+    <li>Nobody yet. Sign in to make the first profile.</li>
+{% endfor %}
+</ul>
+
+{% if user %}
+<section class="box">
+    <h2>From people you follow</h2>
+    <ul class="plain">
+    {% for p in collections.blog|by_following:user %}
+        <li><a href="/blog/{{ p.slug }}">{{ p.title }}</a> {% if p.author %}by <a href="{{ p.author.url }}">{{ p.author.name }}</a>{% endif %}</li>
+    {% empty %}
+        <li>Follow someone and their posts land here.</li>
+    {% endfor %}
+    </ul>
+</section>
+{% endif %}
+{% endblock %}

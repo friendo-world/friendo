@@ -184,10 +184,10 @@ self-hoster can run their own network the same way; there's no separate platform
 codebase.
 
 ```
-testsite.friendo.world
+mytown.friendo.world
   → one friendo binary (friendo network serve)
-    → dispatcher reads the Host header, resolves "testsite"
-  → BuildSiteHandler(testsite)   — serves the site from its folder + SQLite DB
+    → dispatcher reads the Host header, resolves "mytown"
+  → BuildSiteHandler(mytown)   — serves the site from its folder + SQLite DB
 ```
 
 | Component | Role |

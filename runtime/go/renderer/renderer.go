@@ -34,7 +34,9 @@ func init() {
 // RegisterFilters registers all custom Pongo2 filters.
 func RegisterFilters() {
 	pongo2.RegisterFilter("asset_url", filterAssetURL)
-	pongo2.RegisterFilter("date", filterDate)
+	// pongo2 ships a `date` of its own that only takes a time.Time; ours takes the
+	// strings records carry (published_at, created), so it must replace, not register.
+	pongo2.ReplaceFilter("date", filterDate)
 	pongo2.RegisterFilter("resize", filterResize)
 	pongo2.RegisterFilter("markdown", filterMarkdown)
 	pongo2.RegisterFilter("sort_by", filterSortBy)

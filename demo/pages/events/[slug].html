@@ -1,0 +1,37 @@
+{% extends "layouts/base.html" %}
+{% block title %}{{ event.title }} — {{ site.name }}{% endblock %}
+{% block content %}
+<article class="box event">
+    <h1>{{ event.title }}</h1>
+    <p class="post-meta when">{{ event.when|when }}{% if event.when.repeats %} &middot; {{ event.when.repeats }}{% endif %}
+        {% if event.group %}&middot; <a href="/groups/{{ event.group.slug }}">{{ event.group.title }}</a>{% endif %}</p>
+    {% if event.when.repeats and event.when.next %}<p>Next: {{ event.when.next|when }}</p>{% endif %}
+    {% if event.fields.photo %}<img class="cover" src="{{ event.fields.photo }}" alt="">{% endif %}
+    <div class="body">{{ event.body|markdown }}</div>
+    <p>
+        <friendo-add-to-calendar post-id="{{ event.id }}"></friendo-add-to-calendar>
+        <a href="{{ event|google_calendar_url }}" target="_blank" rel="noopener">Add to Google Calendar</a>
+    </p>
+</article>
+
+<section class="box">
+    <h2>Are you going?</h2>
+    <p class="small">So far: {{ event.rsvps.going }} going &middot; {{ event.rsvps.maybe }} maybe &middot; {{ event.rsvps.not_going }} can't &middot; {{ event.rsvps.invited }} invited</p>
+    <!-- Members answer for the next date; with visitors_can_rsvp on, someone
+         signed out can too (anonymously, with optional name + reminder email).
+         `names` shows who answered to the organizer and moderators. -->
+    <friendo-rsvp post-id="{{ event.id }}" names></friendo-rsvp>
+    <!-- The organizer's side: invite by address, group, or followers. -->
+    <friendo-invite post-id="{{ event.id }}"></friendo-invite>
+</section>
+
+<section class="box">
+    <h2>Where</h2>
+    <friendo-map post-id="{{ event.id }}"></friendo-map>
+</section>
+
+<section class="box">
+    <h2>Chatter</h2>
+    <friendo-chat chat-id="event-{{ event.slug }}"></friendo-chat>
+</section>
+{% endblock %}

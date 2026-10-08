@@ -31,7 +31,7 @@ friendo/
 │       ├── renderer/     # Pongo2 filters
 │       ├── export/       # Static HTML export
 │       └── scaffold/     # `friendo init` templates
-├── testsite/             # Example site for local development
+├── demo/                 # Hollowbrook Online — the demo site, with seed data and four looks (see demo/README.md)
 ├── tests/                # Go regression suite (REST scenarios, template render, SQL splitter) + SDK browser check
 ├── go.mod                # Single Go module at repo root
 └── package.json          # Dev scripts
@@ -52,8 +52,8 @@ go build ./cli/cmd/friendo   # the admin SPA + sdk/friendo.js are committed
 The default for day-to-day work. No account or internet needed — fully local.
 
 ```bash
-npm run serve           # build + serve testsite on :3000
-npm run serve:open      # same but skip admin auth
+npm run demo            # build + serve the demo site on :3000, seeding it the first time
+npm run demo:reset      # same, after throwing the demo database away
 ```
 
 | URL | What |
@@ -143,13 +143,13 @@ at `/network`.
 | `npm test` / `npm run test:go` | The Go test suite (`go test ./...`) — the primary test command |
 | `npm run test:sdk` | Playwright browser check of the `friendo.js` Web Components |
 | `npm run check` | `go vet` + `go build` + `npm test` |
-| `npm run serve` | Build + serve testsite on :3000 (Go runtime) |
-| `npm run serve:open` | Same but skip admin auth |
+| `npm run demo` | Build + serve the demo site (`demo/`) on :3000, seeding a fresh database |
+| `npm run demo:reset` | Same, starting from an empty database |
 | `npm run network` | Build + run a local network — `friendo network serve` on :3000 (sites at `<subdomain>.localhost`) |
 | `npm run dev` | Build + run a local `friendo network serve` on :3000 with dev OTP echo (`bash dev.sh`) |
 | `npm run init` | Build + scaffold a new site (`friendo init`) |
-| `npm run export` | Build + export testsite as static HTML |
-| `npm run deploy:dry` | Build + dry-run `friendo push` for testsite |
+| `npm run export` | Build + export the demo site as static HTML |
+| `npm run deploy:dry` | Build + dry-run `friendo push` for the demo site |
 | `npm run deploy:docs` | Publish `docs/` to docs.friendo.world (from your laptop, as an operator — `docs` is a reserved name) |
 | `npm run deploy:www` | Publish `www/` — friendo.world's home site (`friendo network home www` once to serve it at the apex) |
 | `npm run release -- v0.2.0` | Cut a release: guard + bundle-check + `go test` + tag/push. Add `--dry-run` to stop before anything irreversible |

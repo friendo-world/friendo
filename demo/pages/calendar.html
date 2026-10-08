@@ -1,0 +1,35 @@
+{% extends "layouts/base.html" %}
+{% block title %}Calendar — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Community calendar</h1>
+<p>One <code>&lt;friendo-calendar&gt;</code>: a month grid (or a list) of every published
+event, read from <a href="/calendar.json">/calendar.json</a>. Click an entry to open it, or
+<a href="/calendar.ics">subscribe</a> from your calendar app.</p>
+
+<friendo-calendar collection="events"></friendo-calendar>
+
+<section class="box">
+    <h2>Add an event</h2>
+    <p class="small">A <code>&lt;friendo-form&gt;</code> with a <code>&lt;friendo-input type="when"&gt;</code>:
+    start, end, all-day and repeats in one control. Sign in first.</p>
+    <friendo-form collection="events">
+        <label class="field"><span>Title</span><input name="title" placeholder="What's happening?" required></label>
+        <label class="field"><span>When</span><friendo-input name="when" type="when"></friendo-input></label>
+        <label class="field"><span>Where</span><friendo-input name="where" type="location"></friendo-input></label>
+        <label class="field"><span>Details</span><friendo-input name="body" type="richtext" placeholder="Where, what to bring…"></friendo-input></label>
+        <label class="field"><span>Photo</span><friendo-input name="photo" type="media" accept="image/*"></friendo-input></label>
+        <button type="submit">Add event</button>
+    </friendo-form>
+    <p id="result" class="result" hidden></p>
+</section>
+<script>
+    // The calendar above refreshes itself on friendo:submitted; this adds a line.
+    document.querySelector("friendo-form").addEventListener("friendo:submitted", function (e) {
+        var r = e.detail.post, out = document.getElementById("result");
+        out.hidden = false;
+        out.innerHTML = r.status === "published"
+            ? "Added! <a href=\"/events/" + encodeURIComponent(r.slug) + "\">See the event &rarr;</a>"
+            : "Thanks — your event is waiting for a moderator.";
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "layouts/base.html" %}
+{% block title %}Groups — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Groups</h1>
+<p>A group is a post in the <code>groups</code> collection with members. Everyone sees the
+public ones; a private group (the Town Council) is listed only for its members.</p>
+
+<ul class="groups">
+{% for g in collections.groups %}
+    <li class="box group-summary">
+        <h2><a href="/groups/{{ g.slug }}">{{ g.title }}</a></h2>
+        <p class="small">{{ g.member_count }} members &middot; {{ g.settings.visibility }} &middot; join: {{ g.settings.join }}</p>
+    </li>
+{% empty %}
+    <li>No groups yet.</li>
+{% endfor %}
+</ul>
+
+<section class="box">
+    <h2>Your groups</h2>
+    <!-- The live list with your standing in each, and a "start a group" form
+         (members may: members_can_start_groups = true in friendo.toml). -->
+    <friendo-groups></friendo-groups>
+</section>
+{% endblock %}

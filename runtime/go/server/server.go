@@ -390,6 +390,10 @@ func assetHandler(assetsDir string, store storage.Backend) http.Handler {
 type reloadBroadcaster struct {
 	mu      sync.Mutex
 	clients map[chan struct{}]struct{}
+	// gen counts changes. A browser learns it when it connects, and a tab that
+	// dropped its stream while hidden compares on reconnect: a different gen
+	// means it missed a change and reloads.
+	gen uint64
 }
 
 func (b *reloadBroadcaster) subscribe() chan struct{} {
@@ -408,6 +412,7 @@ func (b *reloadBroadcaster) unsubscribe(ch chan struct{}) {
 
 func (b *reloadBroadcaster) notify() {
 	b.mu.Lock()
+	b.gen++
 	for ch := range b.clients {
 		select {
 		case ch <- struct{}{}:
@@ -430,6 +435,12 @@ func handleReloadSSE(w http.ResponseWriter, r *http.Request) {
 
 	ch := liveReload.subscribe()
 	defer liveReload.unsubscribe(ch)
+
+	liveReload.mu.Lock()
+	gen := liveReload.gen
+	liveReload.mu.Unlock()
+	fmt.Fprintf(w, "data: gen:%d\n\n", gen)
+	flusher.Flush()
 
 	for {
 		select {
@@ -513,8 +524,23 @@ func watchForChanges(siteDir string, db *data.DB, reloadRoutes func()) {
 }
 
 // liveReloadScript is injected before </body> in rendered templates.
+//
+// The stream is held only while the tab is visible. A browser allows about six
+// connections to one host, and every open stream (this one, each chat's) uses
+// one for as long as the tab lives — a few background tabs and the next page
+// can't load at all. A hidden tab closes its stream; on coming back it
+// reconnects and reloads if the server's change count moved meanwhile.
 const liveReloadScript = `<script>
-(function(){var es=new EventSource("/_/reload");es.onmessage=function(){location.reload()};es.onerror=function(){es.close();setTimeout(function(){location.reload()},1000)}})();
+(function(){var es=null,gen=null;
+function open(){if(es)return;es=new EventSource("/_/reload");
+es.onmessage=function(e){if(e.data==="reload"){location.reload();return;}
+if(e.data.indexOf("gen:")===0){if(gen!==null&&gen!==e.data){location.reload();return;}gen=e.data;}};
+es.onerror=function(){close();if(!document.hidden)setTimeout(function(){location.reload()},1000)}}
+function close(){if(es){es.close();es=null}}
+document.addEventListener("visibilitychange",function(){document.hidden?close():open()});
+addEventListener("pagehide",close);
+if(!document.hidden)open();
+})();
 </script>`
 
 // --- Routing ---

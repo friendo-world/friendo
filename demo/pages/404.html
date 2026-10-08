@@ -1,0 +1,8 @@
+{% extends "layouts/base.html" %}
+{% block title %}Not found — {{ site.name }}{% endblock %}
+{% block content %}
+<section class="box">
+    <h1>404 &mdash; nothing here</h1>
+    <p>There's no page at <code>{{ request.path }}</code>. <a href="/">Go home</a>.</p>
+</section>
+{% endblock %}

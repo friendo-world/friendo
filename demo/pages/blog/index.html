@@ -1,0 +1,24 @@
+{% extends "layouts/base.html" %}
+{% block title %}Blogs — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Blogs</h1>
+<p>Every member has a blog; it lives on their <a href="/profiles/">profile page</a>. This is
+all of them in one stream. {% if user %}<a href="/write">Write a post &rarr;</a>{% else %}Sign in to write your own.{% endif %}</p>
+
+{% for post in collections.blog|sort_by:"-published_at" %}
+<article class="box post-summary">
+    <h2><a href="/blog/{{ post.slug }}">{{ post.title }}</a></h2>
+    <p class="post-meta">
+        {% if post.anonymous %}by Anonymous{% elif post.author %}by <a href="{{ post.author.url }}">{{ post.author.name }}</a>{% endif %}
+        {% if post.published_at %}&middot; {{ post.published_at|date:"January 2, 2006" }}{% endif %}
+        {% if post.fields.mood %}&middot; <span class="mood">feeling {{ post.fields.mood }}</span>{% endif %}
+        {% if post.group %}&middot; in <a href="/groups/{{ post.group.slug }}">{{ post.group.title }}</a>{% endif %}
+    </p>
+    {% if post.fields.cover %}<img class="cover" src="{{ post.fields.cover }}" alt="">{% endif %}
+    {% if post.fields.tags %}<p class="small">{% for tag in post.fields.tags %}<span class="tag">#{{ tag }}</span> {% endfor %}</p>{% endif %}
+    <friendo-reactions post-id="{{ post.id }}" emojis="👍,❤️"></friendo-reactions>
+</article>
+{% empty %}
+<p>No posts yet.</p>
+{% endfor %}
+{% endblock %}

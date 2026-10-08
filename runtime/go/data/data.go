@@ -341,9 +341,13 @@ func excerpt(body string, max int) string {
 // the review queue without touching its content).
 func (db *DB) SetRecordStatus(id, status string) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	// The first time a post is published it gets its published_at (a content
+	// file's `date:` already set one; that stays).
 	res, err := db.Conn.Exec(
-		`UPDATE posts SET status = ?, updated = ? WHERE id = ? AND site_id = ?`,
-		status, now, id, db.SiteID,
+		`UPDATE posts SET status = ?, updated = ?,
+		        published_at = CASE WHEN ? = 'published' AND (published_at IS NULL OR published_at = '') THEN ? ELSE published_at END
+		 WHERE id = ? AND site_id = ?`,
+		status, now, status, now, id, db.SiteID,
 	)
 	if err != nil {
 		return err
@@ -474,10 +478,16 @@ func (db *DB) GetRecordByID(id string) (map[string]any, error) {
 func (db *DB) CreateRecord(collection, slug, title, body, status, authorID string) (string, error) {
 	id := GenerateID()
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	// A post made published gets its published_at now; a draft or a pending
+	// one gets it when it's published (SetRecordStatus / UpdateRecord).
+	publishedAt := ""
+	if status == "published" {
+		publishedAt = now
+	}
 	_, err := db.Conn.Exec(
-		`INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, created, updated)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, db.SiteID, collection, slug, title, body, status, authorID, now, now,
+		`INSERT INTO posts (id, site_id, collection, slug, title, body, status, author_id, published_at, created, updated)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, db.SiteID, collection, slug, title, body, status, authorID, publishedAt, now, now,
 	)
 	if err != nil {
 		return "", err
@@ -489,9 +499,10 @@ func (db *DB) CreateRecord(collection, slug, title, body, status, authorID strin
 func (db *DB) UpdateRecord(id, slug, title, body, status string) error {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	res, err := db.Conn.Exec(
-		`UPDATE posts SET slug = ?, title = ?, body = ?, status = ?, updated = ?
+		`UPDATE posts SET slug = ?, title = ?, body = ?, status = ?, updated = ?,
+		        published_at = CASE WHEN ? = 'published' AND (published_at IS NULL OR published_at = '') THEN ? ELSE published_at END
 		 WHERE id = ? AND site_id = ?`,
-		slug, title, body, status, now, id, db.SiteID,
+		slug, title, body, status, now, status, now, id, db.SiteID,
 	)
 	if err != nil {
 		return err
@@ -1880,6 +1891,15 @@ func (db *DB) DeleteUser(id string) error {
 	}
 	// Clean up sessions for deleted user.
 	_, _ = db.Conn.Exec(`DELETE FROM sessions WHERE user_id = ? AND site_id = ?`, id, db.SiteID)
+	// Their profiles go too, unless something is by them: a profile with posts
+	// or comments stays, so that content keeps its name. (A profile is an
+	// authors row; see the social graph docs.)
+	_, _ = db.Conn.Exec(
+		`DELETE FROM authors WHERE site_id = ? AND user_id = ?
+		   AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.author_id = authors.id)
+		   AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.author_id = authors.id)`,
+		db.SiteID, id,
+	)
 	return nil
 }
 

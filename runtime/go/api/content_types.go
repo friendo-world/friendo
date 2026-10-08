@@ -141,7 +141,7 @@ func loadContentTypes(siteDir string) ([]ContentType, bool) {
 		out = append(out, ct)
 	}
 	for name := range raw.Content {
-		if name != "types" && !seen[name] {
+		if name != "collections" && !seen[name] {
 			log.Printf("friendo.toml: [content.%s] is declared but %q is not in [content] collections", name, name)
 		}
 	}

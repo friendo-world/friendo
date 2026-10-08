@@ -1,0 +1,83 @@
+{% extends "layouts/base.html" %}
+{% block title %}{{ post.title }} — {{ site.name }}{% endblock %}
+{% block content %}
+<article class="box post">
+    <h1>{{ post.title }}</h1>
+    <!-- post.author is the writer's profile (attached by the runtime), post.group
+         the group it's filed under, if any. -->
+    <p class="post-meta">
+        {% if post.anonymous %}by Anonymous{% elif post.author %}by <a href="{{ post.author.url }}">{{ post.author.name }}</a>
+            <friendo-follow profile-id="{{ post.author.id }}"></friendo-follow>{% endif %}
+        {% if post.published_at %}&middot; {{ post.published_at|date:"January 2, 2006" }}{% endif %}
+        {% if post.group %}&middot; in <a href="/groups/{{ post.group.slug }}">{{ post.group.title }}</a>{% endif %}
+    </p>
+
+    <!-- Fields from the front matter or the /write form land on post.fields. -->
+    {% if post.fields.cover %}<img class="cover" src="{{ post.fields.cover }}" alt="">{% endif %}
+    {% if post.fields.mood or post.fields.tags %}
+    <p class="post-meta">
+        {% if post.fields.mood %}<span class="mood">feeling {{ post.fields.mood }}</span>{% endif %}
+        {% for tag in post.fields.tags %}<span class="tag">#{{ tag }}</span> {% endfor %}
+    </p>
+    {% endif %}
+
+    <div class="body">{{ post.body|markdown }}</div>
+
+    {% if post.gallery %}
+    <!-- A page bundle's sibling images (content/blog/<slug>/*.jpg) become post.gallery. -->
+    <div class="gallery">
+        {% for img in post.gallery %}<img src="{{ img.url }}" alt="">{% endfor %}
+    </div>
+    {% endif %}
+</article>
+
+<!-- Interactive layer: every tag talks to /_/api on its own. The server-rendered
+     versions (post.reactions, post.comments, post.poll) are in the sidebar so the
+     page still reads with JavaScript off. -->
+<section class="box">
+    <h2>Reactions</h2>
+    <friendo-reactions post-id="{{ post.id }}" emojis="👍,❤️,🎉,🤯,😂"></friendo-reactions>
+</section>
+
+{% if post.fields.poll %}
+<section class="box">
+    <h2>Poll</h2>
+    <friendo-poll poll-slug="{{ post.fields.poll.slug }}"></friendo-poll>
+</section>
+{% endif %}
+
+<section class="box">
+    <h2>Comments</h2>
+    <friendo-comments post-id="{{ post.id }}"></friendo-comments>
+</section>
+
+<section class="box">
+    <h2>Where</h2>
+    <friendo-map post-id="{{ post.id }}"></friendo-map>
+</section>
+{% endblock %}
+
+{% block side %}
+<section class="box no-js-view">
+    <h2>Without JavaScript</h2>
+    <p class="small">The same data, server-rendered:</p>
+    <p>{% for r in post.reactions %}{{ r.emoji }} {{ r.count }} {% empty %}No reactions yet.{% endfor %}</p>
+    {% if post.poll %}
+    <p><strong>{{ post.poll.question }}</strong></p>
+    <ul class="plain">{% for opt in post.poll.options %}<li>{{ opt.text }} &mdash; {{ opt.votes }}</li>{% endfor %}</ul>
+    {% endif %}
+    <ol class="plain comments-static">
+    {% for c in post.comments %}<li><strong>{{ c.author_name }}</strong>: {{ c.body }}</li>{% empty %}<li>No comments yet.</li>{% endfor %}
+    </ol>
+</section>
+{% if post.author %}
+<section class="box">
+    <h2>About the author</h2>
+    <p><a href="{{ post.author.url }}">{{ post.author.name }}</a>{% if post.author.bio %} &mdash; {{ post.author.bio }}{% endif %}</p>
+    <h3>More by them</h3>
+    <ul class="plain">
+    {% for p in collections.blog|by_author:post.author.slug %}{% if p.slug != post.slug %}<li><a href="/blog/{{ p.slug }}">{{ p.title }}</a></li>{% endif %}{% endfor %}
+    </ul>
+</section>
+{% endif %}
+{% endblock %}

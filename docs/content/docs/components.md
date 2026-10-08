@@ -100,7 +100,8 @@ Emoji reactions with live counts; a click toggles yours. The member's own carry
 | `emojis` | Comma-separated choices; default `👍,❤️,🎉` |
 
 Parts: `row`, `button`, `emoji`, `count`, `visitor` (the "Sign in to keep
-your reactions" line a [visitor](/docs/visitors) sees after reacting).
+your reactions" line a [visitor](/docs/visitors) sees after reacting). Every
+other button is also `odd` or `even`, so `::part(even)` styles every second one.
 
 ## `<friendo-poll>`
 

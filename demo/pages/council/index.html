@@ -1,0 +1,14 @@
+{% extends "layouts/base.html" %}
+{% block title %}Council room — {{ site.name }}{% endblock %}
+{% block content %}
+<section class="box">
+    <h1>The council room</h1>
+    <p>This whole folder is for members of the <a href="/groups/town-council">Town Council</a>
+    group, by <code>[access] groups</code> in friendo.toml. You're in, {{ user.name }}.</p>
+    <p>A single page can do the same with <code>{% raw %}{% members only if "town-council" in user.groups %}{% endraw %}</code>.</p>
+</section>
+<section class="box">
+    <h2>Minutes &amp; motions</h2>
+    <friendo-chat chat-id="minutes" group="town-council"></friendo-chat>
+</section>
+{% endblock %}

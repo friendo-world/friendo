@@ -1,0 +1,47 @@
+# Hollowbrook Online — the friendo demo site. A small-town community network in
+# the style of the early 2000s, built to show (and test) everything friendo ships.
+# Run it with `npm run demo` from the repo root; see demo/README.md.
+
+[site]
+name = "Hollowbrook Online"
+timezone = "America/Chicago"
+
+[content]
+collections = ["blog", "classifieds", "events", "groups", "pages"]
+
+# A classified ad is a post with a few extra fields. The admin lays out its form
+# from this; the /sell page uses the same names in a <friendo-form>.
+[content.classifieds.fields]
+category = { kind = "text", choices = ["for sale", "wanted", "housing", "jobs", "free", "lost & found"], required = true }
+price    = { kind = "text", hint = "e.g. $40, or 'free', or 'make an offer'" }
+contact  = { kind = "text", hint = "How to reach you — a phone number, or 'message me'" }
+photo    = "image"
+
+[content.blog.fields]
+tags = "tags"
+mood = { kind = "text", choices = ["chill", "hyped", "bummed", "curious", "nostalgic"] }
+cover = "image"
+
+# What a member's profile carries beyond name, avatar and bio. The first few are
+# ordinary; the rest are the MySpace part — a member decorates their own profile
+# page (see pages/profiles/[slug].html and assets/themes/*.css). The site's look
+# itself is always the visitor's pick, from the switcher.
+[profiles.fields]
+pronouns = "text"
+website  = { kind = "text", hint = "https://…" }
+headline = { kind = "text", hint = "A line under your name, like a MySpace headline" }
+mood     = { kind = "text", hint = "How you're feeling today" }
+background = { kind = "text", hint = "A colour (hotpink, #000) or an image address, for your page background" }
+accent   = { kind = "text", hint = "A colour for your links and headings" }
+font     = { kind = "text", choices = ["default", "Verdana", "Comic Sans MS", "Times New Roman", "Courier New", "Impact", "Georgia"], hint = "The font on your page" }
+
+# Declared here, so it's applied on startup and shown read-only in admin Settings.
+[settings]
+members_can_post = true          # members' posts and classifieds go to the review queue
+visitors_can_rsvp = true         # someone signed out can answer an event
+profile_visibility = "public"    # every profile page is visible to visitors
+members_can_start_groups = true
+
+# /council/ is for members of the "town-council" group (content/groups/town-council.md).
+[access]
+groups = { "/council/*" = "town-council" }

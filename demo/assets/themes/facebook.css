@@ -1,0 +1,224 @@
+/* thefacebook, 2005. Tahoma at 11px, the #3b5998 bar, a left column of links in
+   a pale blue box, white content with blue title bars, grey hairlines. Members had
+   no say in how their page looked back then, so on a profile page this theme
+   honours only the member's accent colour (and nothing else). */
+
+:root {
+    --fb: #3b5998;
+    --fb-dark: #29447e;
+    --fb-pale: #d8dfea;
+    --fb-paler: #eceff5;
+    --fb-grey: #f7f7f7;
+    --ink: #333333;
+    --muted: #777777;
+    --line: #d8dfea;
+    --accent: var(--profile-accent, var(--fb));
+    --font: Tahoma, Verdana, Arial, sans-serif;
+}
+html { background: #fff; }
+/* Full-height page, footer at the bottom: the body is a column and .columns takes the slack. */
+body { margin: 0; min-height: 100vh; box-sizing: border-box; font: 11px/1.5 var(--font); color: var(--ink); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, h3 { margin: 0 0 .5em; font-family: var(--font); color: var(--ink); }
+h1 { font-size: 16px; } h2 { font-size: 12px; } h3 { font-size: 11px; color: var(--muted); }
+p { margin: 0 0 .8em; }
+img { max-width: 100%; height: auto; }
+code { font: 11px "Courier New", monospace; background: var(--fb-paler); padding: 0 2px; }
+.small { font-size: 10px; color: var(--muted); }
+ul.plain, ol.plain { list-style: none; margin: 0; padding: 0; }
+ul.plain li, ol.plain li { margin: 0 0 .3em; }
+button, input, select, textarea { font: 11px var(--font); }
+button, input[type=submit] { background: var(--fb); color: #fff; border: 1px solid var(--fb-dark); padding: 2px 8px; cursor: pointer; }
+button:hover { background: var(--fb-dark); }
+input, select, textarea { border: 1px solid #bdc7d8; padding: 2px; }
+
+/* ---- the bar ------------------------------------------------------------------ */
+.masthead { background: var(--fb); color: #fff; height: 32px; padding: 0 16px; display: flex; align-items: center; gap: 14px; position: relative; }
+.masthead .brand { color: #fff; font: bold 16px/1 var(--font); text-decoration: none; text-transform: lowercase; letter-spacing: -0.5px; }
+.masthead .brand::before { content: "[ "; } .masthead .brand::after { content: " ]"; }
+.masthead .brand-mark { display: none; }
+.masthead .tagline { display: none; }
+.masthead .whoami { margin: 0 0 0 auto; color: #d8dfea; font-size: 10px; }
+.masthead .whoami a { color: #fff; font-weight: bold; }
+.masthead .unread { background: #fff; color: var(--fb); padding: 0 4px; margin-left: 4px; }
+
+/* ---- three columns: menu | content | sidebar ------------------------------------ */
+.columns { display: grid; grid-template-columns: 150px 1fr 240px; gap: 12px; padding: 12px 16px; max-width: 980px; margin: 0 auto; flex: 1; align-content: start; width: 100%; box-sizing: border-box; }
+.menu { grid-area: auto; }
+/* The nav is the left column. It's written before .columns in the markup, so
+   it's pulled into the grid by placing the two siblings in one flow. */
+body { display: flex; flex-direction: column; }
+.menu { order: 2; } .columns { order: 2; } .footer { order: 3; }
+.menu ul { list-style: none; margin: 12px 0 0 16px; padding: 4px 0; width: 150px; background: var(--fb-paler); border: 1px solid var(--fb-pale); }
+.menu li a { display: block; padding: 3px 10px; color: var(--fb); font-weight: bold; }
+.menu li a:hover, .menu li a[aria-current] { background: var(--fb-pale); text-decoration: none; }
+.menu .menu-admin { border-top: 1px solid var(--fb-pale); margin-top: 4px; padding-top: 4px; }
+.menu .badge { background: var(--fb); color: #fff; padding: 0 4px; font-size: 9px; }
+@media (min-width: 701px) {
+    .menu { position: absolute; left: 0; top: 32px; }
+    .columns { grid-template-columns: 1fr 240px; margin-left: 166px; max-width: none; width: auto; }
+}
+
+.box { background: #fff; border: 1px solid var(--line); margin: 0 0 12px; padding: 8px 10px 6px; }
+.box > h1, .box > h2 { margin: -8px -10px 8px; padding: 3px 10px; background: var(--fb); color: #fff; font-size: 11px; font-weight: bold; }
+.box > h1 { font-size: 13px; }
+.box > h1 a, .box > h2 a, .box > h1 a:visited, .box > h2 a:visited { color: inherit; text-decoration: none; }
+.box > h1 a:hover, .box > h2 a:hover { text-decoration: underline; }
+.welcome > h1 { background: var(--fb-pale); color: var(--fb); }
+.welcome { background: var(--fb-grey); }
+.sidebar .box > h2 { background: var(--fb-pale); color: var(--fb); }
+.footer { padding: 8px 16px 60px; font-size: 10px; color: var(--muted); border-top: 1px solid var(--line); margin-top: auto; }
+.hit-counter { font: bold 14px var(--font); color: var(--fb); margin: 0; }
+.counter { display: none; } /* thefacebook had no hit counter */
+
+/* ---- posts, lists, people -------------------------------------------------------- */
+.post-meta { color: var(--muted); font-size: 10px; margin: 0 0 .6em; }
+.mood { color: var(--muted); } .tag { color: var(--muted); }
+.post-title { font-weight: bold; }
+.post-list, .event-list, .ad-list { list-style: none; padding: 0; margin: 0; }
+.post-list li, .event-list li, .ad-list li { padding: 4px 0; border-bottom: 1px solid var(--fb-paler); }
+.post-list .post-meta { display: inline; margin-left: 4px; }
+.post-list friendo-reactions { display: inline-block; vertical-align: middle; margin-left: 6px; }
+.event-list .when { color: var(--muted); display: inline-block; min-width: 150px; }
+.cover { display: block; margin: 6px 0; border: 1px solid var(--line); }
+.gallery { display: flex; gap: 6px; flex-wrap: wrap; }
+.gallery img { width: 140px; border: 1px solid var(--line); padding: 2px; }
+.body { font-size: 11px; }
+.category { display: inline-block; background: var(--fb-pale); color: var(--fb); padding: 0 4px; font-size: 9px; }
+.price { font-weight: bold; }
+table.ads { width: 100%; }
+table.ads th { background: var(--fb-pale); color: var(--fb); text-align: left; padding: 3px 6px; font-size: 10px; }
+table.ads td { padding: 3px 6px; border-bottom: 1px solid var(--fb-paler); vertical-align: top; }
+.ad-facts th { text-align: left; color: var(--muted); font-weight: normal; padding: 1px 12px 1px 0; }
+
+.people { list-style: none; margin: 0; padding: 0; }
+.person { display: flex; gap: 10px; }
+.person .name { font-weight: bold; }
+.person .headline { display: block; color: var(--muted); }
+.person p { margin: 2px 0; }
+.avatar-blank { display: inline-flex; align-items: center; justify-content: center; width: 64px; height: 64px; background: var(--fb-paler); color: var(--fb); font: bold 20px var(--font); border: 1px solid var(--line); }
+.people-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
+.people-grid a { font-size: 9px; display: block; }
+.people-grid img, .people-grid .avatar-blank { width: 40px; height: 40px; font-size: 14px; display: flex; margin: 0 auto 2px; }
+.people-grid .name { display: block; line-height: 1.2; overflow-wrap: anywhere; }
+
+.profile-head { display: flex; gap: 14px; }
+.profile-head .avatar { width: 120px; height: 120px; font-size: 36px; flex: none; }
+.profile .headline { color: var(--muted); margin: 0 0 6px; }
+.profile-facts th { text-align: left; color: var(--muted); font-weight: normal; padding: 0 10px 0 0; }
+.profile-actions { margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.profile .bio { border-top: 1px solid var(--fb-paler); margin-top: 10px; padding-top: 8px; }
+/* The one thing a member may change here: the accent. Set on .profile-page, not
+   :root, because the member's properties sit on <body>. */
+.profile-page { --accent: var(--profile-accent, var(--fb)); }
+.groups { list-style: none; margin: 0; padding: 0; }
+
+/* ---- forms --------------------------------------------------------------------- */
+friendo-form { display: grid; gap: 8px; }
+.field > span { display: block; color: var(--muted); margin-bottom: 2px; }
+.field input:not([type=checkbox]), .field select { width: 100%; max-width: 400px; box-sizing: border-box; }
+friendo-form button[type=submit] { justify-self: start; }
+friendo-form [part=status] { color: var(--muted); }
+friendo-form [part=error] { color: #b00; }
+.result { background: #fffbe6; border-color: #e0c060; }
+
+/* ---- the tags ------------------------------------------------------------------ */
+friendo-signin::part(form), friendo-comments::part(form), friendo-chat::part(form) { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+friendo-signin::part(input), friendo-signin::part(email), friendo-signin::part(code),
+friendo-comments::part(input), friendo-chat::part(input), friendo-invite::part(input), friendo-groups::part(input), friendo-group::part(input),
+friendo-comments::part(name-input), friendo-chat::part(name-input), friendo-rsvp::part(name-input), friendo-rsvp::part(reminder-input) {
+    font: 11px var(--font); border: 1px solid #bdc7d8; padding: 2px; background: #fff;
+}
+friendo-signin::part(button), friendo-signin::part(signout), friendo-signin::part(save), friendo-signin::part(cancel), friendo-signin::part(add), friendo-signin::part(edit-profile), friendo-signin::part(profiles-toggle),
+friendo-comments::part(submit), friendo-chat::part(submit), friendo-rsvp::part(button), friendo-rsvp::part(signin),
+friendo-follow::part(button), friendo-profile::part(edit), friendo-invite::part(send), friendo-groups::part(submit),
+friendo-group::part(join), friendo-group::part(leave), friendo-group::part(approve), friendo-group::part(decline), friendo-group::part(add), friendo-group::part(add-chat),
+friendo-add-to-calendar::part(button), friendo-calendar::part(button), friendo-inbox::part(mark), friendo-inbox::part(mark-all),
+friendo-comments::part(approve), friendo-comments::part(reject), friendo-comments::part(delete), friendo-form::part(withdraw), friendo-input::part(tool) {
+    font: 11px var(--font); background: var(--fb); color: #fff; border: 1px solid var(--fb-dark); padding: 1px 7px; cursor: pointer;
+}
+friendo-signin::part(cancel), friendo-comments::part(reject), friendo-comments::part(delete), friendo-group::part(leave), friendo-group::part(decline), friendo-input::part(tool), friendo-calendar::part(button) { background: var(--fb-paler); color: var(--fb); border-color: var(--fb-pale); }
+friendo-rsvp::part(button)[aria-pressed="true"], friendo-reactions::part(button)[aria-pressed="true"], friendo-follow::part(button)[aria-pressed="true"] { background: var(--fb-dark); color: #fff; }
+friendo-signin::part(status), friendo-comments::part(status), friendo-chat::part(status), friendo-rsvp::part(status), friendo-group::part(status), friendo-groups::part(status), friendo-follow::part(status) { color: var(--muted); font-size: 10px; }
+friendo-signin::part(error), friendo-comments::part(error), friendo-chat::part(error), friendo-calendar::part(error), friendo-add-to-calendar::part(error) { color: #b00; }
+friendo-signin::part(signed-in) { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+friendo-signin::part(name) { font-weight: bold; color: var(--fb); }
+friendo-signin::part(badge), friendo-comments::part(badge) { background: var(--fb-pale); color: var(--fb); font-size: 9px; padding: 0 4px; }
+friendo-signin::part(profile-editor) { border-top: 1px solid var(--fb-paler); margin-top: 6px; padding-top: 6px; display: grid; gap: 4px; }
+friendo-signin::part(label), friendo-profile::part(label) { color: var(--muted); }
+friendo-signin::part(profiles) { list-style: none; margin: 4px 0; padding: 0; }
+
+friendo-comments::part(list) { display: grid; gap: 1px; margin: 0 0 8px; }
+friendo-comments::part(comment) { border-bottom: 1px solid var(--fb-paler); padding: 4px 0; }
+friendo-comments::part(author), friendo-chat::part(author) { color: var(--fb); font-weight: bold; }
+friendo-comments::part(empty), friendo-chat::part(empty), friendo-inbox::part(empty), friendo-groups::part(empty), friendo-map::part(empty), friendo-calendar::part(empty) { color: var(--muted); }
+friendo-comments::part(signed-out), friendo-chat::part(signed-out), friendo-rsvp::part(signed-out), friendo-inbox::part(signed-out), friendo-group::part(signed-out), friendo-profile::part(signed-out) { color: var(--muted); font-size: 10px; }
+
+friendo-reactions::part(row) { display: flex; gap: 3px; flex-wrap: wrap; }
+friendo-reactions::part(button) { font: 11px var(--font); background: var(--fb-paler); border: 1px solid var(--fb-pale); padding: 0 5px; cursor: pointer; color: var(--ink); }
+friendo-reactions::part(count) { color: var(--muted); margin-left: 3px; }
+
+friendo-poll::part(question) { font-weight: bold; }
+friendo-poll::part(option) { display: block; margin: 2px 0; }
+friendo-poll::part(bar) { background: var(--fb-pale); height: 8px; }
+friendo-poll::part(total) { color: var(--muted); font-size: 10px; }
+
+friendo-chat { --chat-mine: var(--fb); --chat-theirs: var(--fb-paler); --chat-border: var(--line); --chat-background: #fff; --chat-height: 240px; }
+friendo-chat.big-chat { --chat-height: 60vh; }
+friendo-chat::part(time), friendo-chat::part(meta) { color: var(--muted); font-size: 9px; }
+
+friendo-map::part(map) { height: 240px; border: 1px solid var(--line); }
+friendo-map.town-map::part(map) { height: 460px; }
+
+friendo-calendar { display: block; margin: 0 0 12px; border: 1px solid var(--line); }
+friendo-calendar::part(nav) { display: flex; gap: 6px; align-items: center; background: var(--fb-pale); padding: 4px 6px; }
+friendo-calendar::part(title) { font-weight: bold; color: var(--fb); }
+friendo-calendar::part(grid) { border-collapse: collapse; width: 100%; }
+friendo-calendar::part(weekday) { background: var(--fb-paler); color: var(--fb); font-size: 10px; padding: 2px; }
+friendo-calendar::part(day) { border: 1px solid var(--fb-paler); vertical-align: top; height: 60px; padding: 2px; font-size: 10px; }
+friendo-calendar::part(today) { background: #fffbe6; }
+friendo-calendar::part(outside) { color: #bbb; }
+friendo-calendar::part(event) { display: block; background: var(--fb); color: #fff; padding: 0 2px; margin: 1px 0; font-size: 9px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+friendo-calendar::part(list) { padding: 6px; }
+friendo-calendar::part(heading) { font-weight: bold; color: var(--fb); margin: 6px 0 2px; }
+
+friendo-rsvp::part(question) { font-weight: bold; }
+friendo-rsvp::part(row) { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin: 4px 0; }
+friendo-rsvp::part(count) { color: var(--muted); }
+friendo-rsvp::part(visitor-form) { display: grid; gap: 4px; margin-top: 4px; }
+friendo-invite { display: block; margin-top: 8px; border-top: 1px solid var(--fb-paler); padding-top: 6px; }
+friendo-invite::part(form) { display: flex; gap: 4px; flex-wrap: wrap; }
+friendo-follow { display: inline-block; }
+friendo-follow::part(count) { color: var(--muted); margin-left: 4px; }
+friendo-add-to-calendar { display: inline-block; position: relative; }
+friendo-add-to-calendar::part(menu) { background: #fff; border: 1px solid var(--line); padding: 4px 0; }
+friendo-add-to-calendar::part(item) { display: block; padding: 2px 10px; color: var(--fb); text-decoration: none; }
+friendo-add-to-calendar::part(heading) { padding: 2px 10px; color: var(--muted); font-size: 9px; }
+friendo-inbox::part(list) { list-style: none; margin: 0; padding: 0; }
+friendo-inbox::part(item) { border-bottom: 1px solid var(--fb-paler); padding: 4px 0; }
+friendo-inbox::part(unread) { background: var(--fb-paler); }
+friendo-inbox::part(time) { color: var(--muted); font-size: 9px; }
+friendo-group::part(row), friendo-groups::part(item) { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 2px 0; }
+friendo-group::part(members), friendo-group::part(requests), friendo-group::part(chats) { list-style: none; margin: 4px 0; padding: 0; }
+friendo-group::part(member), friendo-group::part(request), friendo-group::part(chat-row) { display: flex; gap: 6px; align-items: center; padding: 2px 0; border-bottom: 1px solid var(--fb-paler); }
+friendo-group::part(role) { color: var(--muted); font-size: 9px; }
+friendo-group::part(settings) { border-top: 1px solid var(--fb-paler); margin-top: 6px; padding-top: 6px; }
+friendo-groups::part(list) { list-style: none; margin: 0 0 6px; padding: 0; }
+friendo-groups::part(create) { display: flex; gap: 4px; flex-wrap: wrap; border-top: 1px solid var(--fb-paler); padding-top: 6px; }
+friendo-profile::part(editor) { display: grid; gap: 4px; margin-top: 6px; }
+friendo-input::part(editor) { border: 1px solid #bdc7d8; background: #fff; min-height: 90px; font: 11px var(--font); padding: 3px; }
+friendo-input::part(toolbar) { display: flex; gap: 2px; margin-bottom: 2px; }
+friendo-input::part(map) { height: 220px; border: 1px solid var(--line); }
+friendo-input::part(chips) { display: flex; gap: 3px; flex-wrap: wrap; }
+friendo-input::part(chip) { background: var(--fb-paler); border: 1px solid var(--fb-pale); padding: 0 4px; font-size: 10px; }
+friendo-input::part(preview) { max-width: 200px; border: 1px solid var(--line); }
+friendo-input::part(note) { color: var(--muted); font-size: 10px; }
+friendo-input::part(when) { display: grid; gap: 3px; }
+friendo-input::part(select), friendo-input::part(input) { font: 11px var(--font); border: 1px solid #bdc7d8; padding: 2px; }
+
+@media (max-width: 700px) {
+    .columns { grid-template-columns: 1fr; padding: 10px; }
+    .menu ul { width: auto; margin: 10px; display: flex; flex-wrap: wrap; }
+    .people-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}

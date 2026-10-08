@@ -47,7 +47,7 @@ friendo/
 │   └── go/             # The Go runtime — local dev, self-host, and network mode (friendo.world)
 ├── docs/               # docs.friendo.world — itself a friendo site
 ├── www/                # friendo.world's landing page — the network's home site
-└── testsite/           # Example site for development and testing
+└── demo/               # Hollowbrook Online — the demo site (npm run demo), for trying and testing everything
 ```
 
 **Docs:** [docs.friendo.world](https://docs.friendo.world) (building a site) ·

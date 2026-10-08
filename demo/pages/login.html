@@ -1,0 +1,11 @@
+{% extends "layouts/base.html" %}
+{% block title %}Sign in — {{ site.name }}{% endblock %}
+{% block content %}
+<section class="box">
+    <h1>Members only</h1>
+    {% if gate.reason == "signin" %}<p>Sign in to see <code>{{ gate.path }}</code>.</p>
+    {% elif gate.reason == "role" %}<p>That page is for {{ gate.required }}s and up.</p>
+    {% else %}<p>That page isn't open to your account. (The <a href="/council/">council room</a> is for the Town Council group.)</p>{% endif %}
+    <p class="small">The sign-in box is on the right.</p>
+</section>
+{% endblock %}

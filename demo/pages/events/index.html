@@ -1,0 +1,44 @@
+{% extends "layouts/base.html" %}
+{% block title %}Events — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Events</h1>
+<p>Every post with a <code>when</code>. Repeating events are expanded into one entry per date.
+Subscribe with <a href="{{ calendar.google }}">Google Calendar</a>, with
+<a href="{{ calendar.webcal }}">Apple Calendar or Outlook</a>, or from the
+<a href="{{ calendar.ics }}">feed address</a>:
+<friendo-add-to-calendar subscribe collection="events"></friendo-add-to-calendar></p>
+
+<section class="box">
+    <h2>Coming up</h2>
+    <ul class="event-list">
+    {% for e in collections.events|upcoming:12 %}
+        <li><span class="when">{{ e.when|when }}</span> <a href="/events/{{ e.slug }}">{{ e.title }}</a>{% if e.when.repeats %} <small>({{ e.when.repeats }})</small>{% endif %}{% if e.group %} <small>&middot; {{ e.group.title }}</small>{% endif %}</li>
+    {% empty %}
+        <li>Nothing coming up.</li>
+    {% endfor %}
+    </ul>
+</section>
+
+<section class="box">
+    <h2>This month</h2>
+    <ul class="event-list">
+    {% for e in collections.events|in_month %}
+        <li><span class="when">{{ e.when|when }}</span> <a href="/events/{{ e.slug }}">{{ e.title }}</a></li>
+    {% empty %}
+        <li>Quiet month.</li>
+    {% endfor %}
+    </ul>
+</section>
+
+<section class="box">
+    <h2>Past</h2>
+    <ul class="event-list past">
+    {% for e in collections.events|past:5 %}
+        <li><span class="when">{{ e.when|when }}</span> <a href="/events/{{ e.slug }}">{{ e.title }}</a></li>
+    {% empty %}
+        <li>Nothing yet.</li>
+    {% endfor %}
+    </ul>
+</section>
+<p class="small"><a href="/calendar">Month view &rarr;</a></p>
+{% endblock %}

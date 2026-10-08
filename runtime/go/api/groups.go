@@ -85,7 +85,10 @@ func loadGroup(db *data.DB, w http.ResponseWriter, r *http.Request, v groupViewe
 		jsonError(w, fmt.Sprintf("query error: %v", err), http.StatusInternalServerError)
 		return nil, false
 	}
-	if !data.CanSeeGroup(g, v.user != nil, v.memberOf) {
+	// A private group is its members' — except to the site's admins and owners,
+	// who must be able to reach one that came from a content file and has no
+	// members yet (to add the first, and to promote a moderator).
+	if !data.CanSeeGroup(g, v.user != nil, v.memberOf) && !v.administers(db, g["id"].(string)) {
 		if v.user == nil {
 			jsonError(w, "sign in to see this group", http.StatusUnauthorized)
 		} else {

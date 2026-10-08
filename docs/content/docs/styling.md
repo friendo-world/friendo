@@ -39,6 +39,9 @@ Some elements carry two parts at once. Your own messages in a chat are
 friendo-chat::part(mine) { opacity: .9; }
 ```
 
+Reaction buttons are `button odd` and `button even` in turn, which is how a
+stylesheet alternates them: `:nth-child()` doesn't work after `::part()`.
+
 ## 3. Use the custom properties on chats
 
 `<friendo-chat>` also reads custom properties set on the tag:

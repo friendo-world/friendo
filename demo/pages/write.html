@@ -1,0 +1,32 @@
+{% extends "layouts/base.html" %}
+{% block title %}Write — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Write a blog post</h1>
+<p>Sign in on the right, then write. The field names decide where each value lands:
+<code>title</code> and <code>body</code> are the post's own; <code>mood</code>, <code>tags</code>,
+<code>where</code> and <code>cover</code> become <code>post.fields</code>. Members' posts wait
+for a moderator; contributors and up publish straight away.</p>
+
+<friendo-form collection="blog" class="box">
+    <label class="field"><span>Title</span><input name="title" placeholder="A good title" required></label>
+    <label class="field"><span>Story</span><friendo-input name="body" type="richtext" placeholder="Write your story…"></friendo-input></label>
+    <label class="field"><span>Mood</span>
+        <select name="mood"><option>chill</option><option>hyped</option><option>bummed</option><option>curious</option><option>nostalgic</option></select></label>
+    <label class="field"><span>Tags</span><friendo-input name="tags" type="tags"></friendo-input></label>
+    <label class="field"><span>Where was this?</span><friendo-input name="where" type="location"></friendo-input></label>
+    <label class="field"><span>Cover image</span><friendo-input name="cover" type="media" accept="image/*"></friendo-input></label>
+    <label class="field check"><input type="checkbox" name="anonymous" value="1"> Post without my name</label>
+    <button type="submit">Publish</button>
+</friendo-form>
+
+<p id="result" class="box result" hidden></p>
+<script>
+    document.querySelector("friendo-form").addEventListener("friendo:submitted", function (e) {
+        var r = e.detail.post, out = document.getElementById("result");
+        out.hidden = false;
+        out.innerHTML = r.status === "published"
+            ? "Published! <a href=\"/blog/" + encodeURIComponent(r.slug) + "\">Read it &rarr;</a>"
+            : "Thanks — your post is waiting for a moderator and will show up once it's approved.";
+    });
+</script>
+{% endblock %}

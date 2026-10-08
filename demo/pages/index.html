@@ -1,0 +1,79 @@
+{% extends "layouts/base.html" %}
+{% block bodyclass %}page home{% endblock %}
+{% block content %}
+<section class="welcome box">
+    <h1>Welcome to {{ site.name }}!</h1>
+    <p>The place where Hollowbrook meets online. Read your neighbours' <a href="/blog/">blogs</a>,
+    buy and sell in the <a href="/classifieds/">classifieds</a>, find your <a href="/groups/">group</a>,
+    see what's on the <a href="/calendar">calendar</a> and where it's happening on the
+    <a href="/map">town map</a>, or just hang out in the <a href="/chat">chat</a>.</p>
+    <p class="small">New here? Sign in with your email on the right &mdash; a code comes to your inbox
+    (in local dev it's shown right in the form). You get a profile page of your own to decorate.</p>
+</section>
+
+<section class="box">
+    <h2>Latest from the blogs</h2>
+    <ul class="post-list">
+    {% for post in collections.blog|sort_by:"-published_at" %}
+        {% if forloop.Counter <= 6 %}
+        <li>
+            <a class="post-title" href="/blog/{{ post.slug }}">{{ post.title }}</a>
+            <span class="post-meta">
+                {% if post.anonymous %}by Anonymous{% elif post.author %}by <a href="{{ post.author.url }}">{{ post.author.name }}</a>{% endif %}
+                {% if post.published_at %}&middot; {{ post.published_at|date:"Jan 2" }}{% endif %}
+                {% if post.fields.mood %}&middot; feeling {{ post.fields.mood }}{% endif %}
+                {% if post.group %}&middot; in <a href="/groups/{{ post.group.slug }}">{{ post.group.title }}</a>{% endif %}
+            </span>
+            <friendo-reactions post-id="{{ post.id }}" emojis="👍,❤️"></friendo-reactions>
+        </li>
+        {% endif %}
+    {% empty %}
+        <li>No posts yet. <a href="/write">Write the first one.</a></li>
+    {% endfor %}
+    </ul>
+</section>
+
+<section class="box">
+    <h2>Coming up</h2>
+    <ul class="event-list">
+    {% for e in collections.events|upcoming:4 %}
+        <li><span class="when">{{ e.when|when }}</span> <a href="/events/{{ e.slug }}">{{ e.title }}</a>{% if e.when.repeats %} <small>({{ e.when.repeats }})</small>{% endif %}</li>
+    {% empty %}
+        <li>Nothing on the calendar. <a href="/calendar">Add something.</a></li>
+    {% endfor %}
+    </ul>
+    <p class="small"><a href="/events/">All events &rarr;</a> &middot; <a href="/calendar">Month view &rarr;</a></p>
+</section>
+
+<section class="box">
+    <h2>In the classifieds</h2>
+    <ul class="ad-list">
+    {% for ad in collections.classifieds|sort_by:"-published_at" %}
+        {% if forloop.Counter <= 5 %}
+        <li><span class="category">{{ ad.fields.category }}</span> <a href="/classifieds/{{ ad.slug }}">{{ ad.title }}</a>{% if ad.fields.price %} <span class="price">{{ ad.fields.price }}</span>{% endif %}</li>
+        {% endif %}
+    {% empty %}
+        <li>Nothing for sale. <a href="/sell">Post an ad.</a></li>
+    {% endfor %}
+    </ul>
+    <p class="small"><a href="/classifieds/">All classifieds &rarr;</a></p>
+</section>
+{% endblock %}
+
+{% block side %}
+<section class="box">
+    <h2>Town square</h2>
+    <p class="small">Live chat, right here. Say hi!</p>
+    <friendo-chat chat-id="town-square"></friendo-chat>
+</section>
+<section class="box">
+    <h2>People</h2>
+    <ul class="people-grid">
+    {% for p in collections.profiles %}
+        {% if forloop.Counter <= 8 %}
+        <li><a href="{{ p.url }}">{% if p.avatar %}<img src="{{ p.avatar }}" alt="" width="40" height="40">{% else %}<span class="avatar-blank">{{ p.name|slice:":1" }}</span>{% endif %} <span class="name">{{ p.name }}</span></a></li>
+        {% endif %}
+    {% endfor %}
+    </ul>
+</section>
+{% endblock %}

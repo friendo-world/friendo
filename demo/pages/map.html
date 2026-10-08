@@ -1,0 +1,8 @@
+{% extends "layouts/base.html" %}
+{% block title %}Town map — {{ site.name }}{% endblock %}
+{% block content %}
+<h1>Town map</h1>
+<p>Every published post with a place — blog posts, classifieds, events — on one map.
+Click a pin to open it. This is a single <code>&lt;friendo-map&gt;</code> with no post-id.</p>
+<friendo-map class="town-map"></friendo-map>
+{% endblock %}
