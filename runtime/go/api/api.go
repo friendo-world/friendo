@@ -132,7 +132,7 @@ func Mount(r chi.Router, db *data.DB, siteDir, siteName string, authFunc func(*h
 		// maybe) for one date of a post's event. Names for organizers only.
 		// A visitor may answer too when visitors_can_rsvp is on (see visitors.go).
 		r.Get("/posts/{id}/rsvps", featureGate(db, "rsvp", handleGetRSVPs(db, viewer)))
-		r.Post("/posts/{id}/rsvps", featureGate(db, "rsvp", visitorsMay(db, authFunc, "rsvp", func(a authFn) http.HandlerFunc { return handleSetRSVP(db, a) })))
+		r.Post("/posts/{id}/rsvps", featureGate(db, "rsvp", visitorsMay(db, authFunc, "rsvp", func(a authFn) http.HandlerFunc { return handleSetRSVP(db, a, permalink) })))
 		r.Delete("/posts/{id}/rsvps", featureGate(db, "rsvp", handleDeleteRSVP(db, viewer)))
 		r.Get("/posts/{id}/rsvps/names", featureGate(db, "rsvp", handleRSVPNames(db, authFunc)))
 		// Invitations: the organizer asks people (by address, group, or followers);
@@ -1054,8 +1054,14 @@ func rsvpPayload(db *data.DB, user *data.User, ev *data.Event, key string) map[s
 	if t, err := time.Parse(time.RFC3339, key); err == nil {
 		out["date_text"] = data.FormatWhen(t.In(ev.Location()), time.Time{}, ev.AllDay, time.Now().In(ev.Location()), "")
 	}
+	// reminders says whether this server can email one (an email provider is
+	// set up); reminder_email is the address the caller asked to be reminded at.
+	// names (and the emails in them) are for the organizer alone.
+	out["reminders"] = emailConfigured()
+	out["reminder_email"] = ""
 	if user != nil {
 		out["mine"] = db.RSVPForUser(ev.ID, key, user.ID)
+		out["reminder_email"] = db.RSVPReminderFor(ev.ID, key, user.ID)
 		if user.Can(data.CapReviewAny) || db.UserOwnsEventPost(user.ID, ev) {
 			if list, err := db.ListRSVPs(ev.ID, key); err == nil {
 				out["names"] = list
@@ -1101,9 +1107,13 @@ func handleGetRSVPs(db *data.DB, authFunc func(*http.Request) *data.User) http.H
 	}
 }
 
-// handleSetRSVP records the caller's answer for a date (any signed-in member,
-// or a visitor with a name when visitors_can_rsvp is on).
-func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.HandlerFunc {
+// handleSetRSVP records the caller's answer for a date: any signed-in member,
+// or a visitor when visitors_can_rsvp is on. A visitor needs no name — the
+// organizer sees "Visitor" — though one they give (or gave earlier, on a
+// comment) is kept. Anyone may add an email to be reminded the day before;
+// the organizer sees it with the answer, and nobody else does. permalink
+// resolves the event page for the reminder's link.
+func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User, permalink data.PermalinkFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := authFunc(r)
 		if user == nil {
@@ -1113,9 +1123,11 @@ func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.Ha
 		var in struct {
 			Occurrence string `json:"date"`
 			Answer     string `json:"answer"`
-			// A visitor's name: an organizer needs to tell who's coming, so a
-			// visitor gives one the first time they answer.
+			// A visitor's name, optional.
 			Name string `json:"name"`
+			// Where to send a reminder the day before, optional. The key being
+			// present with "" clears one asked for earlier.
+			Email *string `json:"email"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			jsonError(w, "invalid JSON", http.StatusBadRequest)
@@ -1129,31 +1141,59 @@ func handleSetRSVP(db *data.DB, authFunc func(*http.Request) *data.User) http.Ha
 		if !ok {
 			return
 		}
-		if user.IsVisitor() {
-			if strings.TrimSpace(in.Name) != "" {
-				if err := db.SetVisitorName(user.ID, in.Name); err != nil {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusBadRequest)
-					json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "needs_name": true})
-					return
-				}
-			} else if db.VisitorName(user.ID) == "" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(map[string]any{"error": "add your name so the organizer knows who's coming", "needs_name": true})
+		if in.Email != nil && strings.TrimSpace(*in.Email) != "" {
+			if err := data.ValidReminderEmail(*in.Email); err != nil {
+				jsonError(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+			if !emailConfigured() {
+				jsonError(w, "this site can't send email, so it can't remind you", http.StatusBadRequest)
+				return
+			}
+		}
+		if !setVisitorName(w, db, user, in.Name) {
+			return
 		}
 		if !db.RateLimitAllow("rsvp:"+user.ID, commentRateLimit, commentRateWindow) {
 			jsonError(w, "too many changes — slow down", http.StatusTooManyRequests)
 			return
 		}
-		if err := db.SetRSVP(ev.ID, key, db.DefaultAuthorID(user.ID), in.Answer); err != nil {
+		authorID := db.DefaultAuthorID(user.ID)
+		if err := db.SetRSVP(ev.ID, key, authorID, in.Answer); err != nil {
 			jsonError(w, fmt.Sprintf("rsvp error: %v", err), http.StatusInternalServerError)
 			return
 		}
+		if in.Email != nil {
+			if err := db.SetRSVPReminder(ev.ID, key, authorID, *in.Email, eventPageLink(r, db, ev, permalink)); err != nil {
+				jsonError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 		jsonResponse(w, rsvpPayload(db, user, ev, key))
 	}
+}
+
+// eventPageLink is the full address of an event's page as this request saw
+// the site ("" when the collection has no page), for the reminder email.
+func eventPageLink(r *http.Request, db *data.DB, ev *data.Event, permalink data.PermalinkFunc) string {
+	if permalink == nil || r.Host == "" {
+		return ""
+	}
+	rec, err := db.GetRecordByID(ev.TargetID)
+	if err != nil {
+		return ""
+	}
+	collection, _ := rec["collection"].(string)
+	slug, _ := rec["slug"].(string)
+	path := permalink(collection, map[string]string{"slug": slug})
+	if path == "" {
+		return ""
+	}
+	scheme := "http"
+	if requestIsHTTPS(r) {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host + path
 }
 
 // handleDeleteRSVP withdraws the caller's answer for an occurrence.

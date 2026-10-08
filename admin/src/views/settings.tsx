@@ -278,7 +278,7 @@ export function SettingsView() {
           {s && s.features.rsvp && (
             <Toggle
               label="Visitors can RSVP"
-              hint={managedHint("When on, someone who hasn't signed in can answer an event, giving a name. Organizers see them marked \"(visitor)\".", "visitors_can_rsvp")}
+              hint={managedHint("When on, someone who hasn't signed in can answer an event, no name needed. They can add a name and an email for a reminder the day before. Organizers see them as \"Visitor\" (or \"Robin (visitor)\") with that email; nobody else sees it.", "visitors_can_rsvp")}
               on={s.visitors_can_rsvp}
               disabled={saving || isManaged("visitors_can_rsvp")}
               onToggle={() => patch({ visitors_can_rsvp: !s.visitors_can_rsvp })}

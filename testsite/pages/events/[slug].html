@@ -24,12 +24,14 @@
 </article>
 
 <!-- RSVP. The tally line renders server-side from event.rsvps (readable with
-     JS off); the component asks the question and lets a signed-in member answer
-     for the next date. `names` shows who answered to the post's author and
-     moderators. -->
+     JS off); the component asks the question and lets a member answer for the
+     next date. With visitors_can_rsvp on (friendo.toml), someone signed out can
+     answer too, anonymously, with optional name and reminder-email boxes; the
+     tag's own Sign in button scrolls to the <friendo-signin> below. `names`
+     shows who answered to the post's author and moderators. -->
 <section class="community">
     <div class="signin">
-        <h2>Sign in to answer</h2>
+        <h2>{% if visitor.can.rsvp %}Sign in to keep your answer{% else %}Sign in to answer{% endif %}</h2>
         <p class="post-meta">So far: {{ event.rsvps.going }} going &middot; {{ event.rsvps.maybe }} maybe &middot; {{ event.rsvps.not_going }} can't go &middot; {{ event.rsvps.invited }} invited</p>
         {% if event.group %}<p class="post-meta">Part of <a href="/groups/{{ event.group.slug }}">{{ event.group.title }}</a></p>{% endif %}
         <friendo-signin></friendo-signin>

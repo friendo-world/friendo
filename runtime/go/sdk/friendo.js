@@ -1124,9 +1124,14 @@
   // The signed-in viewer's answer is the pressed button. Organizers (the post's
   // author, or a moderator) also see who answered when `names` is present.
   // When the site lets visitors RSVP (visitors_can_rsvp), someone who hasn't
-  // signed in can answer too, giving their name the first time.
-  // Parts: question, when, row, button, count, mine, names, name, status,
-  // signed-out, name-form, name-input, visitor, error.
+  // signed in answers with the same buttons, anonymously — nothing is required
+  // — with two optional boxes: a name for the organizer, and an email to be
+  // reminded the day before (shown when the site can send email). The organizer
+  // sees both beside the answer; nobody else does. A Sign in button goes to the
+  // page's own <friendo-signin> when it has one, otherwise opens one right here.
+  // Parts: question, when, row, button, count, mine, invited, invited-count,
+  // names, name, email, status, signed-out, visitor, signin, signin-box,
+  // visitor-form, name-input, reminder-input, reminder, error.
   class FriendoRSVP extends FriendoElement {
     css() {
       return (
@@ -1136,11 +1141,14 @@
         "border-radius:999px;background:#fafafa}" +
         'button[aria-pressed="true"]{background:#e8f0ff;border-color:#9db8ff}' +
         ".count{font-variant-numeric:tabular-nums;opacity:.75}" +
-        ".mine,.status,.signed-out{font-size:.9em;opacity:.75;margin-top:.5em}" +
+        ".mine,.status,.signed-out,.visitor{font-size:.9em;opacity:.75;margin-top:.5em}" +
+        ".link{display:inline;border:0;background:none;padding:0;color:inherit;text-decoration:underline;font:inherit}" +
         ".names{margin:.6em 0 0;padding:0;list-style:none;font-size:.9em}.names li{padding:.1em 0}" +
-        ".name{margin-top:.6em;display:flex;gap:.4em;flex-wrap:wrap;align-items:center}" +
-        ".name input{font:inherit;padding:.3em .5em;border:1px solid #ddd}" +
-        ".names .a{opacity:.6;margin-left:.4em}"
+        ".details{margin-top:.6em;display:flex;gap:.6em;flex-wrap:wrap;align-items:center;font-size:.9em}" +
+        ".details label{display:inline-flex;gap:.4em;align-items:center}" +
+        ".details input{font:inherit;padding:.3em .5em;border:1px solid #ddd;max-width:14em}" +
+        ".signin-box{margin-top:.6em}" +
+        ".names .a,.names .e{opacity:.6;margin-left:.4em}"
       );
     }
     async render() {
@@ -1155,16 +1163,19 @@
         return;
       }
       var user = await currentUser();
-      // A visitor (not signed in) may answer when the site allows it, giving a
-      // name the first time so the organizer knows who's coming.
+      // A visitor (not signed in) may answer when the site allows it; they're
+      // counted anonymously (as "Visitor" to the organizer, or by a name they
+      // gave elsewhere, say on a comment).
       var vis = user ? null : await visitorState();
       var visitorMay = !!(vis && vis.can && vis.can.rsvp);
+      var visitorName = (vis && vis.visitor && vis.visitor.name) || "";
       var answers = [
         { key: "going", label: this.getAttribute("going-label") || "Going" },
         { key: "maybe", label: this.getAttribute("maybe-label") || "Maybe" },
         { key: "not_going", label: this.getAttribute("not-going-label") || "Can't go" },
       ];
       var counts = data.counts || {};
+      var signin = '<button type="button" part="signin" class="link">Sign in</button>';
       var html =
         '<p part="question" class="q">' + esc(this.getAttribute("question") || "Are you coming?") + "</p>" +
         (data.date_text ? '<p part="when" class="when">' + esc(data.date_text) + "</p>" : "") +
@@ -1175,23 +1186,46 @@
         }).join("") +
         "</div>";
       if (!user && !visitorMay) {
-        html += '<div part="signed-out" class="signed-out">Sign in to answer.</div>';
+        html += '<div part="signed-out" class="signed-out">' + signin + " to answer.</div>";
       } else if (data.mine === "invited") {
         html += '<div part="invited" class="mine">You\'re invited — are you coming?</div>';
       } else if (data.mine) {
-        html += '<div part="mine" class="mine">You said <b>' + esc(labelFor(answers, data.mine)) + '</b>. <button type="button" part="button" data-clear="1" style="padding:.1em .5em;font-size:.9em">Clear</button>' +
-          (user ? "" : ' <span part="visitor">Sign in to keep this.</span>') + "</div>";
+        html += '<div part="mine" class="mine">You said <b>' + esc(labelFor(answers, data.mine)) + '</b>. <button type="button" part="button" data-clear="1" style="padding:.1em .5em;font-size:.9em">Clear</button></div>';
       }
+      var answered = !!data.mine && data.mine !== "invited";
       if (!user && visitorMay) {
-        html += '<form part="name-form" class="name" hidden><label>Your name <input part="name-input" name="name" maxlength="60" autocomplete="name" required></label>' +
-          '<button part="button" type="submit">Answer</button></form>';
+        // Two optional boxes: a name for the organizer, and (when this server
+        // can send email) an address for a reminder the day before. An answer
+        // button sends them along; Save re-sends the answer with new values.
+        html += '<form part="visitor-form" class="details">' +
+          '<label>Name <input part="name-input" name="name" placeholder="optional" maxlength="60" autocomplete="name" value="' + esc(visitorName) + '"></label>' +
+          (data.reminders
+            ? '<label>Email me a reminder <input part="reminder-input" type="email" name="email" placeholder="optional" autocomplete="email" value="' + esc(data.reminder_email || "") + '"></label>'
+            : "") +
+          '<button part="button" type="submit"' + (answered ? "" : " hidden") + ">Save</button></form>";
+        if (data.reminder_email) {
+          html += '<div part="reminder" class="status">We\'ll email <b>' + esc(data.reminder_email) + "</b> the day before.</div>";
+        }
+        var who = visitorName ? "as <b>" + esc(visitorName) + "</b> (visitor)" : "anonymously";
+        html += '<div part="visitor" class="visitor">' +
+          (answered
+            ? "Answered " + who + ". " + signin + " to keep it on your account."
+            : "Answer " + who + ", or " + signin + ".") +
+          "</div>";
+      }
+      if (!user) {
+        html += '<div part="signin-box" class="signin-box" hidden></div>';
       }
       if (counts.invited) {
         html += '<div part="invited-count" class="status">' + counts.invited + " invited, no answer yet</div>";
       }
       if (this.hasAttribute("names") && data.names && data.names.length) {
+        // The organizer's list (the server sends names to nobody else): a
+        // visitor's email, if they left one, shows with their answer.
         html += '<ul part="names" class="names">' + data.names.map(function (r) {
-          return '<li part="name">' + esc(r.author_name || "Someone") + '<span class="a">' + esc(labelFor(answers, r.answer)) + "</span></li>";
+          return '<li part="name">' + esc(r.author_name || "Someone") +
+            (r.visitor && r.author_email ? ' <span part="email" class="e">(' + esc(r.author_email) + ")</span>" : "") +
+            '<span class="a">' + esc(labelFor(answers, r.answer)) + "</span></li>";
         }).join("") + "</ul>";
       }
       html += '<div part="status" class="status" hidden></div>';
@@ -1199,17 +1233,11 @@
 
       var self = this;
       var status = this.shadowRoot.querySelector('[part="status"]');
-      var nameForm = this.shadowRoot.querySelector('[part="name-form"]');
-      var pending = "";
-      var askName = function (answer) {
-        pending = answer;
-        nameForm.hidden = false;
-        nameForm.querySelector("input").focus();
-      };
-      var send = async function (answer, name) {
+      // send records an answer; extra carries a reminder email with it.
+      var send = async function (answer, extra) {
         try {
           var body = { date: data.date, answer: answer };
-          if (name) body.name = name;
+          if (extra) for (var k in extra) body[k] = extra[k];
           await api("/posts/" + encodeURIComponent(postId) + "/rsvps", jsonBody("POST", body));
           visitorPromise = null; // a first answer may have made this browser a visitor
           self.dispatchEvent(new CustomEvent("friendo:rsvp", { bubbles: true, detail: { postId: postId, date: data.date, answer: answer } }));
@@ -1217,26 +1245,53 @@
         } catch (err) {
           status.hidden = false;
           status.textContent = err.message;
-          if (err.body && err.body.needs_name && nameForm) askName(answer);
         }
       };
+      // A visitor's optional name and reminder email, as typed right now.
+      var visitorForm = this.shadowRoot.querySelector('[part="visitor-form"]');
+      var details = function () {
+        if (!visitorForm) return null;
+        var out = {};
+        var name = visitorForm.querySelector('[name="name"]');
+        var email = visitorForm.querySelector('[name="email"]');
+        if (name && name.value.trim()) out.name = name.value.trim();
+        if (email) out.email = email.value.trim(); // "" takes a reminder back
+        return out;
+      };
       this.shadowRoot.querySelectorAll("button[data-answer]").forEach(function (btn) {
-        btn.onclick = async function () {
+        btn.onclick = function () {
           if (!user && !visitorMay) {
             self.dispatchEvent(new CustomEvent("friendo:needs-auth", { bubbles: true }));
             return;
           }
-          if (!user && !(vis.visitor && vis.visitor.name)) {
-            askName(btn.dataset.answer);
-            return;
-          }
-          send(btn.dataset.answer);
+          send(btn.dataset.answer, details());
         };
       });
-      if (nameForm) {
-        nameForm.onsubmit = function (e) {
+      if (visitorForm) {
+        visitorForm.onsubmit = function (e) {
           e.preventDefault();
-          send(pending, nameForm.querySelector("input").value.trim());
+          if (answered) send(data.mine, details());
+        };
+      }
+      // Sign in: the page's own <friendo-signin> if it has one on show, else
+      // one opened here. Signing in re-renders this tag as a member, with a
+      // visitor's answer carried over.
+      var signinBtn = this.shadowRoot.querySelector('[part="signin"]');
+      if (signinBtn) {
+        signinBtn.onclick = function () {
+          var own = document.querySelector("friendo-signin");
+          if (own && own.offsetParent !== null) {
+            own.scrollIntoView({ behavior: "smooth", block: "center" });
+            var input = own.shadowRoot && own.shadowRoot.querySelector('[part="email"]');
+            if (input) input.focus({ preventScroll: true });
+            return;
+          }
+          var box = self.shadowRoot.querySelector('[part="signin-box"]');
+          box.hidden = !box.hidden;
+          if (!box.hidden && !box.firstChild) box.appendChild(document.createElement("friendo-signin"));
+          var inner = box.querySelector("friendo-signin");
+          var field = inner && inner.shadowRoot && inner.shadowRoot.querySelector('[part="email"]');
+          if (!box.hidden && field) field.focus();
         };
       }
       var clear = this.shadowRoot.querySelector("button[data-clear]");

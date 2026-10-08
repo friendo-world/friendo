@@ -1,6 +1,7 @@
-// Package email delivers transactional email (today: passwordless login codes)
-// via Resend. It's shared by a site's own member login and the network's
-// device-auth, so the delivery path lives in exactly one place.
+// Package email delivers transactional email (passwordless login codes, and
+// the event reminders people ask for) via Resend. It's shared by a site's own
+// member login and the network's device-auth, so the delivery path lives in
+// exactly one place.
 //
 // Configure with RESEND_API_KEY + FRIENDO_EMAIL_FROM. When unset, Configured
 // reports false and callers fall back to the dev OTP echo.
@@ -37,29 +38,53 @@ func EchoEnabled() bool {
 	return false
 }
 
+// Send delivers one plain-text email through the provider. With none
+// configured it reports that, and sends nothing.
+func Send(to, subject, text string) error {
+	if !Configured() {
+		return fmt.Errorf("no email provider is configured")
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"from":    os.Getenv("FRIENDO_EMAIL_FROM"),
+		"to":      []string{to},
+		"subject": subject,
+		"text":    text,
+	})
+	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("RESEND_API_KEY"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send: %w", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("provider answered %s", resp.Status)
+	}
+	return nil
+}
+
 // SendLoginCode delivers a one-time login code. Best-effort: a delivery error is
 // logged, not returned, so a provider hiccup never leaks whether an email exists.
 func SendLoginCode(to, code string) {
 	if !Configured() {
 		return
 	}
-	payload, _ := json.Marshal(map[string]any{
-		"from":    os.Getenv("FRIENDO_EMAIL_FROM"),
-		"to":      []string{to},
-		"subject": "Your sign-in code",
-		"text":    fmt.Sprintf("Your code is %s. It expires in 10 minutes.", code),
-	})
-	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", strings.NewReader(string(payload)))
-	if err != nil {
-		log.Printf("login code email: build request: %v", err)
-		return
+	if err := Send(to, "Your sign-in code", fmt.Sprintf("Your code is %s. It expires in 10 minutes.", code)); err != nil {
+		log.Printf("login code email: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("RESEND_API_KEY"))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("login code email: send: %v", err)
-		return
+}
+
+// SendEventReminder tells someone an event they said they're coming to is
+// tomorrow: its title, when, and the page to look at (link may be "").
+func SendEventReminder(to, title, when, link string) error {
+	text := fmt.Sprintf("Reminder: %s is coming up — %s.", title, when)
+	if link != "" {
+		text += "\n\n" + link
 	}
-	resp.Body.Close()
+	text += "\n\nYou asked for this reminder when you RSVP'd. There's nothing else coming from this address."
+	return Send(to, "Reminder: "+title, text)
 }

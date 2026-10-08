@@ -12,9 +12,12 @@ website  = { kind = "text", hint = "https://…" }
 
 # Declared here, so it's applied on startup and shown read-only in admin Settings.
 # This also lets the /submit demo take posts from members (into the review queue),
-# shows every member's profile page to visitors, and lets members start groups.
+# shows every member's profile page to visitors, lets members start groups, and
+# lets someone who hasn't signed in answer an event (anonymously, with optional
+# name and reminder-email boxes).
 [settings]
 members_can_post = true
+visitors_can_rsvp = true
 profile_visibility = "public"
 members_can_start_groups = true
 

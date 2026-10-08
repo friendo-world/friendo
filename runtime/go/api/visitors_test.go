@@ -234,7 +234,8 @@ func TestRequestCodeMakesNoAccount(t *testing.T) {
 	}
 }
 
-// A visitor's RSVP needs a name, and the organizer sees it marked.
+// A visitor's RSVP needs no name — the organizer sees "Visitor" — but a name
+// they give is kept and marked, and a member's name is refused.
 func TestVisitorRSVP(t *testing.T) {
 	s := newVisitorSite(t, "visitors_can_rsvp = true")
 	s.db.CreateMember("sam@test.com", "Sam", "member")
@@ -246,26 +247,80 @@ func TestVisitorRSVP(t *testing.T) {
 	path := "/posts/" + post + "/rsvps"
 
 	rec, visitor := s.do("POST", path, "", `{"answer":"going"}`)
-	if rec.Code != http.StatusBadRequest || decode(t, rec)["needs_name"] != true {
-		t.Fatalf("no name = %d %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || decode(t, rec)["mine"] != "going" {
+		t.Fatalf("anonymous rsvp = %d %s", rec.Code, rec.Body.String())
+	}
+	list, _ := s.db.ListRSVPs(s.db.EventFor(post).ID, "")
+	if len(list) != 1 || list[0]["author_name"] != "Visitor" || list[0]["visitor"] != true {
+		t.Fatalf("organizer list = %v", list)
 	}
 	if rec, _ := s.do("POST", path, visitor, `{"answer":"going","name":"sam"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("a member's name = %d, want 400", rec.Code)
 	}
-	rec, _ = s.do("POST", path, visitor, `{"answer":"going","name":"Robin"}`)
-	if rec.Code != http.StatusOK || decode(t, rec)["mine"] != "going" {
-		t.Fatalf("rsvp = %d %s", rec.Code, rec.Body.String())
+	rec, _ = s.do("POST", path, visitor, `{"answer":"maybe","name":"Robin"}`)
+	if rec.Code != http.StatusOK || decode(t, rec)["mine"] != "maybe" {
+		t.Fatalf("named rsvp = %d %s", rec.Code, rec.Body.String())
 	}
-	// Once named, later answers need no name.
-	if rec, _ := s.do("POST", path, visitor, `{"answer":"maybe"}`); rec.Code != http.StatusOK {
-		t.Fatalf("second answer = %d %s", rec.Code, rec.Body.String())
-	}
-	list, _ := s.db.ListRSVPs(s.db.EventFor(post).ID, "")
-	if len(list) != 1 || list[0]["author_name"] != "Robin (visitor)" || list[0]["visitor"] != true {
+	list, _ = s.db.ListRSVPs(s.db.EventFor(post).ID, "")
+	if len(list) != 1 || list[0]["author_name"] != "Robin (visitor)" {
 		t.Fatalf("organizer list = %v", list)
 	}
 	if rec, _ := s.do("DELETE", path, visitor, ""); rec.Code != http.StatusOK {
 		t.Fatalf("clear = %d", rec.Code)
+	}
+}
+
+// A visitor may leave an email to be reminded the day before. It's kept on
+// the answer, reported back to them and to the organizer (and nobody else),
+// and refused when the server can't send email or the address isn't one.
+func TestVisitorRSVPReminder(t *testing.T) {
+	s := newVisitorSite(t, "visitors_can_rsvp = true")
+	post, _ := s.db.CreateRecord("events", "club", "Club", "", "published", "")
+	ev, _, _ := data.ParseWhen(map[string]any{"when": map[string]any{"start": "2026-10-06 19:00 to 20:30", "repeats": "weekly"}}, s.db.Location)
+	if err := s.db.ReconcileWhen(post, ev); err != nil {
+		t.Fatal(err)
+	}
+	path := "/posts/" + post + "/rsvps"
+
+	// No provider: the tally says so, and an email is refused.
+	rec, visitor := s.do("POST", path, "", `{"answer":"going"}`)
+	if rec.Code != http.StatusOK || decode(t, rec)["reminders"] != false {
+		t.Fatalf("no provider: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec, _ := s.do("POST", path, visitor, `{"answer":"going","email":"me@example.com"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("email with no provider = %d, want 400", rec.Code)
+	}
+
+	t.Setenv("RESEND_API_KEY", "test")
+	t.Setenv("FRIENDO_EMAIL_FROM", "Site <hi@example.com>")
+	if rec, _ := s.do("POST", path, visitor, `{"answer":"going","email":"not-an-email"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad email = %d, want 400", rec.Code)
+	}
+	rec, _ = s.do("POST", path, visitor, `{"answer":"going","email":"Me@Example.com"}`)
+	out := decode(t, rec)
+	if rec.Code != http.StatusOK || out["reminders"] != true || out["reminder_email"] != "me@example.com" {
+		t.Fatalf("reminder = %d %s", rec.Code, rec.Body.String())
+	}
+	// Answering again keeps it. The organizer's list shows it beside
+	// "Visitor"; a signed-out reader of the tally never gets names at all.
+	rec, _ = s.do("POST", path, visitor, `{"answer":"maybe"}`)
+	if decode(t, rec)["reminder_email"] != "me@example.com" {
+		t.Fatalf("a new answer dropped the reminder: %s", rec.Body.String())
+	}
+	list, _ := s.db.ListRSVPs(s.db.EventFor(post).ID, "")
+	if len(list) != 1 || list[0]["author_name"] != "Visitor" || list[0]["author_email"] != "me@example.com" {
+		t.Fatalf("organizer list = %v", list)
+	}
+	if _, has := out["names"]; has {
+		t.Fatalf("a visitor got the names list: %v", out)
+	}
+	if rec, _ := s.do("GET", path, visitor, ""); rec.Code != http.StatusOK || decode(t, rec)["names"] != nil {
+		t.Fatalf("a visitor's tally carries names: %s", rec.Body.String())
+	}
+	// The key present but empty clears it.
+	rec, _ = s.do("POST", path, visitor, `{"answer":"maybe","email":""}`)
+	if decode(t, rec)["reminder_email"] != "" {
+		t.Fatalf("clearing = %s", rec.Body.String())
 	}
 }
 

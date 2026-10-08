@@ -175,9 +175,9 @@ The calendar feeds live at the **site root**, not under `/_/api`:
 
 | Route | What | Who |
 |---|---|---|
-| `GET /posts/{id}/rsvps?date=` | The tally for a date (the next one by default), your answer, and the names for organizers | public |
-| `POST /posts/{id}/rsvps {answer, date?}` | Answer `going`, `maybe` or `not_going` | members |
-| `DELETE /posts/{id}/rsvps?date=` | Take your answer back | members |
+| `GET /posts/{id}/rsvps?date=` | The tally for a date (the next one by default), your answer, whether this site can send reminders (`reminders`) and the email yours goes to (`reminder_email`). Organizers also get `names`, each with an email where there is one (a visitor's reminder address included) | public |
+| `POST /posts/{id}/rsvps {answer, date?, email?, name?}` | Answer `going`, `maybe` or `not_going`. `email` asks for a reminder the day before (`""` takes it back); `name` is a [visitor's](/docs/visitors), optional | members, or visitors when allowed |
+| `DELETE /posts/{id}/rsvps?date=` | Take your answer back | members, or visitors when allowed |
 | `GET /posts/{id}/rsvps/names` (`?format=csv`) | Every answer, grouped by date | the author, or moderators and up |
 | `POST /posts/{id}/invites {slugs?, profile_ids?, group?, followers?, date?}` | Invite people | the author, or moderators and up |
 | `GET /me/calendar`, `POST /me/calendar/reset` | The member's private feed link, and a fresh one | members |

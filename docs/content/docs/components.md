@@ -236,9 +236,12 @@ Going / Maybe / Can't go on an [event](/docs/calendar#rsvp).
 | `question`, `going-label`, `maybe-label`, `not-going-label` | Your own wording |
 
 Parts: `question`, `when`, `row`, `button`, `count`, `mine`, `invited`,
-`invited-count`, `names`, `name`, `status`, `signed-out`, and for
-[visitors](/docs/visitors) `name-form`, `name-input` and `visitor`. Fires
-`friendo:rsvp` with `postId`, `date` and `answer`.
+`invited-count`, `names`, `name`, `email` (a visitor's, in the organizer's
+list), `status`, `signed-out`, `signin` (the Sign in button) and `signin-box`
+(the sign-in it opens when the page has none), and for
+[visitors](/docs/visitors) `visitor`, `visitor-form`, `name-input`,
+`reminder-input` and `reminder`. Fires `friendo:rsvp` with `postId`, `date` and
+`answer`.
 
 ## `<friendo-invite>`
 

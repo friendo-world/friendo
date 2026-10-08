@@ -164,11 +164,13 @@ func (db *DB) RSVPForUser(eventID, occurrence, userID string) string {
 
 // ListRSVPs lists who answered for one occurrence (organizer view), with each
 // author's display name and an email to reach them (the profile's, else the
-// account's — a pen name still has a person behind it). A visitor has no email.
+// account's — a pen name still has a person behind it; else the one a visitor
+// left for a reminder). This is the organizer's view only: the names, and so
+// the emails, never reach anyone else (see rsvpPayload and handleRSVPNames).
 func (db *DB) ListRSVPs(eventID, occurrence string) ([]map[string]any, error) {
 	rows, err := db.Conn.Query(
 		`SELECT r.id, r.occurrence, r.author_id, r.answer, r.created, r.updated,
-		        COALESCE(a.name, ''), COALESCE(NULLIF(a.email, ''), u.email, ''), COALESCE(a.role, '')
+		        COALESCE(a.name, ''), COALESCE(NULLIF(a.email, ''), NULLIF(u.email, ''), r.reminder_email, ''), COALESCE(a.role, '')
 		 FROM rsvps r LEFT JOIN authors a ON a.id = r.author_id
 		               LEFT JOIN users u ON u.id = a.user_id
 		 WHERE r.site_id = ? AND r.event_id = ? AND (? = '' OR r.occurrence = ?)

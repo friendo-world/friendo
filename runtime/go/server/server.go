@@ -110,6 +110,8 @@ func Start(port int, openAdmin, requireLogin bool) error {
 	// Start file watcher for hot reload. A change under pages/ also rebuilds the
 	// route table, so a new [slug].html starts routing without a restart.
 	go watchForChanges(siteDir, db, site.Reload)
+	// Event reminders ("email me the day before" on an RSVP) go out from here.
+	go runReminders(db)
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Serving on http://localhost%s\n", addr)

@@ -57,7 +57,11 @@ func Open(siteDir string) (*DB, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "friendo.db")
-	conn, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	// modernc's driver takes pragmas as _pragma=name(value); the mattn-style
+	// _journal_mode= / _busy_timeout= keys are silently ignored, which left the
+	// database in rollback-journal mode with no wait: a page's reads failed
+	// with "database is locked" whenever another request was writing.
+	conn, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}

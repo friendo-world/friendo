@@ -230,6 +230,19 @@ one a `date` attribute names), so a weekly meet-up asks about this week.
 moderators. `event.rsvps` is the tally for the next date, server-rendered:
 `going`, `maybe`, `not_going`, `invited` and `date`.
 
+**Visitors.** With **Visitors can RSVP** on ([`visitors_can_rsvp`](/docs/visitors)),
+someone who hasn't signed in answers with the same buttons, anonymously: nothing
+is required, and the organizer sees *Visitor*. Two optional boxes sit under the
+buttons, a name and an email to be reminded the day before; an answer button
+sends whatever is in them, and **Save** updates them later. The reminder goes
+out once, in the 24 hours before the date, with the event's name, time and page.
+The email box only appears when the site can [send email](/docs/email). The
+organizer sees the name and email beside the answer (on the page with `names`,
+in the admin and in the CSV, as *Visitor* plus the email); nobody else on the
+site ever does. A **Sign in** button beside the answer goes to the page's own
+`<friendo-signin>` if there is one, otherwise opens a sign-in box inside the
+tag; signing in carries the answer onto their account.
+
 **Inviting people.** The organizer (the event's author, or a moderator) can ask
 people to come. Each gets an RSVP waiting for their answer (*You're invited — are
 you coming?* on the event page) and a note in their [inbox](/docs/profiles):

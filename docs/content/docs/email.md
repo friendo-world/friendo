@@ -74,9 +74,13 @@ sign-in for requests from `localhost` when no email provider is set, and
 
 ## What gets emailed
 
-Only sign-in codes. Everything else a member should know (a new follower, a
-comment on their post, a group invite) goes to their inbox on the site, the
-`<friendo-inbox>` tag. See [Profiles](/docs/profiles).
+Sign-in codes, and event reminders: someone who [RSVPs](/docs/calendar#rsvp) can
+leave an email to be reminded the day before, and the server emails it once, in
+the 24 hours before the date. The event's organizer can see that address; nobody
+else can. Without a provider the reminder box isn't offered.
+Everything else a member should know (a new follower, a comment on their post, a
+group invite) goes to their inbox on the site, the `<friendo-inbox>` tag. See
+[Profiles](/docs/profiles).
 
 **Next:** [Self-host a site](/docs/self-host-a-site), or
 [Environment variables](/docs/env) for every variable the server reads.

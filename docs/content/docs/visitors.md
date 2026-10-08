@@ -34,8 +34,11 @@ let visitors in.
 ## What a visitor sees
 
 - **Reactions and votes** count straight away.
-- **RSVPs** ask for a name the first time, so whoever organizes the event knows
-  who's coming.
+- **RSVPs** need nothing: the buttons just work, and the organizer sees
+  *Visitor*. Two optional boxes sit under them: a name, and (when the site can
+  [send email](/docs/email)) an email to be reminded the day before. The
+  organizer sees both beside the answer, *Visitor (robin@example.com)*; nobody
+  else on the site does. A **Sign in** button sits beside the answer.
 - **Comments** have a box for an optional name. A visitor's comment always
   [waits for review](/docs/review), even when members' comments don't. Until
   it's approved, only the visitor sees it, and they can delete it.

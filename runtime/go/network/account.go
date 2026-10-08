@@ -135,7 +135,7 @@ func OpenAccounts(root string) (*Accounts, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating network state dir: %w", err)
 	}
-	conn, err := sql.Open("sqlite", filepath.Join(dir, "accounts.db")+"?_journal_mode=WAL&_busy_timeout=5000")
+	conn, err := sql.Open("sqlite", filepath.Join(dir, "accounts.db")+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)") // modernc pragma syntax; see data.Open
 	if err != nil {
 		return nil, err
 	}
