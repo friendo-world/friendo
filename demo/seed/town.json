@@ -1,34 +1,34 @@
 {
-  "_comment": "Who lives in Hollowbrook, and what they've done to each other. demo.mjs reads this (and posts/**.md) once, on a fresh database. Every account signs in with the password below, or with the emailed code (echoed in the form in local dev).",
-  "password": "hollowbrook",
+  "_comment": "Who lives in Demoville, and what they've done to each other. demo.mjs reads this (and posts/**.md) once, on a fresh database. Every account signs in with the password below, or with the emailed code (echoed in the form in local dev).",
+  "password": "demoville",
   "people": [
     {
-      "name": "Dana Whitfield", "email": "dana@hollowbrook.test", "role": "owner",
+      "name": "Dana Whitfield", "email": "dana@demoville.test", "role": "owner",
       "bio": "I run the site. Librarian by day. If something's broken, it's probably my fault.",
       "fields": { "pronouns": "she/her", "website": "https://friendo.world", "headline": "your friendly neighbourhood webmaster", "mood": "caffeinated" }
     },
     {
-      "name": "Marcus Bell", "email": "marcus@hollowbrook.test", "role": "moderator",
+      "name": "Marcus Bell", "email": "marcus@demoville.test", "role": "moderator",
       "bio": "Moderator. Coaches the under-12s. Will approve your post faster if it has a photo.",
       "fields": { "pronouns": "he/him", "headline": "keeping it civil since 2003", "mood": "patient" }
     },
     {
-      "name": "Priya Raman", "email": "priya@hollowbrook.test", "role": "member",
+      "name": "Priya Raman", "email": "priya@demoville.test", "role": "member",
       "bio": "Bakes too much. Runs the book club. Currently reading three things at once.",
       "fields": { "pronouns": "she/her", "headline": "one more chapter", "mood": "cosy", "accent": "#3b5998" }
     },
     {
-      "name": "Sam Okafor", "email": "sam@hollowbrook.test", "role": "member",
-      "bio": "skate. music. hollowbrook high class of '07. my page my rules!!!",
+      "name": "Sam Okafor", "email": "sam@demoville.test", "role": "member",
+      "bio": "skate. music. demoville high class of '07. my page my rules!!!",
       "fields": { "pronouns": "they/them", "headline": "~*~ live loud ~*~", "mood": "hyper", "background": "hotpink", "accent": "lime", "font": "Comic Sans MS" }
     },
     {
-      "name": "Jordan Ellis", "email": "jordan@hollowbrook.test", "role": "member",
+      "name": "Jordan Ellis", "email": "jordan@demoville.test", "role": "member",
       "bio": "Garage sale hunter. If you're selling a lamp, I've already seen it.",
       "fields": { "pronouns": "he/him", "headline": "everything must go", "mood": "bargain-hunting", "background": "#000", "accent": "orange", "font": "Impact" }
     },
     {
-      "name": "Ruth Kowalski", "email": "ruth@hollowbrook.test", "role": "member",
+      "name": "Ruth Kowalski", "email": "ruth@demoville.test", "role": "member",
       "bio": "Retired. On the town council. I will read your whole post.",
       "fields": { "pronouns": "she/her", "headline": "ask me about zoning", "mood": "thorough", "accent": "darkgreen", "font": "Times New Roman" }
     }
@@ -45,8 +45,8 @@
     "town-council": { "members": ["ruth-kowalski", "dana-whitfield"], "moderator": "ruth-kowalski" }
   },
   "comments": [
-    { "post": "welcome-to-hollowbrook-online", "by": "ruth-kowalski", "body": "Lovely to see the town online. Will the council minutes be posted here?" },
-    { "post": "welcome-to-hollowbrook-online", "by": "sam-okafor", "body": "FIRST!!! lol. nice site dana" },
+    { "post": "welcome-to-demoville-online", "by": "ruth-kowalski", "body": "Lovely to see the town online. Will the council minutes be posted here?" },
+    { "post": "welcome-to-demoville-online", "by": "sam-okafor", "body": "FIRST!!! lol. nice site dana" },
     { "post": "october-book-pick", "by": "ruth-kowalski", "body": "I read it in 1998. It holds up." },
     { "post": "october-book-pick", "by": "dana-whitfield", "body": "We have four copies at the library, two are out." },
     { "post": "new-deck-at-the-skate-spot", "by": "jordan-ellis", "body": "saw the old one at a yard sale on Elm for $5 lol" },
@@ -54,9 +54,9 @@
     { "post": "schwinn-10-speed", "by": "sam-okafor", "body": "does it have the original seat?" }
   ],
   "reactions": [
-    { "post": "welcome-to-hollowbrook-online", "by": "sam-okafor", "emoji": "🎉" },
-    { "post": "welcome-to-hollowbrook-online", "by": "priya-raman", "emoji": "❤️" },
-    { "post": "welcome-to-hollowbrook-online", "by": "marcus-bell", "emoji": "👍" },
+    { "post": "welcome-to-demoville-online", "by": "sam-okafor", "emoji": "🎉" },
+    { "post": "welcome-to-demoville-online", "by": "priya-raman", "emoji": "❤️" },
+    { "post": "welcome-to-demoville-online", "by": "marcus-bell", "emoji": "👍" },
     { "post": "october-book-pick", "by": "dana-whitfield", "emoji": "❤️" },
     { "post": "new-deck-at-the-skate-spot", "by": "jordan-ellis", "emoji": "🤯" },
     { "post": "new-deck-at-the-skate-spot", "by": "priya-raman", "emoji": "👍" },

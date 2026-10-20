@@ -31,7 +31,7 @@ friendo/
 │       ├── renderer/     # Pongo2 filters
 │       ├── export/       # Static HTML export
 │       └── scaffold/     # `friendo init` templates
-├── demo/                 # Hollowbrook Online — the demo site, with seed data and four looks (see demo/README.md)
+├── demo/                 # Demoville Online — the demo site, with seed data and four looks (see demo/README.md)
 ├── tests/                # Go regression suite (REST scenarios, template render, SQL splitter) + SDK browser check
 ├── go.mod                # Single Go module at repo root
 └── package.json          # Dev scripts

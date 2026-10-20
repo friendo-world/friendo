@@ -1,5 +1,5 @@
 ---
-title: Hollowbrook Book Club
+title: Demoville Book Club
 slug: book-club
 visibility: public
 join: open

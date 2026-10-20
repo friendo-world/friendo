@@ -1,7 +1,7 @@
 /* MySpace, 2006. Verdana at 10px, the navy header, orange headings, table-ish
    blue section bars, "a place for friends". The point of this one is the profile
    page: every member's own background, colour and font come through, the way a
-   pasted-in stylesheet used to. (Hollowbrook offers a few fields instead of raw
+   pasted-in stylesheet used to. (Demoville offers a few fields instead of raw
    CSS; see friendo.toml [profiles.fields].) */
 
 :root {

@@ -33,7 +33,7 @@ Tune it from your stylesheet with custom properties on the tag:
 
 ```css
 friendo-chat {
-  --chat-mine: #6d5dfc;      /* your bubbles and the Send button */
+  --chat-mine: #6d5dfc;      /* your bubbles */
   --chat-theirs: #e9e9eb;    /* everyone else's bubbles */
   --chat-border: #d9d9de;
   --chat-background: #fff;

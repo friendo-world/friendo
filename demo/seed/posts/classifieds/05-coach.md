@@ -4,7 +4,7 @@ slug: wanted-assistant-coach
 author: marcus-bell
 category: jobs
 price: volunteer
-contact: marcus@hollowbrook.test
+contact: marcus@demoville.test
 ---
 
 Saturday mornings, September to November. You don't need to be good at soccer; you

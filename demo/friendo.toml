@@ -1,9 +1,9 @@
-# Hollowbrook Online — the friendo demo site. A small-town community network in
+# Demoville Online — the friendo demo site. A small-town community network in
 # the style of the early 2000s, built to show (and test) everything friendo ships.
 # Run it with `npm run demo` from the repo root; see demo/README.md.
 
 [site]
-name = "Hollowbrook Online"
+name = "Demoville Online"
 timezone = "America/Chicago"
 
 [content]

@@ -1,4 +1,4 @@
-// Hollowbrook Online — runs the friendo demo. Starts the runtime over demo/ and,
+// Demoville Online — runs the friendo demo. Starts the runtime over demo/ and,
 // when the database is new, fills the town in (people, profiles, posts, comments,
 // reactions, follows, groups, chats, RSVPs) through the same /_/api the tags use.
 // Nothing here is special to the demo: it's a script doing what a browser would.
@@ -308,7 +308,7 @@ async function seed() {
 function cheatSheet(town) {
   console.log("");
   console.log("============================================");
-  console.log(`  Hollowbrook Online  →  ${ORIGIN}/`);
+  console.log(`  Demoville Online  →  ${ORIGIN}/`);
   console.log(`  admin               →  ${ORIGIN}/_/`);
   console.log("");
   console.log("  Sign in as anyone (the emailed code is shown in the form in local dev;");
@@ -323,7 +323,7 @@ function cheatSheet(town) {
 try {
   const status = await waitForReady();
   if (status.needsSetup) {
-    console.log("demo: fresh database — seeding Hollowbrook…");
+    console.log("demo: fresh database — seeding Demoville…");
     const town = await seed();
     if (warnings.length) console.log(`demo: seeded with ${warnings.length} warning(s) (above)`);
     else console.log("demo: seeded");

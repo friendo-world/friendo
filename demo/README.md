@@ -1,4 +1,4 @@
-# Hollowbrook Online — the friendo demo
+# Demoville Online — the friendo demo
 
 A small-town community network, circa 2003, built from everything friendo ships:
 blogs, classifieds, people with profile pages, groups, a calendar, a map, chat,
@@ -20,16 +20,16 @@ as browsers would, and prints who's who.
 
 Sign in as anyone: type the email in the sign-in box and the emailed code is
 shown right in the form (local dev has no email provider). Every account also
-has the password `hollowbrook`, which the seed script uses.
+has the password `demoville`, which the seed script uses.
 
 | Who | Email | Role | How they decorated their page |
 |---|---|---|---|
-| Dana Whitfield | dana@hollowbrook.test | owner | plain |
-| Marcus Bell | marcus@hollowbrook.test | moderator | plain |
-| Priya Raman | priya@hollowbrook.test | member | thefacebook-blue links |
-| Sam Okafor | sam@hollowbrook.test | member | hot pink, Comic Sans, lime links |
-| Jordan Ellis | jordan@hollowbrook.test | member | black, Impact, orange links |
-| Ruth Kowalski | ruth@hollowbrook.test | member | Times, dark green |
+| Dana Whitfield | dana@demoville.test | owner | plain |
+| Marcus Bell | marcus@demoville.test | moderator | plain |
+| Priya Raman | priya@demoville.test | member | thefacebook-blue links |
+| Sam Okafor | sam@demoville.test | member | hot pink, Comic Sans, lime links |
+| Jordan Ellis | jordan@demoville.test | member | black, Impact, orange links |
+| Ruth Kowalski | ruth@demoville.test | member | Times, dark green |
 
 They follow each other, belong to groups (the Town Council is private), have
 commented, reacted, voted, chatted and RSVP'd. All of it is in
@@ -50,7 +50,7 @@ site's stylesheet and remembers the choice in the browser:
 | Look | File | What it is for |
 |---|---|---|
 | Unstyled | none | No stylesheet at all. Browser defaults plus whatever each `<friendo-*>` tag ships. **Check a new tag here first.** |
-| Hollowbrook (2003) | [`assets/themes/board.css`](assets/themes/board.css) | The default. A community board: Verdana, beveled buttons, blue title bars, a hit counter. |
+| Demoville (2003) | [`assets/themes/board.css`](assets/themes/board.css) | The default. A community board: Verdana, beveled buttons, blue title bars, a hit counter. |
 | thefacebook (2005) | [`assets/themes/facebook.css`](assets/themes/facebook.css) | The blue bar, a left column of links, grey hairlines. |
 | MySpace (2006) | [`assets/themes/myspace.css`](assets/themes/myspace.css) | Orange headings, blue section bars, and member-decorated profile pages. |
 
@@ -72,7 +72,7 @@ decorations on top. `[profiles.fields]` in `friendo.toml` gives every member a
 their own page (or from the sign-in box). The profile page puts them on
 `<body>` as custom properties (`--profile-background`, `--profile-accent`,
 `--profile-font`), and each stylesheet reads them under `.profile-page`.
-MySpace honours all of them; Hollowbrook the colours and font;
+MySpace honours all of them; Demoville the colours and font;
 thefacebook only the accent, which is about what thefacebook allowed. There is deliberately no
 raw-CSS field: a member's CSS would run for every visitor of their page.
 

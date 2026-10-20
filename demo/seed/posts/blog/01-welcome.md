@@ -1,16 +1,16 @@
 ---
-title: Welcome to Hollowbrook Online
-slug: welcome-to-hollowbrook-online
+title: Welcome to Demoville Online
+slug: welcome-to-demoville-online
 author: dana-whitfield
 mood: hyped
 tags: [meta, welcome]
 location:
   lat: 41.8781
   lng: -87.6298
-  label: Hollowbrook Public Library
+  label: Demoville Public Library
 ---
 
-Hi, neighbours. This is **Hollowbrook Online**, a place for the town to talk to itself.
+Hi, neighbours. This is **Demoville Online**, a place for the town to talk to itself.
 
 Here's what you can do:
 

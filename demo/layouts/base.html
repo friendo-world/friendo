@@ -13,7 +13,7 @@
          page and remembered in this browser. Each file under assets/themes/ is a
          complete skin: the page chrome and the ::part() rules for every tag.
            none      — no stylesheet at all: browser defaults + what friendo ships
-           board     — Hollowbrook's own look, a community board circa 2003 (default)
+           board     — Demoville's own look, a community board circa 2003 (default)
            facebook  — thefacebook, 2005
            myspace   — MySpace, 2006
          A profile page keeps the visitor's pick too; what its owner decorates
@@ -24,13 +24,13 @@
             var THEMES = ["none", "board", "facebook", "myspace"];
             var link = document.getElementById("theme");
             var saved = null;
-            try { saved = localStorage.getItem("hollowbrook-theme"); } catch (e) {}
+            try { saved = localStorage.getItem("demoville-theme"); } catch (e) {}
             var theme = THEMES.indexOf(saved) >= 0 ? saved : "board";
             // This runs before <body> exists, so swapping now never flashes.
             if (theme === "none") link.disabled = true;
             else link.href = "/assets/themes/" + theme + ".css";
             document.documentElement.setAttribute("data-theme", theme);
-            window.hollowbrookTheme = { current: theme };
+            window.demovilleTheme = { current: theme };
         })();
     </script>
 </head>
@@ -38,7 +38,7 @@
 
 <header class="masthead">
     <a class="brand" href="/"><span class="brand-mark">✿</span> {{ site.name }}</a>
-    <p class="tagline">Hollowbrook's own corner of the web &mdash; est. 2003</p>
+    <p class="tagline">Demoville's own corner of the web &mdash; est. 2003</p>
     <p class="whoami">
         {% if user %}Hi, <a href="/profiles/">{{ user.name }}</a>!
             {% if user.unread %}<a class="unread" href="/inbox">{{ user.unread }} new</a>{% endif %}
@@ -105,7 +105,7 @@
     <label style="font:12px/1 Verdana,sans-serif">Look:
         <select id="theme-switcher" aria-label="Site look">
             <option value="none">Unstyled</option>
-            <option value="board">Hollowbrook (2003)</option>
+            <option value="board">Demoville (2003)</option>
             <option value="facebook">thefacebook (2005)</option>
             <option value="myspace">MySpace (2006)</option>
         </select>
@@ -115,10 +115,10 @@
     (function () {
         var sel = document.getElementById("theme-switcher");
         var link = document.getElementById("theme");
-        sel.value = window.hollowbrookTheme.current;
+        sel.value = window.demovilleTheme.current;
         sel.addEventListener("change", function () {
             var theme = sel.value;
-            try { localStorage.setItem("hollowbrook-theme", theme); } catch (e) {}
+            try { localStorage.setItem("demoville-theme", theme); } catch (e) {}
             if (theme === "none") { link.disabled = true; }
             else { link.disabled = false; link.href = "/assets/themes/" + theme + ".css"; }
             document.documentElement.setAttribute("data-theme", theme);

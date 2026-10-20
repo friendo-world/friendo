@@ -23,7 +23,7 @@ Every tag names the pieces you may style. Pick the tag and the part:
 
 ```css
 friendo-comments::part(submit) { background: rebeccapurple; color: #fff; }
-friendo-comments::part(input)  { font-family: inherit; border-radius: 0; }
+friendo-comments::part(input)  { border: 1px solid #999; padding: .5em; }
 friendo-poll::part(bar)        { background: #eef; }
 friendo-reactions::part(button) { border: 1px solid currentColor; }
 friendo-reactions::part(button):hover { background: #f5f5f5; }
@@ -48,7 +48,7 @@ stylesheet alternates them: `:nth-child()` doesn't work after `::part()`.
 
 ```css
 friendo-chat {
-  --chat-mine: #6d5dfc;      /* your bubbles and the Send button */
+  --chat-mine: #6d5dfc;      /* your bubbles */
   --chat-theirs: #e9e9eb;    /* everyone else's bubbles */
   --chat-border: #d9d9de;
   --chat-background: #fff;
@@ -85,8 +85,8 @@ with `::part()`, for example `friendo-input::part(toolbar)`.
 ## The pressed state
 
 Reaction, poll, RSVP and follow buttons carry `aria-pressed="true"` for the
-member's own choice, so screen readers announce it, and the tags highlight it
-themselves.
+member's own choice, so screen readers announce it, and the tags show it in
+bold.
 
 > **Common mistake:** `friendo-reactions::part(button)[aria-pressed="true"]`
 > matches nothing. CSS doesn't allow an attribute selector after `::part()`, and

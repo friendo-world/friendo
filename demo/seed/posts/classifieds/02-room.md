@@ -4,7 +4,7 @@ slug: room-above-the-bakery
 author: priya-raman
 category: housing
 price: $450/month
-contact: priya@hollowbrook.test
+contact: priya@demoville.test
 ---
 
 One room, own bathroom, shared kitchen, smells like bread from 5am. Quiet, close to
