@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -65,7 +66,9 @@ func TestParity(t *testing.T) {
 	defer srv.Close()
 
 	base := srv.URL + "/_/api"
-	vars := map[string]string{}
+	// ${nextYear} keeps a scenario's dates in the future (and inside the two years
+	// record.when.next looks ahead) however long the fixtures live.
+	vars := map[string]string{"nextYear": strconv.Itoa(time.Now().Year() + 1)}
 	var cookie *string
 
 	for i, s := range steps {

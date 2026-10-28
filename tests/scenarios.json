@@ -1078,19 +1078,19 @@
     "name": "a record with a `when` in its data becomes an event (when lifted out of data)",
     "method": "POST", "path": "/collections/events/posts",
     "body": { "title": "Harvest Fair", "slug": "harvest-fair", "body": "Bring a dish", "status": "published",
-              "fields": { "when": { "start": "2026-10-04 10:00 to 16:00", "repeats": "weekly", "except": ["2026-10-11"] }, "mood": "festive" } },
+              "fields": { "when": { "start": "${nextYear}-10-04 10:00 to 16:00", "repeats": "weekly", "except": ["${nextYear}-10-11"] }, "mood": "festive" } },
     "expect": {
       "status": 201,
-      "json": { "post.when.start": "2026-10-04T10:00:00Z", "post.when.end": "2026-10-04T16:00:00Z",
+      "json": { "post.when.start": "${nextYear}-10-04T10:00:00Z", "post.when.end": "${nextYear}-10-04T16:00:00Z",
                 "post.when.all_day": false, "post.when.repeats": "weekly", "post.when.rule": "FREQ=WEEKLY",
-                "post.when.except.0": "2026-10-11", "post.fields.mood": "festive" }
+                "post.when.except.0": "${nextYear}-10-11", "post.fields.mood": "festive" }
     },
     "capture": { "eventId": "post.id" }
   },
   {
     "name": "the lifted keys are not in the record's data",
     "method": "GET", "path": "/posts/${eventId}",
-    "expect": { "status": 200, "json": { "post.fields.mood": "festive", "post.when.repeats": "weekly", "post.when.next.start": "2026-10-04T10:00:00Z" } }
+    "expect": { "status": 200, "json": { "post.fields.mood": "festive", "post.when.repeats": "weekly", "post.when.next.start": "${nextYear}-10-04T10:00:00Z" } }
   },
   {
     "name": "a record with no when has when: null",

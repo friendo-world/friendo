@@ -230,6 +230,7 @@ All sync goes through the site's own `/_/api/*` endpoints, authenticated with si
 | **v0.4** | The network opens: quotas, account + site management, custom domains | Complete |
 | **v0.5** | One sign-in (an emailed code everywhere, passwords opt-in); the network as a friendo site; members-only pages; a built-in calendar with RSVP; declared fields + feature switches + a rebuilt records admin | Complete |
 | **v0.6** | Social graph — profiles at `/profiles/<slug>`, one-way follows, an in-page inbox, groups as a built-in collection, event invitations | Complete |
+| **v0.7** | Visitors — comments, posts, reactions, votes, RSVPs and chat without an account, each behind its own switch; drop boxes; members posting anonymously; visitor RSVP reminders by email; `friendo upgrade`; the demo site | Complete |
 | **Phase 2** | Desktop editor (Tauri-based WYSIWYG) | Planned |
 
 See [ROADMAP.md](ROADMAP.md) for details and known gaps.

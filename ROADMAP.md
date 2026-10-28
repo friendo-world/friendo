@@ -12,7 +12,9 @@ What's shipped and what's next. For how the pieces fit together, see
 | **Phase 3** | Community features (comments, reactions, polls, SDK) | ✅ Core complete |
 | **v0.4** | Open the network — quotas, account management, custom domains | ✅ Shipped |
 | **v0.5** | One obvious sign-in; the network as a friendo site (home site + `<friendo-account>` / `<friendo-console>`); members-only pages; a built-in calendar with RSVP; declared fields + feature switches + a rebuilt records admin; docs + landing | ✅ Shipped |
-| **v0.6** | Social graph, built the friendo way — profiles at `/profiles/<slug>` with declared fields, one-way follows (friends = mutual), an in-page inbox, groups as a built-in collection with memberships and visibility, event invitations | ✅ Built (tag pending) |
+| **v0.6** | Social graph, built the friendo way — profiles at `/profiles/<slug>` with declared fields, one-way follows (friends = mutual), an in-page inbox, groups as a built-in collection with memberships and visibility, event invitations | ✅ Shipped |
+| **v0.7** | Visitors — react, vote, comment, post, RSVP and chat without an account, each behind its own switch; drop boxes; members posting anonymously; visitor RSVP reminders by email; `friendo upgrade`; the demo site | ✅ Shipped |
+| **v0.8** | The inbox by email — one daily email of a member's inbox notes, invitations sooner, a way out in every message; one scheduler for `friendo serve` and the network (fixes reminders on friendo.world) | Proposed |
 | **v0.9** | Onion addresses — `friendo serve --onion` and `friendo deploy --onion` (Tor via bine + a real `tor`), onion-safe local admin and rate limits, `Onion-Location` on clearnet | Proposed |
 
 ---
@@ -56,7 +58,44 @@ DNS TXT check. All of it was verified live on friendo.world before the tag: a re
 end to end through Cloudflare, Resend OTP delivery, a quota hit, and suspend/resume.
 Scope and decisions: [design/v0.4-roadmap.md](design/v0.4-roadmap.md).
 
-**v0.6 — built (2026-09-28), tag pending:** a social graph for a site's members, every
+**v0.7 — shipped (2026-10-27):** people without an account can take part, each action
+behind its own switch. **Visitors:** a visitor is a `users` row with role `visitor` and no
+email, made on the first write; `visitors_can_react` / `_vote` / `_comment` / `_post` /
+`_rsvp` / `_chat` / `_upload` (admin **Settings → Features**, freezable in `friendo.toml`;
+by default only members may act). A visitor's comments and posts always wait for review,
+carry an optional name ("Pat (visitor)"), and can be edited or taken back
+(`POST /_/api/posts/:id/withdraw`) while pending; a hidden trap field catches bots;
+`{{ visitor }}` in templates and an *Only from visitors* filter in the review queue.
+Signing in with an email keeps what the visitor did — the activity moves to the account,
+an existing one included (migration `0023`). **Uploads:** `members_can_upload` /
+`visitors_can_upload` attach images to one's own pending post (ten at most); unpublished
+media is served to reviewers only and left out of `friendo export`. **Drop boxes:**
+`<friendo-form collection="tips" drop-box>` lets anyone post with no author kept, always
+into review; the attribute is read from the page files (never from rendered HTML) and
+images arrive through one-time upload keys (migration `0024`). **Visitor chat:**
+`<friendo-chat chat-id="lobby" visitors-can-chat>` — a name first, then messages go live;
+group chats never open. **Anonymous members:** `members_can_be_anonymous` hides a member's
+name on a post or comment from everyone but reviewers (migration `0025`). **Visitor RSVPs:**
+answer an event without an account, with an optional name and a reminder email that
+organizers see and nobody else does; the reminder goes out once in the 24 hours before,
+from a 5-minute loop in `friendo serve`; `<friendo-rsvp>` offers a sign-in in place
+(migration `0026`). **Calendar fixes:** Proton Calendar subscribes to the feed, and
+Google's subscribe link is `webcal://` (given `https://`, Google looks for a calendar ID
+and fails). **`friendo upgrade`:** replaces the binary with the latest release (or a named
+one), checked against the release's checksums, copying `data/friendo.db` aside first
+(`cli/internal/upgrade`). **The demo:** `demo/` (Demoville Online, a small-town network
+circa 2003) replaces `testsite/`; `npm run demo` builds, serves and seeds it through the
+public API; a look switcher shows every tag unstyled, as a 2003 board, as thefacebook or
+as MySpace, and a profile decorates itself from `[profiles.fields]`. Along the way the
+live-reload and chat streams learned to close while a tab is hidden (the browser's
+six-connections-per-host limit was starving navigations). Docs:
+[docs/content/docs/visitors.md](docs/content/docs/visitors.md),
+[docs/content/docs/upgrade.md](docs/content/docs/upgrade.md). **Known gap:** under
+`friendo network serve` the reminder loop never starts, so a visitor's reminder email is
+kept and never sent — 0.8's Tier A fixes it
+([design/v0.8-roadmap.md](design/v0.8-roadmap.md)).
+
+**v0.6 — shipped (2026-09-29):** a social graph for a site's members, every
 piece a row in the site's own database that travels with the folder. **Profiles:** every
 persona has an address (`/profiles/<slug>`, `pages/profiles/[slug].html`), a bio and the
 fields a site declares under `[profiles.fields]`; `record.author` on every record;
@@ -148,15 +187,16 @@ from the docs). Ids are slugs (up to 64 chars); `POST /_/api/chats` takes an opt
 for making one ahead of time or with a display name (`409` if taken). Coverage:
 `chats_test.go` (server) and the REST scenarios.
 
-**v0.6 — planned:** a social graph for a site's members. One-way follows with friends as
-mutual follows; groups as a flexible built-in content type (member-creatable behind a
-setting, moderator-controlled settings in the record's `data`, and the filters, tags and
-gates that come with being built in — `user.groups` lights up the `if` tail reserved in
-v0.5); richer profiles with a public page; in-page notifications (email later); and event
-invitations as an `invited` RSVP. Per site, synced and exported like RSVPs. Scope, names
-and tiers: [design/v0.6-roadmap.md](design/v0.6-roadmap.md).
+**v0.8 — proposed (2026-10-20):** the inbox reaches people who aren't on the site. Every
+inbox note a member hasn't been emailed arrives in one email a day (8:00 site-local), with
+event invitations and join requests going out on the next tick; on by default with a
+signed unsubscribe link and `List-Unsubscribe` headers; a site switch (`inbox_email`) and a
+member choice (`daily` / `never`); `[site] url` so an email can link. It starts with a jobs
+loop that runs for every site under `friendo network serve` as well as `friendo serve`,
+which is also the fix for reminders on friendo.world. Six open questions wait on answers:
+[design/v0.8-roadmap.md](design/v0.8-roadmap.md).
 
-**v0.9 — proposed (after 0.7 and 0.8):** onion addresses, so a site is readable in Tor
+**v0.9 — proposed (after 0.8):** onion addresses, so a site is readable in Tor
 Browser at a `.onion` address from a laptop (`friendo serve --onion`) or a network
 (`friendo deploy --onion`). It uses bine to drive a real `tor`. On the network an onion is a
 custom domain that's verified from the start. Two `friendo serve` holes must close first:
@@ -291,7 +331,8 @@ reserved names, the apex/home-site/override routing, the `www` redirect, the "Op
 SSO hand-off — and a Playwright walk of the whole network story (`tests/sdk-network.mjs`).
 The calendar, the declared-fields and feature-switch work, and the rebuilt records admin
 each landed with their own Go tests and browser checks (listed in their v0.5 paragraphs
-above); `npm run test:sdk` now runs twelve browser checks.
+above); `npm run test:sdk` now runs nineteen browser checks. v0.7 added `cli/internal/upgrade`'s
+tests and the visitor, drop-box and upload scenarios in `runtime/go/api`.
 
 Still without *automated* coverage (each was exercised by hand on friendo.world before
 the v0.4 tag): the live `friendo deploy` device-auth path against a running network, the
@@ -373,6 +414,10 @@ The old Workers-for-Platforms stack it replaced (dispatch namespaces, prod D1
 
 ## Known gaps / tech debt
 
+- **Reminder emails never send on the network.** `runReminders` starts in `server.Start`
+  (`friendo serve`); the network dispatcher builds sites without it, so a visitor's
+  reminder on friendo.world is stored and never sent. Fix: one jobs loop over every
+  site — 0.8 Tier A ([design/v0.8-roadmap.md](design/v0.8-roadmap.md)).
 - ~~**No bulk runtime rollout.**~~ **Resolved by network mode:** one Go binary hosts
   every site, so a runtime update rolls out to all tenants when the single container
   redeploys; the operator console/API provides the admin scope.

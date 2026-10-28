@@ -2,9 +2,11 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,8 +26,22 @@ import (
 // page at /calendar.ics taking the feed's place.
 func TestCalendarEndToEnd(t *testing.T) {
 	loc, _ := time.LoadLocation("America/Los_Angeles")
-	// Pin the clock so "upcoming" is deterministic.
-	renderer.Now = func() time.Time { return time.Date(2026, 10, 1, 9, 0, 0, 0, loc) }
+	// The dates are relative so the test outlives the calendar: the fair is the
+	// first Sunday on or after Oct 2 of next year (in the future, inside the two
+	// years record.when.next scans, and never spilling a fifth weekly occurrence
+	// into October); the club meets two days later, on Tuesdays. The filters'
+	// clock is pinned to that Oct 1 so "upcoming" is deterministic; record.when.next
+	// reads the real clock.
+	year := time.Now().Year() + 1
+	fair := time.Date(year, 10, 2, 0, 0, 0, 0, loc)
+	for fair.Weekday() != time.Sunday {
+		fair = fair.AddDate(0, 0, 1)
+	}
+	day := func(offset int) time.Time { return fair.AddDate(0, 0, offset) }
+	ymd := func(t time.Time) string { return t.Format("2006-01-02") }   // 2027-10-03
+	md := func(t time.Time) string { return t.Format("Mon Jan 2") }     // Sun Oct 3
+	compact := func(t time.Time) string { return t.Format("20060102") } // 20271003
+	renderer.Now = func() time.Time { return time.Date(year, 10, 1, 9, 0, 0, 0, loc) }
 	defer func() { renderer.Now = time.Now }()
 
 	siteDir := t.TempDir()
@@ -37,16 +53,16 @@ func TestCalendarEndToEnd(t *testing.T) {
 		}
 	}
 	write("friendo.toml", "[site]\nname = \"Village\"\ntimezone = \"America/Los_Angeles\"\n\n[access]\nmembers_only = [\"/private/*\"]\n")
-	write("content/events/harvest-fair.md", "---\ntitle: Harvest Fair\nwhen: 2026-10-04 10:00 to 16:00\nlocation: 47.6062, -122.3321\nmood: festive\n---\nBring a dish.")
-	write("content/events/book-club.md", "---\ntitle: Book club\nwhen:\n  start: 2026-10-06 19:00 to 20:30\n  repeats: weekly\n  except: [2026-10-20]\n---\nEvery Tuesday.")
-	write("content/events/last-year.md", "---\ntitle: Last year\nwhen: 2025-10-04\n---\nGone.")
+	write("content/events/harvest-fair.md", "---\ntitle: Harvest Fair\nwhen: "+ymd(day(0))+" 10:00 to 16:00\nlocation: 47.6062, -122.3321\nmood: festive\n---\nBring a dish.")
+	write("content/events/book-club.md", "---\ntitle: Book club\nwhen:\n  start: "+ymd(day(2))+" 19:00 to 20:30\n  repeats: weekly\n  except: ["+ymd(day(16))+"]\n---\nEvery Tuesday.")
+	write("content/events/last-year.md", "---\ntitle: Last year\nwhen: "+ymd(day(0).AddDate(-1, 0, 0))+"\n---\nGone.")
 	write("content/events/no-date.md", "---\ntitle: Not an event\n---\nJust a post in the events folder.")
 	write("content/events/broken.md", "---\ntitle: Broken\nwhen: next tuesday\n---\nBad date.")
-	write("content/private/board.md", "---\ntitle: Board meeting\nwhen: 2026-10-12 18:00\n---\nMembers only.")
+	write("content/private/board.md", "---\ntitle: Board meeting\nwhen: "+ymd(day(8))+" 18:00\n---\nMembers only.")
 	write("pages/events/index.html",
 		"{% for e in collections.events|upcoming %}[{{ e.title }}|{{ e.when|when }}|/events/{{ e.slug }}]{% endfor %}"+
-			"|month:{% for e in collections.events|in_month:\"2026-10\" %}{{ e.title }};{% endfor %}"+
-			"|day:{% for e in collections.events|on_day:\"2026-10-13\" %}{{ e.title }};{% endfor %}"+
+			"|month:{% for e in collections.events|in_month:\""+fmt.Sprintf("%d-10", year)+"\" %}{{ e.title }};{% endfor %}"+
+			"|day:{% for e in collections.events|on_day:\""+ymd(day(9))+"\" %}{{ e.title }};{% endfor %}"+
 			"|past:{% for e in collections.events|past %}{{ e.title }};{% endfor %}"+
 			"|limit:{% for e in collections.events|upcoming:2 %}{{ e.title }};{% endfor %}")
 	write("pages/events/[slug].html", "{{ post.title }}|{{ post.when|when }}|{{ post.when.repeats }}|next:{{ post.when.next|when }}|{{ post.fields.mood }}|when-in-data:{{ post.fields.when }}|going:{{ post.rsvps.going }}|place:{{ post.location.label }}|g:{{ post|google_calendar_url }}|sub:{{ calendar.google }}")
@@ -85,14 +101,14 @@ func TestCalendarEndToEnd(t *testing.T) {
 		return r.StatusCode, string(b), r.Header
 	}
 
-	// Listing: the weekly series expands (Oct 20 skipped), the past and dateless
-	// posts are absent, occurrences are soonest first.
+	// Listing: the weekly series expands (the third Tuesday skipped), the past and
+	// dateless posts are absent, occurrences are soonest first.
 	_, body, _ := get("/events/")
 	body = strings.SplitN(body, "\n<script", 2)[0] // drop the dev live-reload tag
-	wantList := "[Harvest Fair|Sun Oct 4, 10 am – 4 pm|/events/harvest-fair]" +
-		"[Book club|Tue Oct 6, 7 pm – 8:30 pm|/events/book-club]" +
-		"[Book club|Tue Oct 13, 7 pm – 8:30 pm|/events/book-club]" +
-		"[Book club|Tue Oct 27, 7 pm – 8:30 pm|/events/book-club]"
+	wantList := "[Harvest Fair|" + md(day(0)) + ", 10 am – 4 pm|/events/harvest-fair]" +
+		"[Book club|" + md(day(2)) + ", 7 pm – 8:30 pm|/events/book-club]" +
+		"[Book club|" + md(day(9)) + ", 7 pm – 8:30 pm|/events/book-club]" +
+		"[Book club|" + md(day(23)) + ", 7 pm – 8:30 pm|/events/book-club]"
 	if !strings.HasPrefix(body, wantList) {
 		t.Errorf("upcoming list:\n got %s\nwant prefix %s", body, wantList)
 	}
@@ -112,7 +128,7 @@ func TestCalendarEndToEnd(t *testing.T) {
 	// The event page: record.when, its repeats text, the next occurrence, the
 	// rest of the front matter intact, and `when` no longer in data.
 	_, body, _ = get("/events/book-club")
-	if !strings.HasPrefix(body, "Book club|Tue Oct 6, 7 pm – 8:30 pm|weekly|next:Tue Oct 6, 7 pm – 8:30 pm||when-in-data:|going:0") {
+	if !strings.HasPrefix(body, "Book club|"+md(day(2))+", 7 pm – 8:30 pm|weekly|next:"+md(day(2))+", 7 pm – 8:30 pm||when-in-data:|going:0") {
 		t.Errorf("event page: %s", body)
 	}
 	_, body, _ = get("/events/harvest-fair")
@@ -123,8 +139,8 @@ func TestCalendarEndToEnd(t *testing.T) {
 	// subscribe link built from the request's origin.
 	for _, want := range []string{
 		"|place:Harvest Fair|",
-		"|g:https://calendar.google.com/calendar/render?action=TEMPLATE&amp;ctz=America%2FLos_Angeles&amp;dates=20261004T100000%2F20261004T160000&amp;details=Bring+a+dish.&amp;location=Harvest+Fair&amp;text=Harvest+Fair|",
-		"|sub:https://calendar.google.com/calendar/r?cid=" + strings.ReplaceAll(strings.ReplaceAll(srv.URL, ":", "%3A"), "/", "%2F") + "%2Fcalendar.ics",
+		"|g:https://calendar.google.com/calendar/render?action=TEMPLATE&amp;ctz=America%2FLos_Angeles&amp;dates=" + compact(day(0)) + "T100000%2F" + compact(day(0)) + "T160000&amp;details=Bring+a+dish.&amp;location=Harvest+Fair&amp;text=Harvest+Fair|",
+		"|sub:https://calendar.google.com/calendar/r?cid=" + url.QueryEscape("webcal://"+strings.TrimPrefix(srv.URL, "http://")+"/calendar.ics"),
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("event page missing %q:\n%s", want, body)
@@ -147,9 +163,9 @@ func TestCalendarEndToEnd(t *testing.T) {
 	}
 	for _, want := range []string{
 		"X-WR-CALNAME:Village",
-		"DTSTART;TZID=America/Los_Angeles:20261006T190000",
+		"DTSTART;TZID=America/Los_Angeles:" + compact(day(2)) + "T190000",
 		"RRULE:FREQ=WEEKLY",
-		"EXDATE;TZID=America/Los_Angeles:20261020T190000",
+		"EXDATE;TZID=America/Los_Angeles:" + compact(day(16)) + "T190000",
 		"URL:" + srv.URL + "/events/harvest-fair",
 		"LOCATION:Harvest Fair", // the pin's label defaults to the title
 		"GEO:47.606200;-122.332100",
@@ -166,13 +182,13 @@ func TestCalendarEndToEnd(t *testing.T) {
 	}
 
 	// One post, one instance.
-	_, ics, _ = get("/calendar.ics?collection=events&post=" + recordID(t, db, "events", "book-club") + "&date=2026-10-13T19:00:00-07:00")
-	if strings.Count(ics, "BEGIN:VEVENT") != 1 || strings.Contains(ics, "RRULE") || !strings.Contains(ics, "20261013T190000") {
+	_, ics, _ = get("/calendar.ics?collection=events&post=" + recordID(t, db, "events", "book-club") + "&date=" + ymd(day(9)) + "T19:00:00-07:00")
+	if strings.Count(ics, "BEGIN:VEVENT") != 1 || strings.Contains(ics, "RRULE") || !strings.Contains(ics, compact(day(9))+"T190000") {
 		t.Errorf("single instance:\n%s", ics)
 	}
 
 	// The JSON feed for the SDK.
-	_, js, _ := get("/calendar.json?from=2026-10-01&to=2026-11-01")
+	_, js, _ := get(fmt.Sprintf("/calendar.json?from=%d-10-01&to=%d-11-01", year, year))
 	var payload struct {
 		Events []struct {
 			Title, Starts, URL string
